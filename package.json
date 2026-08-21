@@ -1,0 +1,22 @@
+{
+  "name": "@curve-ai/radius",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The open-source desktop runtime for specialized AI agents.",
+  "license": "MIT",
+  "packageManager": "npm@10.9.8",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @curve-ai/radius-desktop",
+    "lint": "npm run lint --workspace @curve-ai/radius-desktop",
+    "typecheck": "npm run typecheck --workspace @curve-ai/radius-desktop",
+    "package": "npm run package --workspace @curve-ai/radius-desktop",
+    "make": "npm run make --workspace @curve-ai/radius-desktop"
+  }
+}

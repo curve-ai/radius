@@ -1,0 +1,29 @@
+appId: ai.curve.radius
+productName: Radius
+asar: true
+files:
+  - out/**
+  - package.json
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+win:
+  executableName: radius
+  target:
+    - nsis
+linux:
+  category: Utility
+  target:
+    - AppImage
+    - deb
+nsis:
+  artifactName: radius-${version}-setup.${ext}
+  shortcutName: Radius
+  uninstallDisplayName: Radius
+dmg:
+  artifactName: radius-${version}.${ext}
+appImage:
+  artifactName: radius-${version}.${ext}
+npmRebuild: false
