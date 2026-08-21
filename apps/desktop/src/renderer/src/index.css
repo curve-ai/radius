@@ -234,10 +234,8 @@ a:focus-visible {
 }
 
 .workspace {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  position: relative;
   min-width: 0;
-  padding: 72px clamp(38px, 6vw, 82px) 24px;
   overflow: auto;
   background:
     linear-gradient(rgba(41, 43, 45, 0.035) 1px, transparent 1px),
@@ -247,11 +245,82 @@ a:focus-visible {
   outline: none;
 }
 
+.workspace-top-sentinel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
 .workspace-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
+  height: 58px;
+  padding: 0 clamp(28px, 4vw, 52px);
+  background: rgba(246, 245, 241, 0.92);
+  border-bottom: 1px solid transparent;
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-app-region: drag;
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  user-select: none;
+  transition: border-color 140ms ease;
+}
+
+.workspace-header[data-scrolled="true"] {
+  border-bottom-color: var(--line);
+}
+
+.workspace-header
+  :is(
+    a,
+    button,
+    input,
+    textarea,
+    select,
+    label,
+    h1,
+    h2,
+    h3,
+    p,
+    span,
+    [role="button"],
+    [contenteditable="true"],
+    [data-window-no-drag]
+  ) {
+  -webkit-app-region: no-drag;
+}
+
+.workspace-header :is(h1, h2, h3, p, span, [data-window-no-drag]) {
+  user-select: text;
+}
+
+.workspace-header-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-content {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: calc(100% - 58px);
+  padding: 38px clamp(38px, 6vw, 82px) 24px;
+  outline: none;
+}
+
+.workspace-intro {
+  display: block;
 }
 
 .eyebrow,
@@ -383,6 +452,12 @@ h2 {
     padding-inline: 12px;
   }
   .workspace {
+    background-size: 42px 42px;
+  }
+  .workspace-header {
+    padding-inline: 28px;
+  }
+  .workspace-content {
     padding-inline: 28px;
   }
 }

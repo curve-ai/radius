@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 const navigationItems = [
   { label: "Workspace", icon: "scope", current: true },
@@ -36,6 +36,45 @@ const Icon = ({ name }: { name: string }): ReactNode => {
     <svg aria-hidden="true" viewBox="0 0 24 24">
       {paths[name]}
     </svg>
+  );
+};
+
+const WorkspaceHeader = (): ReactNode => {
+  const [scrolled, setScrolled] = useState(false);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setScrolled(!entry.isIntersecting),
+      { threshold: 1 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <>
+      <div
+        ref={topSentinelRef}
+        className="workspace-top-sentinel"
+        aria-hidden="true"
+      />
+      <header
+        className="workspace-header"
+        data-scrolled={scrolled ? "true" : "false"}
+      >
+        <span className="workspace-header-title" data-window-no-drag>
+          Workspace
+        </span>
+        <span className="platform-chip" data-window-no-drag>
+          {window.radius.platform}
+        </span>
+      </header>
+    </>
   );
 };
 
@@ -80,34 +119,35 @@ export const App = (): ReactNode => (
       </div>
     </aside>
 
-    <main id="main-content" className="workspace" tabIndex={-1}>
-      <header className="workspace-header">
-        <div>
+    <div className="workspace">
+      <WorkspaceHeader />
+
+      <main id="main-content" className="workspace-content" tabIndex={-1}>
+        <header className="workspace-intro">
           <p className="eyebrow">Local workspace</p>
           <h1>Give an agent a safe place to work.</h1>
-        </div>
-        <span className="platform-chip">{window.radius.platform}</span>
-      </header>
+        </header>
 
-      <section className="empty-state" aria-labelledby="empty-state-title">
-        <div className="orbit-graphic" aria-hidden="true">
-          <span className="orbit orbit-one" />
-          <span className="orbit orbit-two" />
-          <span className="orbit-core" />
-        </div>
-        <p className="section-index">01 / Connect</p>
-        <h2 id="empty-state-title">No agent attached yet</h2>
-        <p>
-          Radius will host the session, permission prompts, local tools, and
-          artifacts. The agent keeps its own model and reasoning loop.
-        </p>
-        <button type="button">Connect an agent</button>
-      </section>
+        <section className="empty-state" aria-labelledby="empty-state-title">
+          <div className="orbit-graphic" aria-hidden="true">
+            <span className="orbit orbit-one" />
+            <span className="orbit orbit-two" />
+            <span className="orbit-core" />
+          </div>
+          <p className="section-index">01 / Connect</p>
+          <h2 id="empty-state-title">No agent attached yet</h2>
+          <p>
+            Radius will host the session, permission prompts, local tools, and
+            artifacts. The agent keeps its own model and reasoning loop.
+          </p>
+          <button type="button">Connect an agent</button>
+        </section>
 
-      <footer className="workspace-footer">
-        <span>Open source · local first</span>
-        <span>Protocol v0</span>
-      </footer>
-    </main>
+        <footer className="workspace-footer">
+          <span>Open source · local first</span>
+          <span>Protocol v0</span>
+        </footer>
+      </main>
+    </div>
   </div>
 );
