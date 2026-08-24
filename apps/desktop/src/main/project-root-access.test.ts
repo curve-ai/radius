@@ -17,7 +17,7 @@ test("allows existing and new paths within the project root", async () => {
     await writeFile(path.join(root, "src", "index.ts"), "export {};\n");
     const canonicalRoot = await canonicalizeProjectRoot(root);
 
-    assert.equal(canonicalRoot.endsWith("/project"), true);
+    assert.equal(canonicalRoot.endsWith(`${path.sep}project`), true);
     assert.equal(
       await resolveProjectPath(root, "src/index.ts"),
       path.join(canonicalRoot, "src", "index.ts"),
