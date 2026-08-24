@@ -93,6 +93,11 @@ test("applies the initial migration and enforces typed message parts", async () 
     );
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await rm(directory, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 });

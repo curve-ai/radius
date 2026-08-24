@@ -122,7 +122,12 @@ test("rejects artifact paths outside the configured root", async () => {
       await realpath(nestedArtifact),
     );
   } finally {
-    await rm(directory, { force: true, recursive: true });
+    await rm(directory, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 });
 
@@ -176,7 +181,12 @@ test("pushes pending changes and idempotently applies the echoed pull", async ()
     );
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await rm(directory, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 });
 
@@ -281,6 +291,11 @@ test("uploads a verified local file artifact after its metadata change", async (
     );
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await rm(directory, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 });

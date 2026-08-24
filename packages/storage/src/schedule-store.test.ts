@@ -50,7 +50,12 @@ async function withDatabase(
     await callback(database);
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await rm(directory, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 }
 
