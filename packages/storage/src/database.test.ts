@@ -18,6 +18,20 @@ import {
 
 const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 const ids = {
   client: "19353755-3c5e-4529-b58d-c74dacf7b68d",
   event: "97c9a24c-5f06-4af0-8c7e-8fc31b2e8295",
@@ -93,11 +107,6 @@ test("applies the initial migration and enforces typed message parts", async () 
     );
   } finally {
     database.close();
-    await rm(directory, {
-      force: true,
-      recursive: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    await removeTemporaryDirectory(directory);
   }
 });

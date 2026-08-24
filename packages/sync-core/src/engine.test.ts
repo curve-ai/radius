@@ -38,6 +38,20 @@ import type { SyncProvider } from "./provider.js";
 const migrationsFolder = fileURLToPath(
   new URL("../../storage/drizzle", import.meta.url),
 );
+
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
 const clientInstanceId = "19353755-3c5e-4529-b58d-c74dacf7b68d";
 const connectionId = "5fa9aa30-7a20-4bba-8921-8bff4b0a159d";
 
@@ -122,12 +136,7 @@ test("rejects artifact paths outside the configured root", async () => {
       await realpath(nestedArtifact),
     );
   } finally {
-    await rm(directory, {
-      force: true,
-      recursive: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    await removeTemporaryDirectory(directory);
   }
 });
 
@@ -181,12 +190,7 @@ test("pushes pending changes and idempotently applies the echoed pull", async ()
     );
   } finally {
     database.close();
-    await rm(directory, {
-      force: true,
-      recursive: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    await removeTemporaryDirectory(directory);
   }
 });
 
@@ -291,11 +295,6 @@ test("uploads a verified local file artifact after its metadata change", async (
     );
   } finally {
     database.close();
-    await rm(directory, {
-      force: true,
-      recursive: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    await removeTemporaryDirectory(directory);
   }
 });

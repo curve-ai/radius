@@ -20,6 +20,20 @@ import { createLocalScheduler } from "./coordinator.js";
 const migrationsFolder = fileURLToPath(
   new URL("../../storage/drizzle", import.meta.url),
 );
+
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
 const clientId = "19353755-3c5e-4529-b58d-c74dacf7b68d";
 
 async function withDatabase(
@@ -44,12 +58,7 @@ async function withDatabase(
     await callback(database);
   } finally {
     database.close();
-    await rm(directory, {
-      force: true,
-      recursive: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    await removeTemporaryDirectory(directory);
   }
 }
 

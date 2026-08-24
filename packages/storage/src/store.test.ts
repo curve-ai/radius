@@ -48,6 +48,20 @@ const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
 
 const clientId = "19353755-3c5e-4529-b58d-c74dacf7b68d";
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 async function withDatabase(
   callback: Awaited<ReturnType<typeof openRadiusDatabase>> extends infer T
     ? (database: T) => Promise<void>
@@ -72,12 +86,7 @@ async function withDatabase(
     await callback(database);
   } finally {
     database.close();
-    await rm(directory, {
-      force: true,
-      recursive: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    await removeTemporaryDirectory(directory);
   }
 }
 
