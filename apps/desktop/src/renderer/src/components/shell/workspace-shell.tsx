@@ -1,0 +1,176 @@
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+
+import {
+  actionToolPanelDesktopFits,
+  actionToolPanelShouldAnimate,
+} from "@renderer/components/ui/action-tool-panel";
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  useReducedMotion,
+} from "@renderer/components/ui/motion";
+import { SidebarProvider } from "@renderer/components/ui/sidebar";
+import { useWorkspaceNavigation } from "./navigation-context";
+import { WorkspaceHeader } from "./workspace-header";
+import { WorkspaceHistoryControls } from "./workspace-history-controls";
+import { WorkspaceSearchDialog } from "./workspace-search-dialog";
+import { WorkspaceSidebar } from "./workspace-sidebar";
+import {
+  clampWorkspaceSidebarWidth,
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+} from "./workspace-sidebar-width";
+import { WorkspaceToolPanel } from "./workspace-tool-panel";
+
+const TOOL_PANEL_STORAGE_KEY = "radius:workspace-tool-panel";
+const SIDEBAR_WIDTH_STORAGE_KEY = "radius:workspace-sidebar-width";
+
+function getInitialSidebarWidth(): number {
+  const storedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+
+  return Number.isFinite(storedWidth) && storedWidth > 0
+    ? clampWorkspaceSidebarWidth(storedWidth)
+    : WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
+}
+
+export function WorkspaceShell({
+  children,
+}: {
+  children: ReactNode;
+}): ReactNode {
+  const { activeView } = useWorkspaceNavigation();
+  const isNewChat = activeView === "workspace";
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => localStorage.getItem("sidebar_state") !== "false",
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [toolPanelOpen, setToolPanelOpen] = useState(
+    () => localStorage.getItem(TOOL_PANEL_STORAGE_KEY) !== "false",
+  );
+  const [workbenchWidth, setWorkbenchWidth] = useState<number | null>(null);
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
+  const desktopToolPanelVisible = actionToolPanelDesktopFits(
+    workbenchWidth,
+    false,
+  );
+  const animateToolPanelGeometry = actionToolPanelShouldAnimate(
+    reduceMotion,
+    "animate",
+  );
+
+  useLayoutEffect(() => {
+    const workbench = workbenchRef.current;
+    if (!workbench) return;
+
+    const updateWidth = (width: number): void => {
+      setWorkbenchWidth(Math.round(width));
+    };
+    updateWidth(workbench.getBoundingClientRect().width);
+
+    const observer = new ResizeObserver(([entry]) => {
+      updateWidth(entry.contentRect.width);
+    });
+    observer.observe(workbench);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const handleSidebarOpenChange = useCallback((open: boolean) => {
+    setSidebarOpen(open);
+    localStorage.setItem("sidebar_state", String(open));
+  }, []);
+
+  const handleSidebarWidthCommit = useCallback((width: number) => {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width));
+  }, []);
+
+  const handleToolPanelOpenChange = useCallback((open: boolean) => {
+    setToolPanelOpen(open);
+    localStorage.setItem(TOOL_PANEL_STORAGE_KEY, String(open));
+  }, []);
+
+  return (
+    <SidebarProvider
+      open={sidebarOpen}
+      onOpenChange={handleSidebarOpenChange}
+      className="min-h-dvh bg-transparent"
+      style={
+        {
+          "--sidebar-width": `${sidebarWidth}px`,
+        } as CSSProperties
+      }
+    >
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[80] focus:rounded-md focus:bg-foreground focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-background"
+      >
+        Skip to content
+      </a>
+      <WorkspaceSidebar
+        width={sidebarWidth}
+        onWidthChange={setSidebarWidth}
+        onWidthCommit={handleSidebarWidthCommit}
+        onSearch={() => setSearchOpen(true)}
+      />
+      <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <WorkspaceHistoryControls />
+      <div className="relative flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-clip bg-background">
+        <LayoutGroup id="workspace-tool-panel-layout">
+          <WorkspaceHeader
+            minimal={isNewChat}
+            toolPanelOpen={toolPanelOpen}
+            desktopToolPanelVisible={desktopToolPanelVisible}
+            onToolPanelOpenChange={handleToolPanelOpenChange}
+          />
+
+          <div
+            ref={workbenchRef}
+            className="@container/workspace-workbench flex min-h-0 min-w-0 flex-1"
+          >
+            <main
+              id="main-content"
+              className="min-w-0 flex-1 outline-none focus:outline-none focus-visible:outline-none"
+              tabIndex={-1}
+            >
+              {children}
+            </main>
+            <AnimatePresence initial={false} mode="popLayout">
+              {!isNewChat && toolPanelOpen && desktopToolPanelVisible && (
+                <motion.div
+                  key="workspace-tool-panel-rail"
+                  initial={
+                    animateToolPanelGeometry
+                      ? { opacity: 0, x: 8 }
+                      : { opacity: 0 }
+                  }
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={
+                    animateToolPanelGeometry
+                      ? { opacity: 0, x: 8 }
+                      : { opacity: 0 }
+                  }
+                  transition={{
+                    duration: reduceMotion ? 0.08 : 0.16,
+                    ease: [0.23, 1, 0.32, 1],
+                  }}
+                  className="shrink-0"
+                >
+                  <WorkspaceToolPanel />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </LayoutGroup>
+      </div>
+    </SidebarProvider>
+  );
+}

@@ -1,0 +1,1315 @@
+@import "tailwindcss";
+@import "../styles/utils.css";
+
+@import "tw-animate-css";
+@import "react-flagpack/dist/style.css";
+
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-card-02: var(--card-02);
+  --color-card-03: var(--card-03);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Custom color mappings */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-positive: var(--positive);
+  --color-positive-foreground: var(--positive-foreground);
+  --color-negative: var(--negative);
+  --color-negative-foreground: var(--negative-foreground);
+  --color-light: var(--light);
+  --color-light-foreground: var(--light-foreground);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  /* Page container max width (1300px). Enables the
+     `max-w-page` utility; use it for the navbar, page <main>, and footer
+     instead of hardcoding a width. */
+  --container-page: 1300px;
+  /* Shared physical measure for filing prose. Unlike `ch`, this keeps the
+     left and right edges aligned when headings use a larger type size. */
+  --container-reader: 40rem;
+
+  /* Radius scale: xs/sm 4px, md/lg 8px, xl 12px, 2xl 16px.
+     Cards use 4px (rounded-sm), media/inputs/panels 8px (rounded-md/lg),
+     buttons are pills. Keep this; don't reach for rounded-xl/2xl on surfaces. */
+  --radius-sm: calc(var(--radius) - 4px); /* 4px — radius-xs */
+  --radius-md: var(--radius); /* 8px — radius-md (inputs) */
+  --radius-lg: var(--radius); /* 8px — radius-lg */
+  --radius-xl: calc(var(--radius) + 4px); /* 12px — radius-xl (rare) */
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--elevation-md-shadow);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-appear: appear 0.6s forwards ease-out;
+  --animate-appear-zoom: appear-zoom 0.6s forwards ease-out;
+  --animate-facet-progress: facet-progress 1s cubic-bezier(0.4, 0, 0.6, 1)
+    infinite;
+  --animate-facet-fade-in: facet-fade-in 0.16s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes appear {
+    0% {
+      opacity: 0;
+      transform: translateY(1rem);
+      filter: blur(0.5rem);
+    }
+    50% {
+      filter: blur(0);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+  @keyframes appear-zoom {
+    0% {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes facet-progress {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(400%);
+    }
+  }
+  @keyframes facet-fade-in {
+    0% {
+      opacity: 0;
+      filter: blur(3px);
+    }
+    100% {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+}
+
+/* `.light` mirrors `:root` so a subtree can be pinned to the light theme
+   from inside a dark page (export card previews/screenshots), the same way
+   `.dark` pins a subtree to dark. */
+:root,
+.light {
+  /* Core color scheme — warm editorial surfaces on a white canvas.
+     Canvas is white, ink is warm near-black (not pure black).
+     Depth is carried by warm surfaces and hairlines, with no
+     heavy shadows. See DESIGN.md for the source tokens. */
+  --background: #ffffff; /* white canvas */
+  --foreground: #25241d; /* warm ink */
+  --card: #f3f1eb; /* card surface — warm, slightly under the canvas (NOT white) */
+  --card-foreground: #25241d;
+  --card-02: #eceae3; /* card-02 (between card-01 and card-03) */
+  --card-03: #e7e5de; /* stronger static surface */
+  --popover: #f3f1eb; /* card surface (flyouts) */
+  --popover-foreground: #25241d;
+  --primary: #25241d; /* button-bg = fg (ink) */
+  --primary-foreground: #ffffff; /* button-text = bg */
+  --secondary: #eceae3; /* card-02 */
+  --secondary-foreground: #25241d;
+  --muted: #f1efe9; /* card-01 */
+  --muted-foreground: color-mix(
+    in oklab,
+    var(--foreground) 60%,
+    transparent
+  ); /* = text-sec (ink @ 60%) */
+  --accent: color-mix(
+    in oklab,
+    var(--card-03) 45%,
+    transparent
+  ); /* shared quiet hover/selection surface */
+  --accent-foreground: #25241d;
+  --destructive: #cf2d56;
+  --destructive-foreground: #ffffff;
+  --border: #e6e6e4; /* quiet, low-chroma hairline */
+  --input: var(--border);
+  --ring: #25241d;
+  --chart-1: oklch(0.81 0.17 75.35);
+  --chart-2: oklch(0.55 0.22 264.53);
+  --chart-3: oklch(0.72 0 0);
+  --chart-4: oklch(0.92 0 0);
+  --chart-5: oklch(0.56 0 0);
+  --sidebar: #f3f1eb;
+  --sidebar-foreground: #25241d;
+  --sidebar-primary: #25241d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: #25241d;
+
+  /* Custom variables that fit the scheme */
+  --brand: #2f4d77; /* Deep muted slate-blue — subtle single accent, used scarcely (finance-safe: not the gain/loss green/red) */
+  --brand-foreground: #ffffff;
+  --positive: #1f8a65; /* Green for positive values */
+  --positive-foreground: #ffffff;
+  --negative: #cf2d56; /* Red for negative values */
+  --negative-foreground: #ffffff;
+  --light: oklch(0.57 0.21 264.53);
+  --light-foreground: #ffffff;
+
+  /* Categorical chart series ramp (slate-blue brand first; muted, editorial,
+     deliberately AVOIDS green/red, which are reserved for gain/loss). Used by
+     /charts when a series has no per-company brand color. */
+  --chart-1: #2f4d77; /* slate-blue (= brand) */
+  --chart-2: #b07d1f; /* amber / gold */
+  --chart-3: #1f7a8c; /* teal */
+  --chart-4: #6f5aa6; /* violet */
+  --chart-5: #c2622d; /* terracotta */
+  --chart-6: #2f6fb0; /* azure */
+  --chart-7: #9b3d6e; /* plum */
+  --chart-8: #8a5a2b; /* clay */
+
+  /* Typography */
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Spacing and radius */
+  --radius: 0.5rem;
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Light mode shadows - subtle and modern */
+  --shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.06), 0px 1px 2px 0px hsl(0 0% 0% / 0.04);
+  --shadow-sm:
+    0px 2px 4px 0px hsl(0 0% 0% / 0.08), 0px 1px 2px 0px hsl(0 0% 0% / 0.06);
+  --shadow:
+    0px 4px 6px -1px hsl(0 0% 0% / 0.08), 0px 2px 4px -2px hsl(0 0% 0% / 0.04);
+  --elevation-md-shadow:
+    0 4px 8px -2px color-mix(in oklab, var(--foreground) 8%, transparent),
+    0 2px 4px -2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  --shadow-lg:
+    0px 12px 20px -4px hsl(0 0% 0% / 0.08), 0px 0px 0px 1px hsl(0 0% 0% / 0.03);
+  --shadow-xl:
+    0px 20px 25px -5px hsl(0 0% 0% / 0.08),
+    0px 8px 10px -6px hsl(0 0% 0% / 0.04);
+  --shadow-2xl: 0px 25px 50px -12px hsl(0 0% 0% / 0.1);
+  /* Chart bar palette — three vertical gradient stops (top/mid/bottom) + solid.
+     Light mode: pale → mid → saturated, so bars lift off a white background.
+     Solid is used for single-color swatches (legend dots, row indicators). */
+  --sector-technology-0: #dbeafe;
+  --sector-technology-50: #93c5fd;
+  --sector-technology-100: #3b82f6;
+  --sector-energy-0: #fed7aa;
+  --sector-energy-50: #fb923c;
+  --sector-energy-100: #ea580c;
+  --sector-healthcare-0: #dcfce7;
+  --sector-healthcare-50: #86efac;
+  --sector-healthcare-100: #16a34a;
+  --sector-financial-services-0: #fde5b6;
+  --sector-financial-services-50: #ffcc69;
+  --sector-financial-services-100: #ffdd9b;
+  --sector-communication-services-0: #e9d5ff;
+  --sector-communication-services-50: #c4b5fd;
+  --sector-communication-services-100: #8b5cf6;
+  --sector-consumer-defensive-0: #ccfbf1;
+  --sector-consumer-defensive-50: #5eead4;
+  --sector-consumer-defensive-100: #14b8a6;
+  --sector-consumer-cyclical-0: #fce7f3;
+  --sector-consumer-cyclical-50: #f9a8d4;
+  --sector-consumer-cyclical-100: #ec4899;
+  --sector-industrials-0: #e0f2fe;
+  --sector-industrials-50: #7dd3fc;
+  --sector-industrials-100: #0284c7;
+  --sector-basic-materials-0: #fef3c7;
+  --sector-basic-materials-50: #fde68a;
+  --sector-basic-materials-100: #d97706;
+  --sector-real-estate-0: #f7fee7;
+  --sector-real-estate-50: #bef264;
+  --sector-real-estate-100: #65a30d;
+  --sector-utilities-0: #f1f5f9;
+  --sector-utilities-50: #94a3b8;
+  --sector-utilities-100: #475569;
+  --sector-etf-0: #faf8f3;
+  --sector-etf-50: #e8dcc4;
+  --sector-etf-100: #d2b48c;
+  --sector-unknown-0: #faf8f3;
+  --sector-unknown-50: #e8dcc4;
+  --sector-unknown-100: #d2b48c;
+
+  --market-cap-mega-0: #e9d5ff;
+  --market-cap-mega-50: #c4b5fd;
+  --market-cap-mega-100: #a855f7;
+  --market-cap-large-0: #f3e8ff;
+  --market-cap-large-50: #d8b4fe;
+  --market-cap-large-100: #c084fc;
+  --market-cap-mid-0: #fae8ff;
+  --market-cap-mid-50: #f0abfc;
+  --market-cap-mid-100: #e879f9;
+  --market-cap-small-0: #ffedd5;
+  --market-cap-small-50: #fdba74;
+  --market-cap-small-100: #fb923c;
+  --market-cap-micro-0: #fed7aa;
+  --market-cap-micro-50: #fb923c;
+  --market-cap-micro-100: #ea580c;
+  --market-cap-nano-0: #fecaca;
+  --market-cap-nano-50: #fca5a5;
+  --market-cap-nano-100: #ef4444;
+  --market-cap-unknown-0: #faf8f3;
+  --market-cap-unknown-50: #e8dcc4;
+  --market-cap-unknown-100: #d2b48c;
+
+  --chart-more-0: #e5e7eb;
+  --chart-more-50: #9ca3af;
+  --chart-more-100: #6b7280;
+
+  /* Outline drawn around each SVG bar segment. */
+  --chart-bar-stroke: rgba(0, 0, 0, 0.45);
+}
+
+.dark {
+  /* Dark theme — deep warm near-black, NOT a mid gray */
+  --background: #15130c; /* canvas (dark) */
+  --foreground: #eeedeb; /* light ink (dark) */
+  --card: #1c1a14; /* card surface (dark) */
+  --card-foreground: #eeedeb;
+  --card-02: #211f19; /* card-02 (dark) */
+  --card-03: #27251f; /* stronger static surface */
+  --popover: #1e1c16; /* card-01 */
+  --popover-foreground: #eeedeb;
+  --primary: #eeedeb; /* button-bg = fg (inverts light) */
+  --primary-foreground: #15130c; /* button-text = bg */
+  --secondary: #211f19; /* card-02 */
+  --secondary-foreground: #eeedeb;
+  --muted: #1e1c16; /* card-01 */
+  --muted-foreground: color-mix(
+    in oklab,
+    var(--foreground) 60%,
+    transparent
+  ); /* = text-sec (ink @ 60%) */
+  --accent: color-mix(
+    in oklab,
+    var(--card-03) 45%,
+    transparent
+  ); /* shared quiet hover/selection surface */
+  --accent-foreground: #eeedeb;
+  --destructive: oklch(0.69 0.2 23.91);
+  --destructive-foreground: #eeedeb;
+  --border: #292928; /* quiet, low-chroma hairline */
+  --input: var(--border);
+  --ring: #948e82;
+  --chart-1: oklch(0.81 0.17 75.35);
+  --chart-2: oklch(0.58 0.21 260.84);
+  --chart-3: oklch(0.56 0 0);
+  --chart-4: oklch(0.44 0 0);
+  --chart-5: oklch(0.92 0 0);
+  --sidebar: #1c1a14;
+  --sidebar-foreground: #eeedeb;
+  --sidebar-primary: #eeedeb;
+  --sidebar-primary-foreground: #15130c;
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: #948e82;
+
+  /* Custom variables for dark mode */
+  --brand: #86a3cf; /* Deep slate-blue, lifted for contrast on the dark canvas */
+  --brand-foreground: #15130c; /* dark text on the lighter dark-mode brand fill */
+  --positive: oklch(0.68 0.18 145); /* Green for positive values */
+  --positive-foreground: hsl(60 5% 90%);
+  --negative: oklch(0.69 0.2 23.91); /* Red for negative values */
+  --negative-foreground: hsl(60 5% 90%);
+  /* Categorical chart series ramp, lifted for contrast on the dark canvas. */
+  --chart-1: #86a3cf; /* slate-blue (= brand) */
+  --chart-2: #d9b15c; /* amber / gold */
+  --chart-3: #5bb8c9; /* teal */
+  --chart-4: #a896d6; /* violet */
+  --chart-5: #e08a55; /* terracotta */
+  --chart-6: #6aa7e0; /* azure */
+  --chart-7: #cf7aa6; /* plum */
+  --chart-8: #c79466; /* clay */
+  --light: hsl(60 5% 90%);
+  --light-foreground: hsl(60 2% 11%);
+
+  /* Typography */
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Spacing and radius */
+  --radius: 0.5rem;
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Dark mode shadows - stronger for depth */
+  --shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.15);
+  --shadow-xs:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.2), 0px 1px 2px 0px hsl(0 0% 0% / 0.15);
+  --shadow-sm:
+    0px 2px 4px 0px hsl(0 0% 0% / 0.25), 0px 1px 2px 0px hsl(0 0% 0% / 0.18);
+  --shadow:
+    0px 4px 6px -1px hsl(0 0% 0% / 0.3), 0px 2px 4px -2px hsl(0 0% 0% / 0.18);
+  --elevation-md-shadow:
+    0 6px 12px -4px hsl(0 0% 0% / 0.42), 0 2px 4px -2px hsl(0 0% 0% / 0.32);
+  --shadow-lg:
+    0px 12px 20px -4px hsl(0 0% 0% / 0.4), 0px 0px 0px 1px hsl(0 0% 0% / 0.05);
+  --shadow-xl:
+    0px 20px 25px -5px hsl(0 0% 0% / 0.45),
+    0px 8px 10px -6px hsl(0 0% 0% / 0.25);
+  --shadow-2xl: 0px 25px 50px -12px hsl(0 0% 0% / 0.5);
+  /* Chart bar palette — dark mode uses a narrow tonal band per hue
+     (≈ Tailwind 400 → 500 → 600) so the bar reads as a tinted pill on
+     the dark background, not a 2005 glassy 3D button. Top stop is the
+     "sheen," bottom stop is the "shadow." Saturation is slightly pulled
+     so the four exposure bars can coexist without fighting. */
+  --sector-technology-0: #60a5fa;
+  --sector-technology-50: #3b82f6;
+  --sector-technology-100: #2563eb;
+  --sector-energy-0: #fb923c;
+  --sector-energy-50: #f97316;
+  --sector-energy-100: #ea580c;
+  --sector-healthcare-0: #4ade80;
+  --sector-healthcare-50: #22c55e;
+  --sector-healthcare-100: #16a34a;
+  --sector-financial-services-0: #fcd34d;
+  --sector-financial-services-50: #f59e0b;
+  --sector-financial-services-100: #d97706;
+  --sector-communication-services-0: #a78bfa;
+  --sector-communication-services-50: #8b5cf6;
+  --sector-communication-services-100: #7c3aed;
+  --sector-consumer-defensive-0: #2dd4bf;
+  --sector-consumer-defensive-50: #14b8a6;
+  --sector-consumer-defensive-100: #0d9488;
+  --sector-consumer-cyclical-0: #f472b6;
+  --sector-consumer-cyclical-50: #ec4899;
+  --sector-consumer-cyclical-100: #db2777;
+  --sector-industrials-0: #38bdf8;
+  --sector-industrials-50: #0ea5e9;
+  --sector-industrials-100: #0284c7;
+  --sector-basic-materials-0: #fbbf24;
+  --sector-basic-materials-50: #d97706;
+  --sector-basic-materials-100: #b45309;
+  --sector-real-estate-0: #a3e635;
+  --sector-real-estate-50: #84cc16;
+  --sector-real-estate-100: #65a30d;
+  --sector-utilities-0: #94a3b8;
+  --sector-utilities-50: #64748b;
+  --sector-utilities-100: #475569;
+  --sector-etf-0: #c4a98b;
+  --sector-etf-50: #a89379;
+  --sector-etf-100: #8b7e69;
+  --sector-unknown-0: #c4a98b;
+  --sector-unknown-50: #a89379;
+  --sector-unknown-100: #8b7e69;
+
+  --market-cap-mega-0: #c084fc;
+  --market-cap-mega-50: #a855f7;
+  --market-cap-mega-100: #9333ea;
+  --market-cap-large-0: #d8b4fe;
+  --market-cap-large-50: #c084fc;
+  --market-cap-large-100: #a855f7;
+  --market-cap-mid-0: #e879f9;
+  --market-cap-mid-50: #d946ef;
+  --market-cap-mid-100: #c026d3;
+  --market-cap-small-0: #fdba74;
+  --market-cap-small-50: #fb923c;
+  --market-cap-small-100: #f97316;
+  --market-cap-micro-0: #fb923c;
+  --market-cap-micro-50: #f97316;
+  --market-cap-micro-100: #ea580c;
+  --market-cap-nano-0: #fca5a5;
+  --market-cap-nano-50: #f87171;
+  --market-cap-nano-100: #ef4444;
+  --market-cap-unknown-0: #c4a98b;
+  --market-cap-unknown-50: #a89379;
+  --market-cap-unknown-100: #8b7e69;
+
+  /* "X more" grey should recede, not advertise itself. Narrow slate band. */
+  --chart-more-0: #475569;
+  --chart-more-50: #3f4854;
+  --chart-more-100: #364150;
+
+  /* Dark outline gives a clear drawn-edge feel on bright mid-tone fills.
+     Symmetric with light mode (rgba(0,0,0,0.45)). */
+  --chart-bar-stroke: rgba(0, 0, 0, 0.5);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .animate-appear,
+  .animate-appear-zoom,
+  .animate-shimmer,
+  .animate-float {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  /* Paint the root element (not just <body>) with the theme background. The
+     canvas/overscroll region below a short page is painted from the root layer;
+     without an explicit html background it inherits a propagated paint that
+     Chromium can leave stale during soft navigation, so a taller previous page
+     (e.g. the image-heavy homepage) ghosts through at the bottom on scroll. */
+  html {
+    @apply bg-background;
+    min-height: 100%;
+    overscroll-behavior-y: none;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+  }
+
+  /* Both public and research shells use this landmark. Keep page content out
+     of side display cutouts while allowing backgrounds to paint edge to edge. */
+  #main-content {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  a[href],
+  button,
+  input,
+  select,
+  summary,
+  textarea,
+  [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  button,
+  [role="button"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* iOS Safari zooms the page when a focused form control renders below
+     16px. Keep compact desktop controls while enforcing the mobile floor for
+     shared and route-local native fields alike. */
+  @media (max-width: 767px) {
+    input:not([type="button"]):not([type="checkbox"]):not([type="color"]):not(
+        [type="radio"]
+      ):not([type="range"]):not([type="reset"]):not([type="submit"]),
+    select,
+    textarea {
+      font-size: 1rem !important;
+    }
+  }
+}
+
+/* ── Editorial type ramp (`type-*` tokens) ──
+   Defined with @utility (not @layer) so responsive variants work, e.g.
+   `type-base md:type-md` (headings scale 16px→22px at md). All
+   weight 400 with negative tracking.
+     type-base  body (16px)         type-md    section headings (22px)
+     type-md-lg page title (26px)   type-lg    big heading (36px)
+     type-xl    CTA headline (52px) type-2xl   largest CTA (72px)        */
+@utility type-base {
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+@utility type-md-sm {
+  /* `type-md-sm` — in-article sub-heading (18px) */
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 400;
+}
+@utility type-md {
+  font-size: 1.375rem;
+  line-height: 1.3;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+@utility type-md-lg {
+  /* `type-md-lg` — THE page-title / hero h1 size (26px, cursor's type-md-lg).
+     Every page h1 uses this; do not retype the raw classes. */
+  font-size: 1.625rem;
+  line-height: 1.25;
+  font-weight: 400;
+  letter-spacing: -0.0125em;
+}
+@utility type-lg {
+  font-size: 2.25rem;
+  line-height: 1.2;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+@utility type-xl {
+  font-size: 3.25rem;
+  line-height: 1.15;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+}
+@utility type-2xl {
+  font-size: 4.5rem;
+  line-height: 1.1;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
+
+/* Utility classes */
+@layer utilities {
+  /* Text gradient utilities */
+  .text-gradient-subtle {
+    background: linear-gradient(
+      135deg,
+      var(--foreground) 0%,
+      var(--muted-foreground) 80%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-primary {
+    background: linear-gradient(
+      135deg,
+      var(--primary) 0%,
+      var(--primary) 60%,
+      var(--muted-foreground) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-brand {
+    background: linear-gradient(135deg, var(--brand) 0%, var(--foreground) 70%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Complex shadow utilities */
+  .shadow-tile {
+    box-shadow:
+      0 1px 2px -1px rgba(0, 0, 0, 0.02),
+      0 2px 4px -2px rgba(0, 0, 0, 0.03),
+      0 4px 8px -4px rgba(0, 0, 0, 0.04),
+      0 0 0 1px rgba(0, 0, 0, 0.01);
+  }
+
+  .shadow-tile-hover {
+    box-shadow:
+      0 2px 4px -1px rgba(0, 0, 0, 0.03),
+      0 4px 8px -2px rgba(0, 0, 0, 0.04),
+      0 8px 16px -4px rgba(0, 0, 0, 0.05),
+      0 0 0 1px rgba(0, 0, 0, 0.02);
+  }
+
+  .shadow-elevated {
+    box-shadow:
+      0 4px 8px -2px rgba(0, 0, 0, 0.04),
+      0 8px 16px -4px rgba(0, 0, 0, 0.05),
+      0 16px 32px -8px rgba(0, 0, 0, 0.06),
+      0 0 0 1px rgba(0, 0, 0, 0.02),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+  }
+
+  .shadow-floating {
+    box-shadow:
+      0 8px 16px -4px rgba(0, 0, 0, 0.06),
+      0 16px 32px -8px rgba(0, 0, 0, 0.07),
+      0 32px 64px -16px rgba(0, 0, 0, 0.08),
+      0 0 0 1px rgba(0, 0, 0, 0.02),
+      inset 0 2px 0 0 rgba(255, 255, 255, 0.4),
+      inset 0 -1px 0 0 rgba(0, 0, 0, 0.01);
+  }
+
+  /* Tactile card hover — a subtle GPU-accelerated lift paired with a
+     warm-tinted shadow (hue ~38, matching the warm canvas) so cards
+     rise off the flat page on hover instead of sitting dead-flat. The
+     transition covers color too, so elements using this can drop their
+     own transition-colors. Dark mode leans on a deeper drop plus a faint
+     warm ring, since soft shadows barely read on the dark surface. */
+  .card-lift {
+    transition:
+      transform 200ms ease,
+      box-shadow 200ms ease,
+      background-color 200ms ease,
+      border-color 200ms ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .card-lift:hover {
+      transform: translateY(-2px);
+      box-shadow:
+        0 10px 24px -8px hsl(38 45% 22% / 0.2),
+        0 4px 10px -4px hsl(38 45% 22% / 0.12);
+    }
+    .dark .card-lift:hover {
+      box-shadow:
+        0 12px 28px -8px hsl(0 0% 0% / 0.55),
+        0 0 0 1px hsl(42 35% 60% / 0.1);
+    }
+  }
+  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+    .card-lift:hover {
+      transform: none;
+    }
+  }
+}
+
+/* Shimmer loading animation */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s infinite;
+}
+
+/* MDX and Code Block Styles */
+@layer components {
+  /* Code block styling */
+  .prose pre {
+    @apply !bg-zinc-900 !text-zinc-50 overflow-x-auto rounded-lg border !p-4;
+  }
+
+  .prose pre code {
+    @apply !bg-transparent !p-0 !text-inherit;
+  }
+
+  /* Inline code styling */
+  .prose :not(pre) > code {
+    @apply !bg-muted !text-foreground px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+
+  /* Code block with title */
+  .prose div[data-rehype-pretty-code-fragment] {
+    @apply relative;
+  }
+
+  .prose div[data-rehype-pretty-code-title] {
+    @apply bg-zinc-800 text-zinc-200 px-4 py-2 text-sm font-mono rounded-t-lg border-b border-zinc-700;
+  }
+
+  .prose div[data-rehype-pretty-code-title] + pre {
+    @apply !rounded-t-none !mt-0;
+  }
+
+  /* Line highlighting */
+  .prose pre [data-line] {
+    @apply px-4;
+  }
+
+  .prose pre [data-highlighted-line] {
+    @apply bg-zinc-800/50;
+  }
+
+  /* Anchor links for headings */
+  .prose .anchor {
+    @apply no-underline;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .prose .anchor:hover {
+      @apply underline;
+    }
+  }
+
+  /* Remove link styling from heading links created by rehype-autolink-headings */
+  .prose h1 a,
+  .prose h2 a,
+  .prose h3 a,
+  .prose h4 a,
+  .prose h5 a,
+  .prose h6 a {
+    @apply no-underline text-inherit hover:text-inherit;
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .prose h1 a:hover,
+    .prose h2 a:hover,
+    .prose h3 a:hover,
+    .prose h4 a:hover,
+    .prose h5 a:hover,
+    .prose h6 a:hover {
+      @apply no-underline;
+      color: inherit !important;
+      text-decoration: none !important;
+    }
+  }
+
+  /* Table of contents styling */
+  .prose .toc {
+    @apply bg-muted/50 rounded-lg p-4 my-6;
+  }
+
+  .prose .toc ul {
+    @apply list-none ml-0;
+  }
+
+  .prose .toc li {
+    @apply mt-1;
+  }
+
+  .prose .toc a {
+    @apply text-muted-foreground hover:text-foreground no-underline;
+    text-decoration: none !important;
+  }
+
+  /* Prose improvements */
+  .prose {
+    @apply max-w-none;
+  }
+
+  .prose img {
+    @apply rounded-lg border shadow-sm;
+  }
+
+  .prose blockquote {
+    @apply border-l-4 border-primary/20 bg-muted/50 py-2 px-4 rounded-r-lg;
+  }
+
+  .prose table {
+    @apply border-collapse border border-border rounded-lg overflow-hidden;
+  }
+
+  .prose th {
+    @apply bg-muted font-semibold;
+  }
+
+  .prose td,
+  .prose th {
+    @apply border border-border px-4 py-2;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────
+     Press-release renderer — editorial typography for 8-K narratives.
+     Lives on /stocks/[ticker]/earnings/[period]. Constrained reading column
+     in serif, with data tables breaking out to full bleed.
+     ────────────────────────────────────────────────────────────────────── */
+  .press-release {
+    color: var(--foreground);
+  }
+
+  .press-release__column {
+    /* Full container width — earnings page already constrains the section.
+       Prose, tables, lists all flow within. */
+    max-width: none;
+  }
+
+  /* Anchor scroll-margin so the page header doesn't cover the heading. */
+  .press-release__h1[id],
+  .press-release__h2[id],
+  .press-release__h3[id] {
+    scroll-margin-top: 5rem;
+  }
+
+  .press-release__table {
+    /* Table containers escape the reading column */
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+    max-width: none;
+    width: 100%;
+  }
+
+  .press-release__body,
+  .press-release__lead {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.7;
+    color: color-mix(in oklab, var(--foreground) 92%, transparent);
+  }
+
+  /* Slightly heavier lead paragraph to feel wire-service-y */
+  .press-release__lead > .press-release__p:nth-child(2) {
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    color: var(--foreground);
+  }
+
+  .press-release__p {
+    margin: 0 0 1rem 0;
+  }
+  .press-release__p:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Footnotes — paragraphs starting with a parenthetical marker like (a)
+     or (1). Rendered as small sans-serif fine print, deliberately distinct
+     from the serif body prose so the eye reads them as annotation. */
+  .press-release__footnote {
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: color-mix(in oklab, var(--muted-foreground) 95%, transparent);
+    margin: 0.2rem 0;
+    letter-spacing: 0.005em;
+  }
+  .press-release__footnote + .press-release__footnote {
+    /* Tighter spacing between consecutive footnotes — a list of fine
+       print should read as a block, not as separately-floating items. */
+    margin-top: 0.2rem;
+  }
+  /* Open up the gap before the first footnote in a run so it sits clearly
+     below the body prose that precedes it. */
+  .press-release__p + .press-release__footnote,
+  .press-release__h1 + .press-release__footnote,
+  .press-release__h2 + .press-release__footnote,
+  .press-release__h3 + .press-release__footnote {
+    margin-top: 1rem;
+  }
+
+  /* Real heading tags (h1/h2/h3 in the source markdown) — rare but possible */
+  .press-release__h1 {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 1.375rem;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    margin: 0 0 1.25rem 0;
+    color: var(--foreground);
+    text-wrap: balance;
+  }
+  .press-release__h2 {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted-foreground);
+    margin: 2.25rem 0 0.75rem 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .press-release__h3 {
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin: 1.75rem 0 0.5rem 0;
+  }
+
+  .press-release__strong {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+
+  /* In SEC press releases the document headline + section dividers come
+     through the source as paragraphs containing nothing but a single bold
+     run. We treat them as headings, with the very first one (= document
+     title in the lead chunk) styled as a real headline and the rest as
+     small-caps eyebrow rules. */
+  .press-release__lead
+    > .press-release__p:first-child:has(> .press-release__strong:only-child) {
+    font-family: var(--font-sans);
+    font-size: 1.5rem;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    color: var(--foreground);
+    margin: 0 0 1.5rem 0;
+    text-wrap: balance;
+  }
+  .press-release__lead
+    > .press-release__p:first-child:has(> .press-release__strong:only-child)
+    .press-release__strong {
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  .press-release__body
+    .press-release__p:has(> .press-release__strong:only-child),
+  .press-release__lead
+    > .press-release__p:not(:first-child):has(
+      > .press-release__strong:only-child
+    ) {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted-foreground);
+    margin: 2.25rem 0 0.6rem 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.4;
+  }
+  .press-release__body
+    .press-release__p:has(> .press-release__strong:only-child)
+    .press-release__strong,
+  .press-release__lead
+    > .press-release__p:not(:first-child):has(
+      > .press-release__strong:only-child
+    )
+    .press-release__strong {
+    font-weight: 600;
+    color: var(--muted-foreground);
+  }
+
+  /* When a bold-only paragraph is adjacent to another bold-only paragraph,
+     they're a multi-line title fragment from the source HTML (e.g. cover
+     pages where each line of "Blackstone's First Quarter 2026 Earnings" is
+     its own <p><b>...</b></p>). Don't apply the section-divider treatment;
+     stack them tightly as one title block. */
+  .press-release
+    .press-release__p:has(> .press-release__strong:only-child):has(
+      + .press-release__p:has(> .press-release__strong:only-child)
+    ),
+  .press-release
+    .press-release__p:has(> .press-release__strong:only-child)
+    + .press-release__p:has(> .press-release__strong:only-child) {
+    font-family: var(--font-sans);
+    font-size: 1.125rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: -0.01em;
+    color: var(--foreground);
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+    line-height: 1.3;
+  }
+  .press-release
+    .press-release__p:has(> .press-release__strong:only-child):has(
+      + .press-release__p:has(> .press-release__strong:only-child)
+    ) {
+    margin-top: 2rem;
+  }
+  .press-release
+    .press-release__p:has(> .press-release__strong:only-child):has(
+      + .press-release__p:has(> .press-release__strong:only-child)
+    )
+    .press-release__strong,
+  .press-release
+    .press-release__p:has(> .press-release__strong:only-child)
+    + .press-release__p:has(> .press-release__strong:only-child)
+    .press-release__strong {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+  /* The last line of a multi-line title gets a small bottom margin to breathe. */
+  .press-release
+    .press-release__p:has(> .press-release__strong:only-child)
+    + .press-release__p:has(> .press-release__strong:only-child):not(
+      :has(+ .press-release__p:has(> .press-release__strong:only-child))
+    ) {
+    margin-bottom: 1.25rem;
+  }
+
+  /* Contacts row */
+  .press-release__contacts {
+    margin: 1.75rem 0;
+    padding: 1.25rem 1.25rem 1.1rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: color-mix(in oklab, var(--card) 70%, transparent);
+  }
+  .press-release__contacts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1.25rem 2rem;
+  }
+  .press-release__contact-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+  .press-release__contact-name {
+    margin: 0;
+    font-weight: 600;
+    color: var(--foreground);
+    font-size: 0.875rem;
+  }
+  .press-release__contact-company {
+    margin: 0;
+    color: var(--muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+  }
+  .press-release__contact-tel {
+    margin: 0;
+    color: color-mix(in oklab, var(--foreground) 85%, transparent);
+    font-variant-numeric: tabular-nums;
+  }
+  .press-release__contact-tel::before {
+    content: "Tel  ";
+    color: var(--muted-foreground);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-right: 0.25rem;
+  }
+  .press-release__contact-email {
+    margin: 0;
+    word-break: break-word;
+  }
+
+  .press-release__em {
+    font-style: italic;
+  }
+
+  .press-release__link {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(
+      in oklab,
+      var(--foreground) 30%,
+      transparent
+    );
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    transition: text-decoration-color 150ms ease;
+    word-break: break-word;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .press-release__link:hover {
+      text-decoration-color: var(--foreground);
+    }
+  }
+
+  .press-release__ul,
+  .press-release__ol {
+    margin: 0.75rem 0 1rem;
+    padding-left: 1.5rem;
+  }
+  .press-release__ul {
+    list-style: disc outside;
+  }
+  .press-release__ol {
+    list-style: decimal outside;
+  }
+  .press-release__li {
+    margin: 0.35rem 0;
+    padding-left: 0.35rem;
+  }
+
+  .press-release__hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2.5rem 0;
+  }
+
+  .press-release__quote {
+    border-left: 2px solid var(--border);
+    padding: 0.25rem 0 0.25rem 1rem;
+    margin: 1.25rem 0;
+    color: color-mix(in oklab, var(--foreground) 80%, transparent);
+    font-style: italic;
+  }
+
+  .press-release__inline-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+  }
+  .press-release__inline-table th,
+  .press-release__inline-table td {
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+  .press-release__inline-table th {
+    font-weight: 600;
+    color: var(--muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.6875rem;
+  }
+
+  /* Line clamp utilities */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Financial dashboard utilities */
+  .dashboard-card {
+    @apply bg-card border border-border rounded-lg p-4 shadow-sm;
+  }
+
+  .dashboard-stat {
+    @apply text-2xl font-bold text-foreground;
+  }
+
+  .dashboard-stat-positive {
+    @apply text-positive;
+  }
+
+  .dashboard-stat-negative {
+    @apply text-negative;
+  }
+
+  .dashboard-stat-neutral {
+    @apply text-muted-foreground;
+  }
+
+  .dashboard-section {
+    @apply space-y-4;
+  }
+
+  .dashboard-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4;
+  }
+
+  .dashboard-chart-container {
+    @apply bg-card border border-border rounded-lg p-4 h-64;
+  }
+
+  /* Financial value styling */
+  .financial-value-positive {
+    @apply text-positive font-semibold;
+  }
+
+  .financial-value-negative {
+    @apply text-negative font-semibold;
+  }
+
+  .financial-percentage-positive {
+    @apply text-positive text-sm;
+  }
+
+  .financial-percentage-negative {
+    @apply text-negative text-sm;
+  }
+
+  .financial-label {
+    @apply text-muted-foreground text-sm;
+  }
+
+  /* Brand accent utilities */
+  .brand-accent {
+    @apply text-brand;
+  }
+
+  .brand-bg {
+    @apply bg-brand text-brand-foreground;
+  }
+
+  /* Glass element text color */
+  .glass-text {
+    @apply text-neutral-400;
+  }
+
+  /* 404 Page floating animation */
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0) translateX(0);
+      opacity: 0.3;
+    }
+    25% {
+      transform: translateY(-20px) translateX(10px);
+      opacity: 0.5;
+    }
+    50% {
+      transform: translateY(-10px) translateX(-10px);
+      opacity: 0.7;
+    }
+    75% {
+      transform: translateY(-30px) translateX(5px);
+      opacity: 0.4;
+    }
+  }
+
+  .animate-float {
+    animation: float ease-in-out infinite;
+  }
+
+  @keyframes cardIn {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

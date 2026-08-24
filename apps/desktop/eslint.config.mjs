@@ -26,5 +26,32 @@ export default defineConfig(
       ...eslintPluginReactRefresh.configs.vite.rules,
     },
   },
+  {
+    files: [
+      "src/renderer/src/components/ui/**/*.{ts,tsx}",
+      "src/renderer/src/components/loading/LoadingCube.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "react-refresh/only-export-components": "off",
+      "react/no-unknown-property": "off",
+      "react/prop-types": "off",
+      "prettier/prettier": "off",
+    },
+  },
   eslintConfigPrettier,
+  {
+    files: [
+      "src/renderer/src/components/ui/**/*.{ts,tsx}",
+      "src/renderer/src/components/loading/LoadingCube.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-refresh/only-export-components": "off",
+      "react/no-unknown-property": "off",
+      "react/prop-types": "off",
+      "prettier/prettier": "off",
+    },
+  },
 );

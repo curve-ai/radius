@@ -1,9 +1,9 @@
+import type { RadiusApi } from "../radius-api";
+
 export {};
 
 declare global {
   interface Window {
-    radius: {
-      platform: string;
-    };
+    radius: RadiusApi;
   }
 }

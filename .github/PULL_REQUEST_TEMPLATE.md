@@ -12,7 +12,8 @@
 
 ## Verification
 
-- [ ] `npm run typecheck`
-- [ ] `npm run lint`
+- [ ] `bun run typecheck`
+- [ ] `bun run lint`
+- [ ] `bun run test`
 - [ ] Relevant focused tests
 - [ ] Manual verification described below

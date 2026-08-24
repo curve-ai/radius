@@ -4,19 +4,28 @@
   "private": true,
   "description": "The open-source desktop runtime for specialized AI agents.",
   "license": "MIT",
-  "packageManager": "npm@10.9.8",
+  "packageManager": "bun@1.3.14",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "engines": {
+    "bun": ">=1.3.14",
     "node": ">=22.12"
   },
+  "trustedDependencies": [
+    "@curve-ai/radius-desktop",
+    "electron",
+    "electron-winstaller",
+    "esbuild"
+  ],
   "scripts": {
-    "dev": "npm run dev --workspace @curve-ai/radius-desktop",
-    "lint": "npm run lint --workspace @curve-ai/radius-desktop",
-    "typecheck": "npm run typecheck --workspace @curve-ai/radius-desktop",
-    "package": "npm run package --workspace @curve-ai/radius-desktop",
-    "make": "npm run make --workspace @curve-ai/radius-desktop"
+    "dev": "bun run --cwd apps/desktop dev",
+    "build:packages": "bun run --cwd packages/sync-protocol build && bun run --cwd packages/storage build && bun run --cwd packages/sync-core build && bun run --cwd packages/scheduler build",
+    "lint": "bun run --cwd apps/desktop lint",
+    "test": "bun run --cwd packages/sync-protocol test && bun run --cwd packages/storage test && bun run --cwd packages/sync-core test && bun run --cwd packages/scheduler test && bun run --cwd apps/desktop test",
+    "typecheck": "bun run --cwd packages/sync-protocol typecheck && bun run --cwd packages/storage typecheck && bun run --cwd packages/sync-core typecheck && bun run --cwd packages/scheduler typecheck && bun run --cwd apps/desktop typecheck",
+    "package": "bun run --cwd apps/desktop package",
+    "make": "bun run --cwd apps/desktop make"
   }
 }

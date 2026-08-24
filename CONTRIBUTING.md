@@ -12,10 +12,11 @@ Radius executes code and brokers access to user files and tools. Changes to perm
 ## Local checks
 
 ```bash
-npm install
-npm run typecheck
-npm run lint
-npm run package
+bun install
+bun run typecheck
+bun run lint
+bun run test
+bun run package
 ```
 
 Add focused tests as runtime and protocol packages are introduced. Security-sensitive behavior must include failure-path coverage.

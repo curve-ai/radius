@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787348486059,
+      "tag": "0000_initial_storage",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787395652695,
+      "tag": "0001_durable_scheduling",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787413222210,
+      "tag": "0002_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787413756075,
+      "tag": "0003_agent_run_file_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787415271714,
+      "tag": "0004_session_pins",
+      "breakpoints": true
+    }
+  ]
+}

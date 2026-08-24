@@ -17,23 +17,45 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
-    "build": "npm run typecheck && electron-vite build",
-    "package": "npm run build && electron-builder --dir",
-    "make": "npm run build && electron-builder",
+    "build": "bun run typecheck && bun run build:bundle",
+    "build:bundle": "electron-vite build",
+    "package": "bun run build && electron-builder --dir",
+    "make": "bun run build && electron-builder",
     "lint": "eslint --cache .",
+    "test": "tsx --test 'src/**/*.test.ts'",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "typecheck": "bun run typecheck:node && bun run typecheck:web",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@curve-ai/radius-scheduler": "0.0.1",
+    "@curve-ai/radius-storage": "0.0.1",
+    "@curve-ai/radius-sync-core": "0.0.1",
+    "@radix-ui/react-avatar": "^1.1.11",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-icons": "^1.3.2",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-separator": "^1.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-switch": "^1.2.2",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron-updater": "6.8.9",
+    "lucide-react": "^0.554.0",
+    "motion": "^12.23.24",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-flagpack": "^2.0.6",
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@tailwindcss/typography": "^0.5.19",
+    "@tailwindcss/vite": "^4.1.7",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -46,7 +68,30 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "prettier": "^3.7.4",
+    "tailwindcss": "^4.1.7",
+    "tsx": "4.23.12",
+    "tw-animate-css": "^1.4.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
+  },
+  "build": {
+    "appId": "ai.curve.radius",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "curve-ai",
+        "repo": "radius",
+        "releaseType": "release"
+      }
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "../../packages/storage/drizzle",
+        "to": "storage-migrations"
+      }
+    ]
   }
 }

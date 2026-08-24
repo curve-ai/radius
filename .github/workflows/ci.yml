@@ -25,20 +25,27 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22.12
-          cache: npm
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: npm ci
+        run: bun ci
 
       - name: Type-check
-        run: npm run typecheck
+        run: bun run typecheck
 
       - name: Lint
-        run: npm run lint
+        run: bun run lint
+
+      - name: Test
+        run: bun run test
 
       - name: Build
-        run: npm run build --workspace @curve-ai/radius-desktop
+        run: bun run --cwd apps/desktop build:bundle
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
-        run: npm audit --omit=dev --audit-level=high
+        run: bun audit --audit-level high
