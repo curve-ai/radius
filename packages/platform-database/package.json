@@ -1,0 +1,30 @@
+{
+  "name": "@curve-ai/platform-database",
+  "version": "0.1.0-alpha.5",
+  "description": "PostgreSQL schema and repositories for the self-hosted Radius Platform",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "generate": "drizzle-kit generate --config drizzle.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "@types/pg": "8.15.5",
+    "drizzle-kit": "0.31.10",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

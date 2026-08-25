@@ -54,6 +54,9 @@ The React renderer is unprivileged. Electron owns operating-system integration b
   approval model; implementation is not yet approved.
 - [`sync-v1-data-model.md`](sync-v1-data-model.md) — accepted typed local schema, public envelope, artifact model, authority rules, and migration plan.
 - [`../guides/sync-provider.md`](../guides/sync-provider.md) — implement a compatible service and connect a cloned Radius application.
+- [`platform-postgresql.md`](platform-postgresql.md) — approved PostgreSQL
+  system of record for the self-hosted Platform, including tenancy, Better
+  Auth, sync, connectors, RLS, and the pinned minimal distribution.
 
 ## Repository shape
 
@@ -67,6 +70,8 @@ packages/storage      Embedded libSQL persistence and migrations
 packages/sync-protocol Versioned provider-neutral sync contracts
 packages/sync-core    Optional sync lifecycle, HTTP provider, and recovery
 packages/scheduler    Durable local recurrence, recovery, and dispatch coordination
+packages/platform-database PostgreSQL schema and migrations for the self-hosted Platform
+hosting/postgres       Pinned PostgreSQL image and single-node self-host service
 docs/architecture     Public technical decisions
 ```
 
