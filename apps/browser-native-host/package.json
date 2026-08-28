@@ -1,0 +1,17 @@
+{
+  "name": "@curve-ai/radius-browser-native-host",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "mkdir -p dist && bun build src/index.ts --outfile dist/index.cjs --target=node --format=cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

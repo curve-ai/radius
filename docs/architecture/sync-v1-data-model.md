@@ -209,4 +209,4 @@ transfer and removes credentials without deleting canonical local records.
 - Cloud-authored commands or messages.
 - Scheduling and Cloud execution.
 - Artifact bytes inside tRPC or sync envelopes.
-- Database-page, WAL-frame, MongoDB-document, or raw SQL replication.
+- Database-page, WAL-frame, database-document, or raw SQL replication.

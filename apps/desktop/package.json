@@ -29,8 +29,12 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@curve-ai/radius-browser-protocol": "0.0.1",
+    "@curve-ai/radius-browser-tools": "0.0.1",
+    "@curve-ai/platform-client": "0.0.1",
     "@curve-ai/radius-scheduler": "0.0.1",
     "@curve-ai/radius-storage": "0.0.1",
+    "@curve-ai/radius-runtime": "0.0.1",
     "@curve-ai/radius-sync-core": "0.0.1",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -91,7 +95,40 @@
       {
         "from": "../../packages/storage/drizzle",
         "to": "storage-migrations"
+      },
+      {
+        "from": "../browser-extension/dist",
+        "to": "browser-extension"
+      },
+      {
+        "from": "../browser-native-host/dist",
+        "to": "browser-native-host"
       }
-    ]
+    ],
+    "mac": {
+      "minimumSystemVersion": "26.0.0",
+      "extraResources": [
+        {
+          "from": "../runtime-host-macos/.build/release/radius-runtime-host",
+          "to": "runtime/macos-arm64/radius-runtime-host"
+        },
+        {
+          "from": "../runtime-host-macos/Config/runtime-assets.json",
+          "to": "runtime/runtime-assets.json"
+        },
+        {
+          "from": "../runtime-host-macos/.build/runtime-assets/vmlinux-arm64",
+          "to": "runtime/vmlinux-arm64"
+        },
+        {
+          "from": "../runtime-host-macos/THIRD_PARTY_NOTICES.md",
+          "to": "runtime/THIRD_PARTY_NOTICES.md"
+        },
+        {
+          "from": "../runtime-host-macos/.build/provider-assets",
+          "to": "agents"
+        }
+      ]
+    }
   }
 }

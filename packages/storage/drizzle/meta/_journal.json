@@ -36,6 +36,27 @@
       "when": 1787415271714,
       "tag": "0004_session_pins",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787603800106,
+      "tag": "0005_connector_registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787605806184,
+      "tag": "0006_connector_catalog_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787608241362,
+      "tag": "0007_agent_authentication",
+      "breakpoints": true
     }
   ]
 }

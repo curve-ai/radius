@@ -3,6 +3,8 @@ import {
   listAllProjectSessions,
   listProjects,
   listRecentSessions,
+  listSessionTranscript,
+  setSessionArchived,
   setSessionPinned,
   setProjectRoot,
   updateProjectName,
@@ -23,6 +25,7 @@ import type {
   ProjectFolderSelection,
   ProjectSidebarRecord,
   RecentSidebarSession,
+  SessionTranscriptEvent,
 } from "../radius-api";
 
 const PROJECT_FOLDER_SELECTION_TTL_MS = 10 * 60 * 1_000;
@@ -65,6 +68,7 @@ export async function listProjectSidebar(): Promise<ProjectSidebarRecord[]> {
       title: session.title,
       status: session.status,
       updatedAt: session.updatedAt,
+      lastAssistantMessageAt: session.lastAssistantMessageAt,
       pinnedAt: session.pinnedAt,
     });
     sessionsByProject.set(session.projectId, projectSessions);
@@ -88,8 +92,21 @@ export async function listRecentSidebar(): Promise<RecentSidebarSession[]> {
     title: session.title,
     status: session.status,
     updatedAt: session.updatedAt,
+    lastAssistantMessageAt: session.lastAssistantMessageAt,
     pinnedAt: session.pinnedAt,
   }));
+}
+
+export async function listSessionTranscriptForRenderer(
+  _event: IpcMainInvokeEvent,
+  sessionId: unknown,
+): Promise<SessionTranscriptEvent[]> {
+  if (typeof sessionId !== "string" || !sessionId) {
+    throw new Error("A session identifier is required");
+  }
+
+  const context = await initializeStorage();
+  return listSessionTranscript(context.database, sessionId);
 }
 
 async function chooseRootFolder(
@@ -262,5 +279,21 @@ export async function setSessionPinnedFromRenderer(
     clientInstanceId: identity.clientInstanceId,
     sessionId,
     pinned,
+  });
+}
+
+export async function setSessionArchivedFromRenderer(
+  _event: IpcMainInvokeEvent,
+  sessionId: unknown,
+): Promise<void> {
+  if (typeof sessionId !== "string" || !sessionId) {
+    throw new Error("A session identifier is required");
+  }
+
+  const context = await initializeStorage();
+  const identity = localDeviceIdentity(context.vault);
+  await setSessionArchived(context.database, {
+    originClientInstanceId: identity.clientInstanceId,
+    sessionId,
   });
 }

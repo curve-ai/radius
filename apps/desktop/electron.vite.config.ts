@@ -9,8 +9,13 @@ export default defineConfig({
       externalizeDeps: {
         include: ["@libsql/client", "drizzle-orm"],
         exclude: [
+          "@curve-ai/platform-client",
+          "@curve-ai/radius-browser-protocol",
+          "@curve-ai/radius-browser-tools",
+          "@curve-ai/radius-connector-protocol",
           "@curve-ai/radius-scheduler",
           "@curve-ai/radius-storage",
+          "@curve-ai/radius-runtime",
           "@curve-ai/radius-sync-core",
           "@curve-ai/radius-sync-protocol",
         ],

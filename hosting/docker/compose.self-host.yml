@@ -1,0 +1,160 @@
+name: radius-platform
+
+services:
+  ingress:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      RADIUS_ACME_EMAIL: ${RADIUS_ACME_EMAIL:?set RADIUS_ACME_EMAIL}
+      RADIUS_PLATFORM_DOMAIN: ${RADIUS_PLATFORM_DOMAIN:?set RADIUS_PLATFORM_DOMAIN}
+      RADIUS_REGISTRY_DOMAIN: ${RADIUS_REGISTRY_DOMAIN:?set RADIUS_REGISTRY_DOMAIN}
+      RADIUS_TLS_DIRECTIVE: ${RADIUS_TLS_DIRECTIVE:-}
+    ports:
+      - "${RADIUS_HTTP_BIND:-0.0.0.0:80}:80"
+      - "${RADIUS_HTTPS_BIND:-0.0.0.0:443}:443"
+      - "${RADIUS_HTTPS_BIND:-0.0.0.0:443}:443/udp"
+    volumes:
+      - ./Caddyfile.self-host:/etc/caddy/Caddyfile:ro
+      - radius-caddy-data:/data
+      - radius-caddy-config:/config
+    depends_on:
+      platform-api:
+        condition: service_healthy
+      platform-web:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+
+  registry:
+    image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+    restart: unless-stopped
+    environment:
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: Radius Registry
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      REGISTRY_HTTP_DEBUG_ADDR: 0.0.0.0:5001
+      REGISTRY_HTTP_SECRET: ${RADIUS_REGISTRY_HTTP_SECRET:?set RADIUS_REGISTRY_HTTP_SECRET}
+      REGISTRY_STORAGE_DELETE_ENABLED: "false"
+    volumes:
+      - ${RADIUS_REGISTRY_AUTH_FILE:?set RADIUS_REGISTRY_AUTH_FILE}:/auth/htpasswd:ro
+      - radius-registry-data:/var/lib/registry
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5001/debug/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  jobs-redis:
+    image: valkey/valkey:8.1.9-alpine@sha256:e0eb7c480958d32bdc4357a74bdd70653ae15f2f9b4c93c4a5a9fad1dc471c84
+    restart: unless-stopped
+    command:
+      - valkey-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - radius-jobs-redis:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: ${RADIUS_IMAGE_REGISTRY:-ghcr.io/curve-ai}/radius-postgres:${RADIUS_VERSION:?set RADIUS_VERSION}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: radius
+      POSTGRES_USER: radius
+      POSTGRES_PASSWORD: ${RADIUS_POSTGRES_PASSWORD:?set RADIUS_POSTGRES_PASSWORD}
+    volumes:
+      - radius-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radius -d radius"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  platform-api:
+    image: ${RADIUS_IMAGE_REGISTRY:-ghcr.io/curve-ai}/radius-platform-api:${RADIUS_VERSION:?set RADIUS_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD}@postgres:5432/radius
+      RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY: "false"
+      RADIUS_PLATFORM_REGISTRY: ${RADIUS_REGISTRY_DOMAIN}
+      RADIUS_PLATFORM_REGISTRY_VERIFY: registry:5000
+      RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE: "true"
+      RADIUS_PLATFORM_REGISTRY_USERNAME: ${RADIUS_REGISTRY_USERNAME:?set RADIUS_REGISTRY_USERNAME}
+      RADIUS_PLATFORM_REGISTRY_PASSWORD: ${RADIUS_REGISTRY_PASSWORD:?set RADIUS_REGISTRY_PASSWORD}
+      RADIUS_OIDC_ISSUER: ${RADIUS_OIDC_ISSUER:?set RADIUS_OIDC_ISSUER}
+      RADIUS_OIDC_CLIENT_ID: ${RADIUS_OIDC_CLIENT_ID:?set RADIUS_OIDC_CLIENT_ID}
+      RADIUS_OIDC_CLIENT_SECRET: ${RADIUS_OIDC_CLIENT_SECRET:-}
+      RADIUS_OIDC_REDIRECT_URI: https://${RADIUS_PLATFORM_DOMAIN}/api/platform/v1/auth/oidc/callback
+      RADIUS_OIDC_TRANSACTION_SECRET: ${RADIUS_OIDC_TRANSACTION_SECRET:?set RADIUS_OIDC_TRANSACTION_SECRET}
+      RADIUS_OIDC_ORGANIZATION: ${RADIUS_OIDC_ORGANIZATION:?set RADIUS_OIDC_ORGANIZATION}
+      RADIUS_OIDC_ALLOWED_EMAILS: ${RADIUS_OIDC_ALLOWED_EMAILS:-}
+      RADIUS_OIDC_ALLOWED_EMAIL_DOMAINS: ${RADIUS_OIDC_ALLOWED_EMAIL_DOMAINS:?set RADIUS_OIDC_ALLOWED_EMAIL_DOMAINS}
+      RADIUS_OIDC_AUTO_JOIN_ROLE: ${RADIUS_OIDC_AUTO_JOIN_ROLE:-viewer}
+      RADIUS_OIDC_BOOTSTRAP_ACCOUNT_ID: ${RADIUS_OIDC_BOOTSTRAP_ACCOUNT_ID:-}
+      RADIUS_PLATFORM_APPLICATION_URL: https://${RADIUS_PLATFORM_DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+
+  platform-jobs:
+    image: ${RADIUS_IMAGE_REGISTRY:-ghcr.io/curve-ai}/radius-platform-jobs:${RADIUS_VERSION:?set RADIUS_VERSION}
+    restart: unless-stopped
+    read_only: true
+    working_dir: /tmp
+    command: ["bun", "/app/platform-jobs.js"]
+    tmpfs:
+      - /tmp
+    environment:
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD}@postgres:5432/radius
+      JOBS_REDIS_URL: redis://jobs-redis:6379
+      JOBS_CONCURRENCY: ${RADIUS_JOBS_CONCURRENCY:-5}
+      RADIUS_PLATFORM_REGISTRIES: ${RADIUS_REGISTRY_DOMAIN}
+      RADIUS_PLATFORM_INSECURE_REGISTRIES: registry:5000
+      RADIUS_PLATFORM_REGISTRY_ENDPOINTS: '{"${RADIUS_REGISTRY_DOMAIN}":"registry:5000"}'
+      RADIUS_PLATFORM_REGISTRY_USERNAME: ${RADIUS_REGISTRY_USERNAME}
+      RADIUS_PLATFORM_REGISTRY_PASSWORD: ${RADIUS_REGISTRY_PASSWORD}
+    depends_on:
+      jobs-redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "/app/platform-jobs-health.js"]
+
+  platform-web:
+    image: ${RADIUS_IMAGE_REGISTRY:-ghcr.io/curve-ai}/radius-platform-web:${RADIUS_VERSION:?set RADIUS_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      RADIUS_PLATFORM_AUTH_MODE: browser-session
+      RADIUS_PLATFORM_API_URL: http://platform-api:3100
+      RADIUS_PLATFORM_PUBLIC_API_URL: https://${RADIUS_PLATFORM_DOMAIN}
+      RADIUS_PLATFORM_ALLOW_INSECURE_API: "true"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+volumes:
+  radius-caddy-data:
+  radius-caddy-config:
+  radius-registry-data:
+  radius-jobs-redis:
+  radius-postgres-data:

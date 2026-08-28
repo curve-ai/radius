@@ -17,9 +17,11 @@ import {
   asc,
   desc,
   eq,
+  inArray,
   isNotNull,
   isNull,
   lte,
+  max,
   or,
   sql,
 } from "drizzle-orm";
@@ -107,6 +109,7 @@ export interface ProjectSessionRecord {
   status: SessionRecord["status"];
   createdAt: string;
   updatedAt: string;
+  lastAssistantMessageAt: string | null;
   pinnedAt: string | null;
 }
 
@@ -116,13 +119,130 @@ export interface RecentSessionRecord {
   status: SessionRecord["status"];
   createdAt: string;
   updatedAt: string;
+  lastAssistantMessageAt: string | null;
   pinnedAt: string | null;
 }
+
+export type SessionTranscriptEventRecord =
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "message";
+      role: "user" | "assistant" | "system";
+      messageKind:
+        "prompt" | "progress" | "final" | "run_summary" | "system_notice";
+      status: "completed" | "cancelled" | "failed";
+      text: string;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string;
+      eventType: "agent_run";
+      providerKey: string;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string;
+      eventType: "agent_run_state_update";
+      state:
+        | "working"
+        | "waiting_for_approval"
+        | "waiting_for_user"
+        | "completed"
+        | "failed"
+        | "cancelled";
+      detail: string | null;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string;
+      eventType: "agent_run_presentation";
+      mode: "inline" | "collapsible";
+      initialState: "expanded" | "collapsed" | null;
+      summaryMessageEventId: string | null;
+      label: string | null;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "reasoning_summary";
+      summaryKind: "analysis" | "decision" | "handoff";
+      summaryText: string;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "task_plan";
+      planId: string;
+      title: string;
+      supersedesPlanId: string | null;
+      steps: Array<{
+        id: string;
+        position: number;
+        title: string;
+      }>;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "task_step_update";
+      taskStepId: string;
+      state: "pending" | "in_progress" | "completed" | "blocked" | "skipped";
+      detail: string | null;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "tool_call";
+      capability: string;
+      operation: string;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "tool_result";
+      toolCallEventId: string;
+      outcome: "succeeded" | "failed" | "cancelled";
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "error";
+      code: string;
+      message: string;
+      retryable: boolean;
+    };
 
 export interface SetSessionPinnedInput {
   clientInstanceId: string;
   sessionId: string;
   pinned: boolean;
+  now?: number;
+}
+
+export interface SetSessionArchivedInput {
+  originClientInstanceId: string;
+  sessionId: string;
   now?: number;
 }
 
@@ -1111,6 +1231,11 @@ async function queryProjectSessions(
     )
     .orderBy(desc(sessions.updatedAtMs));
 
+  const lastAssistantMessageAt = await queryLastAssistantMessageAt(
+    database,
+    rows.map((row) => row.id),
+  );
+
   return rows.map((row) => ({
     id: row.id,
     projectId: row.projectId!,
@@ -1118,8 +1243,39 @@ async function queryProjectSessions(
     status: row.status,
     createdAt: toIso(row.createdAtMs),
     updatedAt: toIso(row.updatedAtMs),
+    lastAssistantMessageAt: lastAssistantMessageAt.get(row.id) ?? null,
     pinnedAt: row.pinnedAtMs ? toIso(row.pinnedAtMs) : null,
   }));
+}
+
+async function queryLastAssistantMessageAt(
+  database: RadiusDatabase,
+  sessionIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (sessionIds.length === 0) return new Map();
+
+  const rows = await database.db
+    .select({
+      sessionId: sessionEvents.sessionId,
+      occurredAtMs: max(sessionEvents.occurredAtMs),
+    })
+    .from(sessionEvents)
+    .innerJoin(messages, eq(messages.eventId, sessionEvents.id))
+    .where(
+      and(
+        inArray(sessionEvents.sessionId, sessionIds),
+        eq(messages.role, "assistant"),
+      ),
+    )
+    .groupBy(sessionEvents.sessionId);
+
+  return new Map(
+    rows.flatMap((row) =>
+      row.occurredAtMs === null
+        ? []
+        : [[row.sessionId, toIso(row.occurredAtMs)] as const],
+    ),
+  );
 }
 
 export async function listProjectSessions(
@@ -1167,14 +1323,270 @@ export async function listRecentSessions(
     )
     .orderBy(desc(sessions.updatedAtMs));
 
+  const lastAssistantMessageAt = await queryLastAssistantMessageAt(
+    database,
+    rows.map((row) => row.id),
+  );
+
   return rows.map((row) => ({
     id: row.id,
     title: row.title,
     status: row.status,
     createdAt: toIso(row.createdAtMs),
     updatedAt: toIso(row.updatedAtMs),
+    lastAssistantMessageAt: lastAssistantMessageAt.get(row.id) ?? null,
     pinnedAt: row.pinnedAtMs ? toIso(row.pinnedAtMs) : null,
   }));
+}
+
+export async function listSessionTranscript(
+  database: RadiusDatabase,
+  sessionId: string,
+): Promise<SessionTranscriptEventRecord[]> {
+  const rowsQuery = database.db
+    .select({
+      eventId: sessionEvents.id,
+      sessionRevision: sessionEvents.sessionRevision,
+      eventType: sessionEvents.eventType,
+      occurredAtMs: sessionEvents.occurredAtMs,
+      agentRunId: eventRuns.agentRunId,
+      providerKey: agentRuns.providerKey,
+      messageRole: messages.role,
+      messageKind: messages.messageKind,
+      messageStatus: messages.status,
+      runState: agentRunStateUpdates.state,
+      runStateDetail: agentRunStateUpdates.detail,
+      presentationMode: agentRunPresentations.mode,
+      presentationInitialState: agentRunPresentations.initialState,
+      presentationSummaryMessageEventId:
+        agentRunPresentations.summaryMessageEventId,
+      presentationLabel: agentRunPresentations.label,
+      reasoningKind: reasoningSummaries.summaryKind,
+      reasoningText: reasoningSummaries.summaryText,
+      taskPlanId: taskPlanEvents.planId,
+      taskPlanTitle: taskPlans.title,
+      taskPlanSupersedesPlanId: taskPlans.supersedesPlanId,
+      taskStepId: taskStepUpdates.taskStepId,
+      taskStepState: taskStepUpdates.state,
+      taskStepDetail: taskStepUpdates.detail,
+      toolCapability: toolCalls.capability,
+      toolOperation: toolCalls.operation,
+      toolCallEventId: toolResults.toolCallEventId,
+      toolOutcome: toolResults.outcome,
+      errorCode: errors.code,
+      errorMessage: errors.message,
+      errorRetryable: errors.retryable,
+    })
+    .from(sessionEvents)
+    .leftJoin(eventRuns, eq(eventRuns.eventId, sessionEvents.id))
+    .leftJoin(agentRuns, eq(agentRuns.createdByEventId, sessionEvents.id))
+    .leftJoin(messages, eq(messages.eventId, sessionEvents.id))
+    .leftJoin(
+      agentRunStateUpdates,
+      eq(agentRunStateUpdates.eventId, sessionEvents.id),
+    )
+    .leftJoin(
+      agentRunPresentations,
+      eq(agentRunPresentations.eventId, sessionEvents.id),
+    )
+    .leftJoin(
+      reasoningSummaries,
+      eq(reasoningSummaries.eventId, sessionEvents.id),
+    )
+    .leftJoin(taskPlanEvents, eq(taskPlanEvents.eventId, sessionEvents.id))
+    .leftJoin(taskPlans, eq(taskPlans.id, taskPlanEvents.planId))
+    .leftJoin(taskStepUpdates, eq(taskStepUpdates.eventId, sessionEvents.id))
+    .leftJoin(toolCalls, eq(toolCalls.eventId, sessionEvents.id))
+    .leftJoin(toolResults, eq(toolResults.eventId, sessionEvents.id))
+    .leftJoin(errors, eq(errors.eventId, sessionEvents.id))
+    .where(eq(sessionEvents.sessionId, sessionId))
+    .orderBy(asc(sessionEvents.sessionRevision));
+
+  const textPartsQuery = database.db
+    .select({
+      messageEventId: messageParts.messageEventId,
+      position: messageParts.position,
+      textContent: messageParts.textContent,
+    })
+    .from(messageParts)
+    .innerJoin(sessionEvents, eq(sessionEvents.id, messageParts.messageEventId))
+    .where(
+      and(
+        eq(sessionEvents.sessionId, sessionId),
+        eq(messageParts.partType, "text"),
+      ),
+    )
+    .orderBy(asc(messageParts.messageEventId), asc(messageParts.position));
+  const [rows, textParts] = await Promise.all([rowsQuery, textPartsQuery]);
+  const messageText = new Map<string, string[]>();
+  for (const part of textParts) {
+    if (part.textContent === null) continue;
+    const parts = messageText.get(part.messageEventId) ?? [];
+    parts.push(part.textContent);
+    messageText.set(part.messageEventId, parts);
+  }
+
+  const planIds = Array.from(
+    new Set(rows.flatMap((row) => (row.taskPlanId ? [row.taskPlanId] : []))),
+  );
+  const planStepRows =
+    planIds.length === 0
+      ? []
+      : await database.db
+          .select({
+            planId: taskSteps.planId,
+            id: taskSteps.id,
+            position: taskSteps.position,
+            title: taskSteps.title,
+          })
+          .from(taskSteps)
+          .where(inArray(taskSteps.planId, planIds))
+          .orderBy(asc(taskSteps.planId), asc(taskSteps.position));
+  const planSteps = new Map<
+    string,
+    Array<{ id: string; position: number; title: string }>
+  >();
+  for (const step of planStepRows) {
+    const steps = planSteps.get(step.planId) ?? [];
+    steps.push({ id: step.id, position: step.position, title: step.title });
+    planSteps.set(step.planId, steps);
+  }
+
+  return rows.flatMap<SessionTranscriptEventRecord>((row) => {
+    const base = {
+      eventId: row.eventId,
+      sessionRevision: row.sessionRevision,
+      occurredAt: toIso(row.occurredAtMs),
+      agentRunId: row.agentRunId,
+    };
+
+    switch (row.eventType) {
+      case "message":
+        if (!row.messageRole || !row.messageKind || !row.messageStatus)
+          throw new Error(`Message event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            role: row.messageRole,
+            messageKind: row.messageKind,
+            status: row.messageStatus,
+            text: (messageText.get(row.eventId) ?? []).join("\n\n"),
+          },
+        ];
+      case "agent_run":
+        if (!row.agentRunId || !row.providerKey)
+          throw new Error(`Agent run event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            agentRunId: row.agentRunId,
+            eventType: row.eventType,
+            providerKey: row.providerKey,
+          },
+        ];
+      case "agent_run_state_update":
+        if (!row.agentRunId || !row.runState)
+          throw new Error(`Agent run state event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            agentRunId: row.agentRunId,
+            eventType: row.eventType,
+            state: row.runState,
+            detail: row.runStateDetail,
+          },
+        ];
+      case "agent_run_presentation":
+        if (!row.agentRunId || !row.presentationMode)
+          throw new Error(
+            `Agent run presentation event ${row.eventId} is incomplete`,
+          );
+        return [
+          {
+            ...base,
+            agentRunId: row.agentRunId,
+            eventType: row.eventType,
+            mode: row.presentationMode,
+            initialState: row.presentationInitialState,
+            summaryMessageEventId: row.presentationSummaryMessageEventId,
+            label: row.presentationLabel,
+          },
+        ];
+      case "reasoning_summary":
+        if (!row.reasoningKind || !row.reasoningText)
+          throw new Error(`Reasoning event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            summaryKind: row.reasoningKind,
+            summaryText: row.reasoningText,
+          },
+        ];
+      case "task_plan":
+        if (!row.taskPlanId || !row.taskPlanTitle)
+          throw new Error(`Task plan event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            planId: row.taskPlanId,
+            title: row.taskPlanTitle,
+            supersedesPlanId: row.taskPlanSupersedesPlanId,
+            steps: planSteps.get(row.taskPlanId) ?? [],
+          },
+        ];
+      case "task_step_update":
+        if (!row.taskStepId || !row.taskStepState)
+          throw new Error(`Task step event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            taskStepId: row.taskStepId,
+            state: row.taskStepState,
+            detail: row.taskStepDetail,
+          },
+        ];
+      case "tool_call":
+        if (!row.toolCapability || !row.toolOperation)
+          throw new Error(`Tool call event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            capability: row.toolCapability,
+            operation: row.toolOperation,
+          },
+        ];
+      case "tool_result":
+        if (!row.toolCallEventId || !row.toolOutcome)
+          throw new Error(`Tool result event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            toolCallEventId: row.toolCallEventId,
+            outcome: row.toolOutcome,
+          },
+        ];
+      case "error":
+        if (!row.errorCode || !row.errorMessage || row.errorRetryable === null)
+          throw new Error(`Error event ${row.eventId} is incomplete`);
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            code: row.errorCode,
+            message: row.errorMessage,
+            retryable: row.errorRetryable,
+          },
+        ];
+      default:
+        return [];
+    }
+  });
 }
 
 export async function setSessionPinned(
@@ -1236,6 +1648,77 @@ export async function setSessionPinned(
         set: { pinnedAtMs: now },
       });
     return toIso(now);
+  });
+}
+
+export async function setSessionArchived(
+  database: RadiusDatabase,
+  input: SetSessionArchivedInput,
+): Promise<SessionRecord> {
+  const now = input.now ?? Date.now();
+  if (!Number.isSafeInteger(now) || now <= 0) {
+    throw new Error("Archive timestamp must be a positive integer");
+  }
+
+  return database.db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, input.sessionId),
+          eq(sessions.originClientInstanceId, input.originClientInstanceId),
+          isNull(sessions.archivedAtMs),
+          isNull(sessions.deletedAtMs),
+        ),
+      )
+      .limit(1);
+    if (!current) {
+      throw new Error("Only the local origin can archive an active session");
+    }
+
+    const session = SessionRecordSchema.parse({
+      id: current.id,
+      originClientInstanceId: current.originClientInstanceId,
+      projectId: current.projectId,
+      title: current.title,
+      status: current.status,
+      revision: current.revision + 1,
+      createdAt: toIso(current.createdAtMs),
+      updatedAt: toIso(now),
+      archivedAt: toIso(now),
+      deletedAt: null,
+    });
+    const { envelope, payloadJson } = prepareLocalChange({
+      originClientInstanceId: session.originClientInstanceId,
+      sessionId: session.id,
+      sessionRevision: session.revision,
+      createdAt: session.updatedAt,
+      kind: "session.upsert",
+      payload: session,
+    });
+
+    const updated = await tx
+      .update(sessions)
+      .set({
+        revision: session.revision,
+        updatedAtMs: now,
+        archivedAtMs: now,
+      })
+      .where(
+        and(
+          eq(sessions.id, current.id),
+          eq(sessions.revision, current.revision),
+        ),
+      )
+      .returning({ id: sessions.id });
+    if (updated.length !== 1) {
+      throw new Error("Session revision changed concurrently");
+    }
+
+    await tx.delete(sessionPins).where(eq(sessionPins.sessionId, session.id));
+    await insertLocalChange(tx, envelope, payloadJson);
+    return session;
   });
 }
 

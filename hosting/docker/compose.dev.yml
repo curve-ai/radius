@@ -1,0 +1,120 @@
+name: radius-platform-dev
+
+services:
+  registry:
+    image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - radius-registry-data:/var/lib/registry
+
+  jobs-redis:
+    image: redis:7.4.5-alpine@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - "127.0.0.1:6381:6379"
+    volumes:
+      - radius-platform-jobs-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  postgres:
+    profiles: ["platform"]
+    image: radius-postgres:dev
+    build:
+      context: ../..
+      dockerfile: hosting/postgres/Containerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: radius
+      POSTGRES_USER: radius
+      POSTGRES_PASSWORD: ${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}
+    ports:
+      - "127.0.0.1:5441:5432"
+    volumes:
+      - radius-platform-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radius -d radius"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  platform-api:
+    profiles: ["platform"]
+    image: radius-platform-api:dev
+    build:
+      context: ../..
+      dockerfile: apps/platform-api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/radius
+      RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY: ${RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY:-true}
+      RADIUS_PLATFORM_ALLOW_INSECURE_SESSIONS: "true"
+      RADIUS_PLATFORM_DEV_TOKEN: ${RADIUS_PLATFORM_DEV_TOKEN:-radius-dev-token}
+      RADIUS_PLATFORM_REGISTRY: 127.0.0.1:5001
+      RADIUS_PLATFORM_REGISTRY_VERIFY: registry:5000
+      RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE: "true"
+    ports:
+      - "127.0.0.1:3110:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  platform-jobs:
+    profiles: ["platform"]
+    image: radius-platform-jobs:dev
+    build:
+      context: ../..
+      dockerfile: apps/platform-jobs/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/radius
+      JOBS_REDIS_URL: redis://jobs-redis:6379
+      JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-5}
+      RADIUS_PLATFORM_REGISTRIES: 127.0.0.1:5001
+      RADIUS_PLATFORM_INSECURE_REGISTRIES: registry:5000
+      RADIUS_PLATFORM_REGISTRY_ENDPOINTS: '{"127.0.0.1:5001":"registry:5000"}'
+      RADIUS_PLATFORM_ALLOW_INSECURE_LOOPBACK: "true"
+      RADIUS_PLATFORM_REGISTRY_USERNAME: radius-dev
+      RADIUS_PLATFORM_REGISTRY_PASSWORD: radius-dev-only
+    depends_on:
+      jobs-redis:
+        condition: service_healthy
+      platform-api:
+        condition: service_healthy
+
+  platform-web:
+    profiles: ["platform"]
+    image: radius-platform-web:dev
+    build:
+      context: ../..
+      dockerfile: apps/platform-web/Dockerfile
+    restart: unless-stopped
+    environment:
+      RADIUS_PLATFORM_AUTH_MODE: development-token
+      RADIUS_PLATFORM_API_URL: http://platform-api:3100
+      RADIUS_PLATFORM_PUBLIC_API_URL: http://127.0.0.1:3110
+      RADIUS_PLATFORM_ACCESS_TOKEN: ${RADIUS_PLATFORM_DEV_TOKEN:-radius-dev-token}
+      RADIUS_PLATFORM_ALLOW_INSECURE_API: "true"
+    ports:
+      - "127.0.0.1:3200:3200"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+volumes:
+  radius-registry-data:
+  radius-platform-jobs-redis:
+  radius-platform-postgres:

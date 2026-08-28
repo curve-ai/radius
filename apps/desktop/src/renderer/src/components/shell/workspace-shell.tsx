@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -18,13 +19,17 @@ import {
   useReducedMotion,
 } from "@renderer/components/ui/motion";
 import { SidebarProvider } from "@renderer/components/ui/sidebar";
+import { cn } from "@renderer/lib/utils";
 import { useWorkspaceNavigation } from "./navigation-context";
+import { useProjects } from "./project-context-value";
+import { WORKSPACE_TITLES } from "./types";
 import { WorkspaceHeader } from "./workspace-header";
 import { WorkspaceHistoryControls } from "./workspace-history-controls";
 import { WorkspaceSearchDialog } from "./workspace-search-dialog";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import {
   clampWorkspaceSidebarWidth,
+  getWorkspaceSidebarMaxWidth,
   WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
 } from "./workspace-sidebar-width";
 import { WorkspaceToolPanel } from "./workspace-tool-panel";
@@ -46,11 +51,19 @@ export function WorkspaceShell({
   children: ReactNode;
 }): ReactNode {
   const { activeView } = useWorkspaceNavigation();
-  const isNewChat = activeView === "workspace";
+  const { activeSession } = useProjects();
+  const isNewChat = activeView === "workspace" && activeSession === null;
+  const hasCollapsingTitle = activeView === "connectors";
+  const toolPanelAvailable = !isNewChat && activeView !== "connectors";
+  const headerTitle =
+    activeView === "workspace" && activeSession
+      ? activeSession.session.title
+      : WORKSPACE_TITLES[activeView];
   const [sidebarOpen, setSidebarOpen] = useState(
     () => localStorage.getItem("sidebar_state") !== "false",
   );
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolPanelOpen, setToolPanelOpen] = useState(
     () => localStorage.getItem(TOOL_PANEL_STORAGE_KEY) !== "false",
@@ -66,6 +79,25 @@ export function WorkspaceShell({
     reduceMotion,
     "animate",
   );
+  const sidebarMaxWidth = getWorkspaceSidebarMaxWidth(viewportWidth);
+  const effectiveSidebarWidth = clampWorkspaceSidebarWidth(
+    sidebarWidth,
+    sidebarMaxWidth,
+  );
+
+  useEffect(() => {
+    document.title = `${headerTitle} · Radius`;
+  }, [headerTitle]);
+
+  useLayoutEffect(() => {
+    const updateViewportWidth = (): void => {
+      setViewportWidth(Math.round(window.innerWidth));
+    };
+    window.addEventListener("resize", updateViewportWidth);
+    updateViewportWidth();
+
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
 
   useLayoutEffect(() => {
     const workbench = workbenchRef.current;
@@ -102,10 +134,10 @@ export function WorkspaceShell({
     <SidebarProvider
       open={sidebarOpen}
       onOpenChange={handleSidebarOpenChange}
-      className="min-h-dvh bg-transparent"
+      className="h-full min-h-0 overflow-hidden bg-transparent"
       style={
         {
-          "--sidebar-width": `${sidebarWidth}px`,
+          "--sidebar-width": `${effectiveSidebarWidth}px`,
         } as CSSProperties
       }
     >
@@ -116,17 +148,21 @@ export function WorkspaceShell({
         Skip to content
       </a>
       <WorkspaceSidebar
-        width={sidebarWidth}
+        width={effectiveSidebarWidth}
+        maxWidth={sidebarMaxWidth}
         onWidthChange={setSidebarWidth}
         onWidthCommit={handleSidebarWidthCommit}
         onSearch={() => setSearchOpen(true)}
       />
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
       <WorkspaceHistoryControls />
-      <div className="relative flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-clip bg-background">
+      <div className="radius-workspace-timeline-scope relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <LayoutGroup id="workspace-tool-panel-layout">
           <WorkspaceHeader
+            collapsingTitle={hasCollapsingTitle}
             minimal={isNewChat}
+            title={headerTitle}
+            toolPanelAvailable={toolPanelAvailable}
             toolPanelOpen={toolPanelOpen}
             desktopToolPanelVisible={desktopToolPanelVisible}
             onToolPanelOpenChange={handleToolPanelOpenChange}
@@ -134,39 +170,47 @@ export function WorkspaceShell({
 
           <div
             ref={workbenchRef}
-            className="@container/workspace-workbench flex min-h-0 min-w-0 flex-1"
+            className="@container/workspace-workbench flex min-h-0 min-w-0 flex-1 overflow-hidden"
           >
             <main
               id="main-content"
-              className="min-w-0 flex-1 outline-none focus:outline-none focus-visible:outline-none"
+              className={cn(
+                "h-full min-h-0 min-w-0 flex-1 outline-none focus:outline-none focus-visible:outline-none",
+                activeView === "workspace"
+                  ? "overflow-hidden"
+                  : "overflow-x-hidden overflow-y-auto overscroll-contain",
+                hasCollapsingTitle && "radius-workspace-scroll-timeline",
+              )}
               tabIndex={-1}
             >
               {children}
             </main>
             <AnimatePresence initial={false} mode="popLayout">
-              {!isNewChat && toolPanelOpen && desktopToolPanelVisible && (
-                <motion.div
-                  key="workspace-tool-panel-rail"
-                  initial={
-                    animateToolPanelGeometry
-                      ? { opacity: 0, x: 8 }
-                      : { opacity: 0 }
-                  }
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={
-                    animateToolPanelGeometry
-                      ? { opacity: 0, x: 8 }
-                      : { opacity: 0 }
-                  }
-                  transition={{
-                    duration: reduceMotion ? 0.08 : 0.16,
-                    ease: [0.23, 1, 0.32, 1],
-                  }}
-                  className="shrink-0"
-                >
-                  <WorkspaceToolPanel />
-                </motion.div>
-              )}
+              {toolPanelAvailable &&
+                toolPanelOpen &&
+                desktopToolPanelVisible && (
+                  <motion.div
+                    key="workspace-tool-panel-rail"
+                    initial={
+                      animateToolPanelGeometry
+                        ? { opacity: 0, x: 8 }
+                        : { opacity: 0 }
+                    }
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={
+                      animateToolPanelGeometry
+                        ? { opacity: 0, x: 8 }
+                        : { opacity: 0 }
+                    }
+                    transition={{
+                      duration: reduceMotion ? 0.08 : 0.16,
+                      ease: [0.23, 1, 0.32, 1],
+                    }}
+                    className="shrink-0"
+                  >
+                    <WorkspaceToolPanel />
+                  </motion.div>
+                )}
             </AnimatePresence>
           </div>
         </LayoutGroup>

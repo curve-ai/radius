@@ -20,6 +20,37 @@ normalize_file() {
   perl -0pi -e 's/[ \t]+(?=\n)//g; s/\n+\z/\n/' "$1"
 }
 
+adapt_ui_file() {
+  local filename="$1"
+  local path="$2"
+
+  case "${filename}" in
+    "popover.tsx")
+      perl -0pi -e 's/border p-4 shadow-md outline-hidden/border p-1 shadow-md outline-hidden/' "${path}"
+      ;;
+    "tooltip.tsx")
+      perl -0pi -e 's/border px-3 py-1\.5 text-sm shadow-md/border p-1 text-sm shadow-md/' "${path}"
+      ;;
+  esac
+}
+
+adapted_source_ui() {
+  local filename="$1"
+  local path="$2"
+
+  case "${filename}" in
+    "popover.tsx")
+      perl -0pe 's/border p-4 shadow-md outline-hidden/border p-1 shadow-md outline-hidden/' "${path}"
+      ;;
+    "tooltip.tsx")
+      perl -0pe 's/border px-3 py-1\.5 text-sm shadow-md/border p-1 text-sm shadow-md/' "${path}"
+      ;;
+    *)
+      cat "${path}"
+      ;;
+  esac
+}
+
 ui_files=(
   "action-tool-panel.tsx"
   "alert.tsx"
@@ -54,6 +85,9 @@ for filename in "${ui_files[@]}"; do
     "${renderer_dir}/src/components/ui/${filename}"
   perl -pi -e 's#\@/#\@renderer/#g' \
     "${renderer_dir}/src/components/ui/${filename}"
+  adapt_ui_file \
+    "${filename}" \
+    "${renderer_dir}/src/components/ui/${filename}"
 done
 
 for relative_path in "${shared_files[@]}"; do
@@ -63,7 +97,9 @@ for relative_path in "${shared_files[@]}"; do
 done
 for filename in "${ui_files[@]}"; do
   diff -q \
-    "${source_dir}/components/ui/${filename}" \
+    <(adapted_source_ui \
+      "${filename}" \
+      "${source_dir}/components/ui/${filename}") \
     <(sed 's#@renderer/#@/#g' "${renderer_dir}/src/components/ui/${filename}")
 done
 

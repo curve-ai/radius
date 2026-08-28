@@ -94,6 +94,11 @@ export function getDesktopUpdateStatus(): DesktopUpdateStatus {
   return status;
 }
 
+export function checkDesktopUpdate(): DesktopUpdateStatus {
+  void checkForUpdate();
+  return status;
+}
+
 export function performDesktopUpdate(): DesktopUpdateStatus {
   if (!updater) return status;
 

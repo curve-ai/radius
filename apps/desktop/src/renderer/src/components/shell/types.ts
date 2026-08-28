@@ -1,7 +1,7 @@
 export type WorkspaceView =
   | "workspace"
   | "scheduled"
-  | "plugins"
+  | "connectors"
   | "agents"
   | "projects"
   | "artifacts"
@@ -11,7 +11,7 @@ export type WorkspaceView =
 export const WORKSPACE_TITLES: Record<WorkspaceView, string> = {
   workspace: "New chat",
   scheduled: "Scheduled",
-  plugins: "Plugins",
+  connectors: "Connectors",
   agents: "Agents",
   projects: "Projects",
   artifacts: "Artifacts",

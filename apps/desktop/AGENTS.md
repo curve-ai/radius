@@ -3,9 +3,9 @@
 ## Visual system
 
 - Invoke the `design-taste-frontend` skill before writing or editing renderer
-  UI. Apply its design read, anti-slop checks, accessibility rules, and relevant
-  pre-flight checks while deferring to the implemented Radius product system;
-  its landing-page patterns do not govern the desktop workbench.
+  UI. Apply its design read, anti-slop checks, and accessibility rules while
+  deferring to the implemented Radius product system. Its automatic validation
+  protocols and landing-page patterns do not govern the desktop workbench.
 - Read `../../DESIGN.md` before building, styling, or redesigning renderer UI.
   Keep page, panel, section, dialog, sheet, and empty-state headings at weight
   400. Use size, spacing, position, and color for hierarchy; do not add bold or
@@ -32,7 +32,10 @@
 
 - Use `scripts/sync-dashboard-ui.sh` for the verified upstream primitive
   set. Do not hand-edit copied files in `components/ui/`; adapt product behavior
-  in `components/shell/` or `app/`.
+  in `components/shell/` or `app/`. The sync script owns the approved Radius
+  padding adaptation that sets shared popover and tooltip content to a compact
+  4px inset. When validation is requested, use the sync script's matching check
+  for that transformation.
 - Do not copy upstream repository instructions, business logic, data components,
   routes, credentials, or private product details into Radius.
 - The Radius wordmark is text-only. Do not add the rotating loading cube or a
@@ -57,11 +60,13 @@
 - The skip-link target may remain programmatically focusable, but must never
   display a body-sized focus outline.
 
-## Validation
+## Available validation
 
+- Run these only when Alexey explicitly requests validation, using the requested
+  scope. They are not an automatic completion checklist.
 - `bun run typecheck`
 - `bun run lint`
 - `bun run test`
 - `bun run package`
-- Verify both the workspace and settings surfaces in the actual preload-backed
-  Electron window.
+- Live verification can cover the relevant workspace or settings surface in an
+  actual preload-backed Electron window.

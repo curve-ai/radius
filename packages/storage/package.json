@@ -2,6 +2,7 @@
   "name": "@curve-ai/radius-storage",
   "version": "0.0.1",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -16,6 +17,7 @@
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
+    "@curve-ai/radius-connector-protocol": "0.0.1",
     "@curve-ai/radius-sync-protocol": "0.0.1",
     "@libsql/client": "0.17.4",
     "drizzle-orm": "0.45.2"

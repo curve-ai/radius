@@ -1,0 +1,19 @@
+{
+  "name": "@curve-ai/example-typescript-agent",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "validate": "radius validate",
+    "dev": "radius dev",
+    "deploy:dry-run": "radius deploy --dry-run"
+  },
+  "dependencies": {
+    "@curve-ai/sdk": "0.0.1"
+  },
+  "devDependencies": {
+    "@curve-ai/build": "0.0.1",
+    "@curve-ai/cli": "0.0.1"
+  }
+}

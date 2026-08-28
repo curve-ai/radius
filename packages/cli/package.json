@@ -1,0 +1,35 @@
+{
+  "name": "@curve-ai/cli",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "radius": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --emitDeclarationOnly -p tsconfig.json && bun build src/index.ts --target=node --format=esm --external @napi-rs/keyring --outfile=dist/index.js && bun build src/cli.ts --target=node --format=esm --external @napi-rs/keyring --outfile=dist/cli.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@curve-ai/agent-contracts": "0.0.1",
+    "@curve-ai/build": "0.0.1",
+    "@curve-ai/platform-client": "0.0.1",
+    "@curve-ai/radius-runtime": "0.0.1",
+    "@napi-rs/keyring": "1.3.0",
+    "smol-toml": "1.8.0",
+    "tsx": "4.23.12"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "typescript": "5.9.3"
+  }
+}

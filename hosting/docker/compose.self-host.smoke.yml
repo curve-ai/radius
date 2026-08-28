@@ -1,0 +1,24 @@
+# Loopback-only ports for the disposable self-host verification script.
+# Never layer this file onto a public installation.
+services:
+  ingress:
+    environment:
+      RADIUS_PLATFORM_DOMAIN: platform.localhost
+      RADIUS_REGISTRY_DOMAIN: registry.localhost
+      RADIUS_TLS_DIRECTIVE: tls internal
+
+  registry:
+    ports:
+      - "127.0.0.1:${RADIUS_SMOKE_REGISTRY_PORT:-5012}:5000"
+
+  platform-api:
+    ports:
+      - "127.0.0.1:${RADIUS_SMOKE_API_PORT:-3122}:3100"
+
+  platform-jobs:
+    environment:
+      RADIUS_PLATFORM_ALLOW_INSECURE_LOOPBACK: "true"
+
+  platform-web:
+    ports:
+      - "127.0.0.1:${RADIUS_SMOKE_WEB_PORT:-3212}:3200"

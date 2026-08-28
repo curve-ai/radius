@@ -1,0 +1,31 @@
+{
+	email {$RADIUS_ACME_EMAIL}
+}
+
+{$RADIUS_PLATFORM_DOMAIN} {
+	{$RADIUS_TLS_DIRECTIVE:}
+	encode zstd gzip
+
+	header {
+		-Server
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+	}
+
+	handle /api/platform/* {
+		reverse_proxy platform-api:3100
+	}
+
+	handle {
+		reverse_proxy platform-web:3200
+	}
+}
+
+{$RADIUS_REGISTRY_DOMAIN} {
+	{$RADIUS_TLS_DIRECTIVE:}
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+	}
+	reverse_proxy registry:5000
+}

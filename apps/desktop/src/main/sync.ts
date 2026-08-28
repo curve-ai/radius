@@ -289,3 +289,14 @@ export async function stopSync(): Promise<void> {
   connectionGeneration += 1;
   await stopActiveSync();
 }
+
+export async function getConnectorCatalogAccessToken(
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!storageContext) throw new Error("STORAGE_NOT_READY");
+  const connection = await getMostRecentSyncConnection(storageContext.database);
+  if (!connection) throw new Error("CLOUD_CONNECTION_REQUIRED");
+  const provider = accessTokenProvider(connection);
+  if (!provider) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+  return provider(signal);
+}

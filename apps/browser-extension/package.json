@@ -1,0 +1,19 @@
+{
+  "name": "@curve-ai/radius-browser-extension",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "mkdir -p dist && bun build src/background.ts src/popup.ts --outdir dist --target=browser --format=esm && cp manifest.json popup.html popup.css dist/",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run typecheck"
+  },
+  "dependencies": {
+    "@curve-ai/radius-browser-protocol": "0.0.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.1.26",
+    "typescript": "5.9.3"
+  }
+}

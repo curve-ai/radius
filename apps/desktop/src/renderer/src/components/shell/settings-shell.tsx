@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Cloud, Search, Settings, SunMoon } from "lucide-react";
+import {
+  ArrowLeft,
+  Bell,
+  Info,
+  Plug,
+  Search,
+  Settings,
+  ShieldCheck,
+  SunMoon,
+} from "lucide-react";
 
+import {
+  ActionToolPanelButton,
+  ActionToolPanelItemContent,
+  ActionToolPanelItemIcon,
+  ActionToolPanelItemLabel,
+} from "@renderer/components/ui/action-tool-panel";
 import { cn } from "@renderer/lib/utils";
 import {
   SETTINGS_SECTIONS,
@@ -10,12 +25,12 @@ import {
 
 const settingsNavigation = [
   {
-    group: "Workspace",
+    group: "Personal",
     items: [
       {
         id: SETTINGS_SECTIONS.general.id,
         label: SETTINGS_SECTIONS.general.label,
-        keywords: "local storage platform",
+        keywords: "preferences settings",
         icon: Settings,
       },
       {
@@ -27,13 +42,42 @@ const settingsNavigation = [
     ],
   },
   {
-    group: "Connections",
+    group: "Work",
     items: [
       {
-        id: SETTINGS_SECTIONS.dataSync.id,
-        label: SETTINGS_SECTIONS.dataSync.label,
-        keywords: "cloud provider backup sessions artifacts",
-        icon: Cloud,
+        id: SETTINGS_SECTIONS.permissions.id,
+        label: SETTINGS_SECTIONS.permissions.label,
+        keywords: "approval access files internet agent restrictions",
+        icon: ShieldCheck,
+      },
+      {
+        id: SETTINGS_SECTIONS.notifications.id,
+        label: SETTINGS_SECTIONS.notifications.label,
+        keywords: "task completed approval scheduled background alerts",
+        icon: Bell,
+      },
+    ],
+  },
+  {
+    group: "Integrations",
+    items: [
+      {
+        id: SETTINGS_SECTIONS.apps.id,
+        label: SETTINGS_SECTIONS.apps.label,
+        keywords:
+          "apps connectors agents browser Chrome tabs connections permissions scopes",
+        icon: Plug,
+      },
+    ],
+  },
+  {
+    group: "Support",
+    items: [
+      {
+        id: SETTINGS_SECTIONS.about.id,
+        label: SETTINGS_SECTIONS.about.label,
+        keywords: "version updates release notes license help feedback",
+        icon: Info,
       },
     ],
   },
@@ -131,14 +175,14 @@ export function SettingsShell({
 
       <aside className="radius-settings-sidebar-material relative z-10 flex h-full w-72 shrink-0 flex-col border-r border-sidebar-border px-3 text-sidebar-foreground">
         <div className="electron-window-drag absolute inset-x-0 top-0 h-8" />
-        <button
-          type="button"
-          className="mt-12 flex h-9 w-fit items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/50"
-          onClick={onBack}
-        >
-          <ArrowLeft className="size-4" aria-hidden />
-          Back to Radius
-        </button>
+        <ActionToolPanelButton type="button" className="mt-12" onClick={onBack}>
+          <ActionToolPanelItemIcon>
+            <ArrowLeft aria-hidden />
+          </ActionToolPanelItemIcon>
+          <ActionToolPanelItemContent>
+            <ActionToolPanelItemLabel>Back to Radius</ActionToolPanelItemLabel>
+          </ActionToolPanelItemContent>
+        </ActionToolPanelButton>
 
         <label className="relative mt-4 block">
           <Search

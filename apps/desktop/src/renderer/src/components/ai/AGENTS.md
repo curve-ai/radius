@@ -37,26 +37,85 @@
   states. Attachment, access, and agent selection remain semantic, focusable
   buttons whose effects are supplied by typed callbacks. Effectful submit
   actions stay disabled until their required state and callback are available.
-- Composer footer controls share one 32px height and vertical center. The send
-  action stays visibly disabled for an empty draft. Center project-strip
+- Composer footer controls share one vertical center. Below 640px, attachment,
+  access, agent, and send remain available as 28px icon-only controls with
+  accessible labels and titles. At 640px and above, they return to the 32px
+  treatment; access and agent show their standard 14px interface labels. The
+  send action stays visibly disabled for an empty draft. Center project-strip
   contents as one row and align their inset with the composer's content column.
 - Access selection exposes only supported policies; do not show placeholder
-  policy choices. Agent selection lists caller-provided connected agents
-  directly without model/effort configuration submenus.
+  policy choices. Agent selection uses `ComposerSelectionPanel`: its first
+  surface lists compact selection categories. For categories with two or more
+  options, click, Enter, or Space cycles to the next option without closing the
+  first panel; hover or ArrowRight opens the complete side list. Both surfaces force a
+  4px outer inset and use single-line 36px rows with 8px inline padding. This
+  selector intentionally omits the icon element required by tool-action rows,
+  along with option subtitles and a redundant flyout heading. Its side flyout
+  opens to the right with its vertical center aligned to the category row only
+  when at least two choices exist. Zero or one choice renders a static category
+  row without a chevron or hover behavior. With zero Agent choices, replace the
+  trailing value with the link-variant setup-guide button inside that row.
+  Secondary values remain muted through hover and focus instead of inheriting
+  the row's primary foreground color. Agent lists only caller-provided
+  available agents and accepts
+  a caller-provided empty-state guide link. Render that guide as a link-variant
+  `Button`, not a selectable row. Product callers may omit that action when the
+  primary Agents destination owns status and authentication. Render Model only
+  when the selected agent advertises at least one model. Render Thinking effort
+  only when the selected model advertises supported levels through the desktop
+  runtime contract. Reset it to that model's declared default when Agent or
+  Model changes, and send the selected value with the next prompt.
+  When a category's selected value changes while the first panel remains open,
+  animate only that trailing value with the shared 2px/160ms state-transition
+  treatment. Reduced motion uses a 100ms opacity-only crossfade. Keep the
+  accessible current value outside overlapping visual transition nodes.
+  The collapsed desktop trigger shows Model and Thinking effort as muted
+  metadata when both are resolved. With exactly one available Agent, omit its
+  redundant visible name in that state. Keep the Agent name when multiple
+  Agents are available or either configuration value is unavailable. The
+  accessible label always includes every known Agent, Model, and Thinking
+  effort value. Mobile remains icon-only.
+  Composer popover titles use the 14px label scale, and leading/trailing icons
+  center against the full option row rather than its first text line. The access
+  popover inherits the shared 4px outer inset and adds a 4px header inset for an
+  8px total header edge. Option backgrounds start at the
+  outer inset, while 6px leading
+  and 8px trailing row padding align the shared icon wrapper and check with the
+  header. Its optional Learn more action accepts a caller-provided URL. The
+  workspace page resolves public Cloud URLs from `VITE_RADIUS_CLOUD_WEB_URL`.
 - `ComposerContextMenu` owns the reusable popover geometry for contextual
   choices that open above the composer. Callers own its data and actions. Build
   interactive menu rows from the complete `ActionToolPanelButton`, icon,
   content, label, and optional metadata composition so composer menus and the
   right-side tool panel keep one row grammar. The menu surface is a compact
   `bg-background` canvas with one quiet outer border; separate groups with
-  labels and spacing, not divider hairlines. Keep the surface flush with its
-  composer trigger.
+  labels and spacing, not divider hairlines. Keep a compact 4px separation from
+  its composer trigger.
+- Project context is optional. Prompt, attachment, access, and agent controls
+  remain available without a selected project; selecting one only scopes the
+  future session to its local root.
 - File previews are ephemeral UI. Revoke every object URL, support removal by
   keyboard and pointer, and never persist, upload, or read file contents in the
   presentation component. The owning page may make its full canvas a drop zone
   and passes accepted files into the composer. Renderer CSP permits `blob:`
   only for `img-src` so local image thumbnails can render; do not broaden that
-  exception to scripts, frames, connections, or other resource types.
+  exception to scripts, frames, connections, or other resource types. Tile
+  entry/exit uses opacity plus scale, while position-only layout motion bridges
+  reflow. Reduced motion keeps a 100ms opacity transition and disables movement.
 - Keep motion brief, purposeful, and compatible with reduced-motion settings.
 - Do not render or store raw chain-of-thought. Components may present concise
   reasoning summaries supplied by a trusted caller.
+- Session transcripts consume typed canonical events through caller-owned
+  read APIs. Group run activity without replacing event order, keep final
+  messages outside collapsible traces, and honor provider-owned inline or
+  collapsible presentation records.
+- Show the pixel-grid thinking indicator only for a real non-terminal run.
+  Reduced motion freezes its pixels while elapsed time may continue to update.
+- Completed assistant messages expose the working Copy markdown action. When a
+  canonical plan completes, place its quiet completion status beside Copy on
+  the run summary when one is identified, otherwise on the run's last final
+  assistant message. Do not add retry, voting, reaction, or other no-op message
+  controls.
+- While a canonical plan is active, show only its compact current-step status
+  above the session composer. Reveal the complete item list on pointer hover or
+  keyboard focus; never add code-diff counts or coding-client language.

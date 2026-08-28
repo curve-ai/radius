@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Radius Browser",
+  "description": "Let installed Radius agents use authenticated tabs through the Radius permission broker.",
+  "version": "0.0.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAn6E8nasG8Ay/mxPJ7w++2n9N/A9jd9cEAFdRG0HpDQLV3HXm8avZywlKrmorBZkrd38KZLIZYSDlW7wAwjiYa3U8zpqNEAll5HQ645QQg/N6uSt79NXrI31nqrgpMMDvLzM7k7ZxiXDyWc6Jy/uOkU+WrWd4X4xMRuxBnpqL3nBDP/pIQ3WixRjfhCLLdNnogcyDN7wv8ZUgR7X/UmVdYVjEQ4VPq2B4LF4pPmY2tK6sZjU8Yg0/a+nXOjXrt1i74as1Cwn3QM8IvhYDQYYnDoxCH8zTk1CpPuwhIChv/OU/tfzfDCvnmYlt0TKi3L5KhjxtW7qVDugjJ259nhFjgQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "debugger",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Radius Browser",
+    "default_popup": "popup.html"
+  }
+}

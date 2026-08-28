@@ -17,8 +17,11 @@ export interface ActiveProjectSession {
 }
 
 export interface ProjectContextValue {
+  activateSession(sessionId: string): Promise<void>;
   activeProject: ProjectSidebarRecord | null;
   activeSession: ActiveProjectSession | null;
+  archiveSession(sessionId: string): Promise<void>;
+  clearActiveProject(): void;
   clearActiveSession(): void;
   editProject(projectId: string): void;
   error: string | null;
@@ -26,6 +29,8 @@ export interface ProjectContextValue {
   openCreateProjectDialog(): void;
   projects: ProjectSidebarRecord[];
   recents: RecentSessionRecord[];
+  isSessionUnread(sessionId: string): boolean;
+  markSessionsRead(sessionIds: readonly string[]): void;
   refresh(): Promise<void>;
   relinkProject(projectId: string): Promise<boolean>;
   revealProject(projectId: string): Promise<void>;

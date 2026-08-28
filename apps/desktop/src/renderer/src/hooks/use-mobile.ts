@@ -1,6 +1,8 @@
 import * as React from "react";
 
-const MOBILE_BREAKPOINT = 768;
+// Radius is a desktop application whose native window cannot be narrower than
+// 480px. Keep desktop navigation behavior across every supported window size.
+const MOBILE_BREAKPOINT = 480;
 
 export function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = React.useState(false);

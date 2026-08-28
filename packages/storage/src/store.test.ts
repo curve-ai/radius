@@ -27,6 +27,7 @@ import {
   projectFileVersions,
   projectRoots,
   projects,
+  sessionPins,
   sessions,
   syncDeliveries,
 } from "./schema.js";
@@ -39,6 +40,8 @@ import {
   listProjectSessions,
   listProjects,
   listRecentSessions,
+  listSessionTranscript,
+  setSessionArchived,
   setSessionPinned,
   updateProjectName,
 } from "./store.js";
@@ -164,6 +167,109 @@ test("writes a typed message, artifact, and sync change atomically", async () =>
       .select({ value: count() })
       .from(localChanges);
     assert.equal(changeCount?.value, 2);
+    assert.deepEqual(await listSessionTranscript(database, session.id), [
+      {
+        eventId,
+        sessionRevision: 2,
+        occurredAt: "2026-08-21T20:01:00.000Z",
+        agentRunId: null,
+        eventType: "message",
+        role: "assistant",
+        messageKind: "final",
+        status: "completed",
+        text: "Here is the report.",
+      },
+    ]);
+    assert.equal(
+      (await listRecentSessions(database, clientId))[0]?.lastAssistantMessageAt,
+      "2026-08-21T20:01:00.000Z",
+    );
+  });
+});
+
+test("projects canonical plans and step updates into the session transcript", async () => {
+  await withDatabase(async (database) => {
+    const session = await createSession(database, {
+      originClientInstanceId: clientId,
+      title: "Plan projection",
+      now: Date.parse("2026-08-24T18:00:00.000Z"),
+    });
+    const agentRunId = "bcd95039-4a82-4f29-9087-2f459f611d28";
+    const planId = "0c10b7c7-c04b-4f77-8f98-cae6001e4033";
+    const stepId = "645cb784-c83a-4b31-b91d-8c3f0d4ea9da";
+
+    await appendSessionEvent(database, {
+      eventId: "31084b72-5538-4d69-84ed-a3fdf11aa909",
+      sessionId: session.id,
+      sessionRevision: 2,
+      sourceClientInstanceId: clientId,
+      agentRunId,
+      occurredAt: "2026-08-24T18:01:00.000Z",
+      artifactLinks: [],
+      eventType: "agent_run",
+      providerKey: "fx",
+      providerRunId: null,
+      triggeringMessageEventId: null,
+    });
+    await appendSessionEvent(database, {
+      eventId: "5e6faacb-1ef3-42ca-a7ab-64e455be5a66",
+      sessionId: session.id,
+      sessionRevision: 3,
+      sourceClientInstanceId: clientId,
+      agentRunId,
+      occurredAt: "2026-08-24T18:02:00.000Z",
+      artifactLinks: [],
+      eventType: "task_plan",
+      planId,
+      title: "Plan",
+      supersedesPlanId: null,
+      steps: [{ id: stepId, position: 0, title: "Render plan progress" }],
+    });
+    await appendSessionEvent(database, {
+      eventId: "1fb07302-09d9-43b5-810a-f0e124104c59",
+      sessionId: session.id,
+      sessionRevision: 4,
+      sourceClientInstanceId: clientId,
+      agentRunId,
+      occurredAt: "2026-08-24T18:03:00.000Z",
+      artifactLinks: [],
+      eventType: "task_step_update",
+      taskStepId: stepId,
+      state: "in_progress",
+      detail: "Matching the supplied reference",
+    });
+
+    assert.deepEqual(await listSessionTranscript(database, session.id), [
+      {
+        eventId: "31084b72-5538-4d69-84ed-a3fdf11aa909",
+        sessionRevision: 2,
+        occurredAt: "2026-08-24T18:01:00.000Z",
+        agentRunId,
+        eventType: "agent_run",
+        providerKey: "fx",
+      },
+      {
+        eventId: "5e6faacb-1ef3-42ca-a7ab-64e455be5a66",
+        sessionRevision: 3,
+        occurredAt: "2026-08-24T18:02:00.000Z",
+        agentRunId,
+        eventType: "task_plan",
+        planId,
+        title: "Plan",
+        supersedesPlanId: null,
+        steps: [{ id: stepId, position: 0, title: "Render plan progress" }],
+      },
+      {
+        eventId: "1fb07302-09d9-43b5-810a-f0e124104c59",
+        sessionRevision: 4,
+        occurredAt: "2026-08-24T18:03:00.000Z",
+        agentRunId,
+        eventType: "task_step_update",
+        taskStepId: stepId,
+        state: "in_progress",
+        detail: "Matching the supplied reference",
+      },
+    ]);
   });
 });
 
@@ -288,6 +394,12 @@ test("stores provider presentation separately from durable project file outcomes
     assert.equal(
       (await database.db.select().from(fileChanges))[0]?.operation,
       "create",
+    );
+    assert.deepEqual(
+      (await listSessionTranscript(database, session.id)).map(
+        (event) => event.eventType,
+      ),
+      ["agent_run", "message", "agent_run_presentation"],
     );
     assert.deepEqual(await listAgentRunFileOutcomes(database, agentRunId), [
       {
@@ -490,6 +602,40 @@ test("pins sessions locally without creating a sync change", async () => {
         pinned: true,
       }),
       /active session/,
+    );
+  });
+});
+
+test("archives a local-origin session and records the revision for sync", async () => {
+  await withDatabase(async (database) => {
+    const session = await createSession(database, {
+      originClientInstanceId: clientId,
+      title: "Archive this",
+      now: Date.parse("2026-08-22T17:00:00.000Z"),
+    });
+    await setSessionPinned(database, {
+      clientInstanceId: clientId,
+      sessionId: session.id,
+      pinned: true,
+      now: Date.parse("2026-08-22T17:01:00.000Z"),
+    });
+
+    const archived = await setSessionArchived(database, {
+      originClientInstanceId: clientId,
+      sessionId: session.id,
+      now: Date.parse("2026-08-22T17:02:00.000Z"),
+    });
+
+    assert.equal(archived.revision, 2);
+    assert.equal(archived.archivedAt, "2026-08-22T17:02:00.000Z");
+    assert.deepEqual(await listRecentSessions(database, clientId), []);
+    assert.equal((await database.db.select().from(sessionPins)).length, 0);
+    const changes = await database.db.select().from(localChanges);
+    assert.equal(changes.length, 2);
+    assert.equal(changes[1]?.kind, "session.upsert");
+    assert.match(
+      changes[1]?.payloadJson ?? "",
+      /\"archivedAt\":\"2026-08-22T17:02:00.000Z\"/,
     );
   });
 });

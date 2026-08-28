@@ -22,7 +22,9 @@ import {
 } from "react";
 
 import { attachmentFileKey } from "@renderer/components/ai/attachment-files";
+import { composerAgentTriggerPresentation } from "@renderer/components/ai/composer-agent-trigger";
 import { ComposerContextMenu } from "@renderer/components/ai/composer-context-menu";
+import { ComposerSelectionPanel } from "@renderer/components/ai/composer-selection-panel";
 import {
   ActionToolPanelButton,
   ActionToolPanelGroup,
@@ -33,6 +35,11 @@ import {
 } from "@renderer/components/ui/action-tool-panel";
 import { Button } from "@renderer/components/ui/button";
 import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+} from "@renderer/components/ui/motion";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -40,13 +47,26 @@ import {
 import { cn } from "@renderer/lib/utils";
 
 const MAX_TEXTAREA_HEIGHT_PX = 160;
-
+const ATTACHMENT_TRANSITION_EASE = [0.23, 1, 0.32, 1] as const;
+const ATTACHMENT_LAYOUT_EASE = [0.77, 0, 0.175, 1] as const;
 export type ChatAccessMode = "ask" | "full";
 
 export type ConnectedAgent = {
   id: string;
   label: string;
   detail?: string;
+};
+
+export type ConnectedModel = {
+  defaultThinkingEffortId?: string | null;
+  id: string;
+  label: string;
+  thinkingEfforts?: readonly ConnectedThinkingEffort[];
+};
+
+export type ConnectedThinkingEffort = {
+  id: string;
+  label: string;
 };
 
 export type ChatSubmission = {
@@ -56,11 +76,14 @@ export type ChatSubmission = {
 
 export type ChatComposerProps = {
   acceptedFileTypes?: string;
+  accessLearnMoreHref?: string;
   accessMode?: ChatAccessMode;
+  agentSetupGuideHref?: string;
   attachments?: readonly File[];
   autoFocus?: boolean;
   className?: string;
   connectedAgents?: readonly ConnectedAgent[];
+  connectedModels?: readonly ConnectedModel[];
   defaultAccessMode?: ChatAccessMode;
   defaultSelectedAgentId?: string;
   defaultValue?: string;
@@ -69,12 +92,16 @@ export type ChatComposerProps = {
   onAddAttachments?: (files: File[]) => void;
   onRemoveAttachment?: (index: number) => void;
   onSelectedAgentChange?: (agentId: string) => void;
+  onSelectedModelChange?: (modelId: string) => void;
+  onSelectedThinkingEffortChange?: (thinkingEffortId: string) => void;
   onSubmit?: (submission: ChatSubmission) => void;
   onValueChange?: (value: string) => void;
   placeholder?: string;
   selectedAgentId?: string;
+  selectedModelId?: string;
+  selectedThinkingEffortId?: string;
   value?: string;
-  workspaceLabel: string;
+  workspaceLabel?: string;
   workspaceMenu?: ReactNode;
 };
 
@@ -158,11 +185,14 @@ function AttachmentPreview({
 
 export function ChatComposer({
   acceptedFileTypes,
+  accessLearnMoreHref,
   accessMode,
+  agentSetupGuideHref,
   attachments = [],
   autoFocus = false,
   className,
   connectedAgents = [],
+  connectedModels = [],
   defaultAccessMode = "full",
   defaultSelectedAgentId,
   defaultValue = "",
@@ -171,19 +201,27 @@ export function ChatComposer({
   onAddAttachments,
   onRemoveAttachment,
   onSelectedAgentChange,
+  onSelectedModelChange,
+  onSelectedThinkingEffortChange,
   onSubmit,
   onValueChange,
   placeholder = "Do anything",
   selectedAgentId,
+  selectedModelId,
+  selectedThinkingEffortId,
   value,
   workspaceLabel,
   workspaceMenu,
 }: ChatComposerProps): ReactNode {
+  const reduceMotion = useReducedMotion();
   const promptId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [accessPopoverOpen, setAccessPopoverOpen] = useState(false);
   const [agentPopoverOpen, setAgentPopoverOpen] = useState(false);
+  const [openAgentSelectionItemId, setOpenAgentSelectionItemId] = useState<
+    string | null
+  >(null);
   const [uncontrolledAccessMode, setUncontrolledAccessMode] =
     useState<ChatAccessMode>(defaultAccessMode);
   const [uncontrolledAgentId, setUncontrolledAgentId] = useState<string | null>(
@@ -197,12 +235,31 @@ export function ChatComposer({
     connectedAgents.find((agent) => agent.id === resolvedAgentId) ??
     connectedAgents[0] ??
     null;
+  const selectedModel =
+    connectedModels.find((model) => model.id === selectedModelId) ??
+    connectedModels[0] ??
+    null;
+  const thinkingEfforts = selectedModel?.thinkingEfforts ?? [];
+  const selectedThinkingEffort =
+    thinkingEfforts.find((option) => option.id === selectedThinkingEffortId) ??
+    thinkingEfforts.find(
+      (option) => option.id === selectedModel?.defaultThinkingEffortId,
+    ) ??
+    thinkingEfforts[0] ??
+    null;
+  const agentTriggerPresentation = composerAgentTriggerPresentation({
+    agentCount: connectedAgents.length,
+    agentLabel: selectedAgent?.label ?? null,
+    modelLabel: selectedModel?.label ?? null,
+    thinkingEffortLabel: selectedThinkingEffort?.label ?? null,
+  });
   const hasSubmission = prompt.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasSubmission && Boolean(onSubmit) && !disabled;
   const selectedAccess =
     ACCESS_OPTIONS.find((option) => option.mode === selectedAccessMode) ??
     ACCESS_OPTIONS[1];
   const SelectedAccessIcon = selectedAccess.icon;
+  const hasWorkspaceBrow = Boolean(workspaceMenu || workspaceLabel);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -226,7 +283,14 @@ export function ChatComposer({
   const selectAgent = (agentId: string): void => {
     if (selectedAgentId === undefined) setUncontrolledAgentId(agentId);
     onSelectedAgentChange?.(agentId);
-    setAgentPopoverOpen(false);
+  };
+
+  const selectModel = (modelId: string): void => {
+    onSelectedModelChange?.(modelId);
+  };
+
+  const selectThinkingEffort = (thinkingEffortId: string): void => {
+    onSelectedThinkingEffortChange?.(thinkingEffortId);
   };
 
   const submitPrompt = (): void => {
@@ -275,37 +339,74 @@ export function ChatComposer({
         >
           {workspaceMenu}
         </ComposerContextMenu>
-      ) : (
+      ) : workspaceLabel ? (
         <div className="mx-4 flex h-10 items-center gap-2.5 rounded-t-[0.875rem] bg-muted px-4 text-foreground">
           <Folder className="size-3.5 shrink-0" aria-hidden />
           <span className="min-w-0 truncate text-sm leading-5">
             {workspaceLabel}
           </span>
         </div>
-      )}
+      ) : null}
 
       <form
-        className="relative -mt-1 flex min-h-[6.5rem] flex-col rounded-[1.25rem] border border-border bg-background shadow-lg transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-xl"
+        className={cn(
+          "relative flex min-h-24 flex-col rounded-[1.25rem] border border-border bg-background shadow-sm transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-md sm:min-h-[6.5rem]",
+          hasWorkspaceBrow && "-mt-1",
+        )}
         onSubmit={handleSubmit}
       >
-        {attachments.length > 0 ? (
-          <div
-            className="flex flex-wrap gap-2 px-4 pt-4"
-            aria-label="Attached files"
-          >
+        <div
+          className={cn(
+            "flex flex-wrap gap-2 px-4",
+            attachments.length > 0 && "pt-4",
+          )}
+          aria-label="Attached files"
+        >
+          <AnimatePresence initial={false} mode="popLayout">
             {attachments.map((file, index) => (
-              <AttachmentPreview
+              <motion.div
                 key={attachmentFileKey(file)}
-                file={file}
-                onRemove={
-                  onRemoveAttachment
-                    ? () => onRemoveAttachment(index)
-                    : undefined
-                }
-              />
+                layout={reduceMotion === true ? false : "position"}
+                initial={{
+                  opacity: 0,
+                  transform: reduceMotion === true ? "scale(1)" : "scale(0.96)",
+                }}
+                animate={{ opacity: 1, transform: "scale(1)" }}
+                exit={{
+                  opacity: 0,
+                  transform: reduceMotion === true ? "scale(1)" : "scale(0.96)",
+                  transition: {
+                    duration: 0.12,
+                    ease: ATTACHMENT_TRANSITION_EASE,
+                  },
+                }}
+                transition={{
+                  opacity: {
+                    duration: reduceMotion === true ? 0.1 : 0.16,
+                    ease: ATTACHMENT_TRANSITION_EASE,
+                  },
+                  transform: {
+                    duration: reduceMotion === true ? 0.1 : 0.16,
+                    ease: ATTACHMENT_TRANSITION_EASE,
+                  },
+                  layout: {
+                    duration: 0.18,
+                    ease: ATTACHMENT_LAYOUT_EASE,
+                  },
+                }}
+              >
+                <AttachmentPreview
+                  file={file}
+                  onRemove={
+                    onRemoveAttachment
+                      ? () => onRemoveAttachment(index)
+                      : undefined
+                  }
+                />
+              </motion.div>
             ))}
-          </div>
-        ) : null}
+          </AnimatePresence>
+        </div>
 
         <label htmlFor={promptId} className="sr-only">
           Message Radius
@@ -318,12 +419,12 @@ export function ChatComposer({
           value={prompt}
           disabled={disabled}
           placeholder={placeholder}
-          className="min-h-14 w-full resize-none overflow-y-auto bg-transparent px-4 pb-2 pt-3.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/45 disabled:cursor-not-allowed"
+          className="min-h-12 w-full resize-none overflow-y-auto bg-transparent px-4 pb-2 pt-3.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/45 disabled:cursor-not-allowed sm:min-h-14"
           onChange={(event) => updatePrompt(event.target.value)}
           onKeyDown={handleKeyDown}
         />
 
-        <div className="mt-auto flex h-12 shrink-0 items-center gap-1 px-2">
+        <div className="mt-auto flex h-10 shrink-0 items-center gap-1 px-1.5 sm:h-12 sm:px-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -344,10 +445,10 @@ export function ChatComposer({
             aria-label="Attach files"
             title="Attach files"
             disabled={disabled || !onAddAttachments}
-            className="size-8 shrink-0"
+            className="size-7 shrink-0 sm:size-8"
             onClick={() => fileInputRef.current?.click()}
           >
-            <Paperclip className="size-4" aria-hidden />
+            <Paperclip className="size-3.5 sm:size-4" aria-hidden />
           </Button>
 
           <Popover open={accessPopoverOpen} onOpenChange={setAccessPopoverOpen}>
@@ -356,12 +457,16 @@ export function ChatComposer({
                 type="button"
                 variant="ghost"
                 size="sm"
-                aria-label="Change access level"
+                aria-label={`Access: ${selectedAccess.label}`}
+                title={`Access: ${selectedAccess.label}`}
                 disabled={disabled}
-                className="h-8 px-2.5 text-xs text-negative data-[state=open]:bg-negative/8 hover:bg-negative/8 hover:text-negative"
+                className="size-7 shrink-0 p-0 text-negative data-[state=open]:bg-negative/8 hover:bg-negative/8 hover:text-negative sm:h-8 sm:w-auto sm:px-2.5 sm:text-sm sm:font-normal"
               >
-                <SelectedAccessIcon className="size-4" aria-hidden />
-                {selectedAccess.label}
+                <SelectedAccessIcon
+                  className="size-3.5 sm:size-4"
+                  aria-hidden
+                />
+                <span className="hidden sm:inline">{selectedAccess.label}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent
@@ -369,12 +474,24 @@ export function ChatComposer({
               align="start"
               sideOffset={8}
               collisionPadding={12}
-              className="w-[32rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] p-2"
+              className="w-[32rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem]"
             >
-              <ActionToolPanelGroupLabel className="px-2 pb-2 pt-1 text-xs">
-                How should Radius actions be approved?
-              </ActionToolPanelGroupLabel>
-              <ActionToolPanelGroup className="space-y-1 p-0">
+              <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
+                <ActionToolPanelGroupLabel className="p-0 text-sm">
+                  How should Radius actions be approved?
+                </ActionToolPanelGroupLabel>
+                {accessLearnMoreHref ? (
+                  <a
+                    href={accessLearnMoreHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 rounded-sm text-sm text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    Learn more
+                  </a>
+                ) : null}
+              </div>
+              <ActionToolPanelGroup className="gap-1 p-0 -mx-1">
                 {ACCESS_OPTIONS.map((option) => {
                   const selected = option.mode === selectedAccessMode;
                   const OptionIcon = option.icon;
@@ -384,12 +501,18 @@ export function ChatComposer({
                       type="button"
                       aria-pressed={selected}
                       className={cn(
-                        "items-start gap-3 rounded-md px-2 py-2.5",
+                        "items-center gap-3 rounded-md py-2 px-2",
                         option.mode === "full" && "text-negative",
                       )}
                       onClick={() => selectAccessMode(option.mode)}
                     >
-                      <ActionToolPanelItemIcon className="mt-0.5 text-inherit">
+                      <ActionToolPanelItemIcon
+                        className={cn(
+                          option.mode === "full"
+                            ? "text-negative"
+                            : "text-foreground",
+                        )}
+                      >
                         <OptionIcon aria-hidden />
                       </ActionToolPanelItemIcon>
                       <ActionToolPanelItemContent>
@@ -411,7 +534,13 @@ export function ChatComposer({
                         </span>
                       </ActionToolPanelItemContent>
                       {selected ? (
-                        <Check className="mt-0.5 size-4 shrink-0" aria-hidden />
+                        <Check
+                          className={cn(
+                            "size-4 shrink-0",
+                            option.mode === "full" && "text-negative",
+                          )}
+                          aria-hidden
+                        />
                       ) : null}
                     </ActionToolPanelButton>
                   );
@@ -421,82 +550,110 @@ export function ChatComposer({
           </Popover>
 
           <div className="ml-auto flex min-w-0 items-center gap-1">
-            <Popover open={agentPopoverOpen} onOpenChange={setAgentPopoverOpen}>
+            <Popover
+              open={agentPopoverOpen}
+              onOpenChange={(nextOpen) => {
+                setAgentPopoverOpen(nextOpen);
+                if (!nextOpen) setOpenAgentSelectionItemId(null);
+              }}
+            >
               <PopoverTrigger asChild>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  aria-label="Select agent"
+                  aria-label={agentTriggerPresentation.accessibleLabel}
+                  title={agentTriggerPresentation.accessibleLabel}
                   disabled={disabled}
-                  className="hidden h-8 min-w-0 gap-1 px-2 text-xs text-muted-foreground sm:inline-flex"
+                  className="group/agent-trigger inline-flex size-7 shrink-0 p-0 text-muted-foreground sm:h-8 sm:w-auto sm:min-w-0 sm:gap-1 sm:px-2 sm:text-sm sm:font-normal"
                 >
-                  {selectedAgent ? (
-                    <>
-                      <span className="truncate text-foreground">
-                        {selectedAgent.label}
-                      </span>
-                      {selectedAgent.detail ? (
-                        <span>{selectedAgent.detail}</span>
-                      ) : null}
-                    </>
-                  ) : (
-                    <span>Select agent</span>
-                  )}
-                  <ChevronDown className="ml-0.5 size-3.5" aria-hidden />
+                  <Bot className="size-3.5 sm:hidden" aria-hidden />
+                  <span className="hidden min-w-0 items-center gap-1 sm:flex">
+                    {selectedAgent ? (
+                      <>
+                        {agentTriggerPresentation.showAgentLabel ? (
+                          <span className="min-w-0 truncate text-foreground">
+                            {selectedAgent.label}
+                          </span>
+                        ) : null}
+                        {agentTriggerPresentation.configurationLabel ? (
+                          <span className="min-w-0 truncate text-muted-foreground">
+                            {agentTriggerPresentation.configurationLabel}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span>Select agent</span>
+                    )}
+                    <ChevronDown
+                      className="ml-0.5 size-3.5 text-muted-foreground"
+                      aria-hidden
+                    />
+                  </span>
                 </Button>
               </PopoverTrigger>
-              <PopoverContent
-                side="top"
-                align="end"
-                sideOffset={8}
-                collisionPadding={12}
-                className="w-64 rounded-[1rem] p-2"
-              >
-                <ActionToolPanelGroupLabel className="px-2 pb-2 pt-1 text-xs">
-                  Connected agents
-                </ActionToolPanelGroupLabel>
-                {connectedAgents.length > 0 ? (
-                  <ActionToolPanelGroup className="space-y-1 p-0">
-                    {connectedAgents.map((agent) => {
-                      const selected = agent.id === selectedAgent?.id;
-                      return (
-                        <ActionToolPanelButton
-                          key={agent.id}
-                          type="button"
-                          aria-pressed={selected}
-                          className="gap-3 rounded-md px-2 py-2"
-                          onClick={() => selectAgent(agent.id)}
-                        >
-                          <ActionToolPanelItemIcon className="text-muted-foreground">
-                            <Bot aria-hidden />
-                          </ActionToolPanelItemIcon>
-                          <ActionToolPanelItemContent>
-                            <ActionToolPanelItemLabel className="truncate leading-5">
-                              {agent.label}
-                            </ActionToolPanelItemLabel>
-                            {agent.detail ? (
-                              <span className="block truncate text-xs leading-4 text-muted-foreground">
-                                {agent.detail}
-                              </span>
-                            ) : null}
-                          </ActionToolPanelItemContent>
-                          {selected ? (
-                            <Check
-                              className="size-4 shrink-0 text-muted-foreground"
-                              aria-hidden
-                            />
-                          ) : null}
-                        </ActionToolPanelButton>
-                      );
-                    })}
-                  </ActionToolPanelGroup>
-                ) : (
-                  <p className="px-2 py-3 text-sm text-muted-foreground">
-                    No connected agents
-                  </p>
-                )}
-              </PopoverContent>
+              <ComposerSelectionPanel
+                openItemId={openAgentSelectionItemId}
+                onOpenItemChange={setOpenAgentSelectionItemId}
+                onRequestClose={() => {
+                  setOpenAgentSelectionItemId(null);
+                  setAgentPopoverOpen(false);
+                }}
+                items={[
+                  {
+                    id: "agent",
+                    label: "Agent",
+                    valueLabel: selectedAgent?.label ?? "No available agents",
+                    options: connectedAgents.map((agent) => ({
+                      id: agent.id,
+                      label: agent.label,
+                    })),
+                    selectedOptionId: selectedAgent?.id ?? null,
+                    onSelect: selectAgent,
+                    emptyState: {
+                      actionLabel: "Open setup guide",
+                      actionHref: agentSetupGuideHref,
+                    },
+                  },
+                  ...(selectedAgent && connectedModels.length > 0
+                    ? [
+                        {
+                          id: "model",
+                          label: "Model",
+                          valueLabel: selectedModel?.label ?? "Default",
+                          options: connectedModels.map((model) => ({
+                            id: model.id,
+                            label: model.label,
+                          })),
+                          selectedOptionId: selectedModel?.id ?? null,
+                          onSelect: selectModel,
+                          emptyState: {
+                            actionLabel: "Use agent default",
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(selectedModel && thinkingEfforts.length > 0
+                    ? [
+                        {
+                          id: "thinking-effort",
+                          label: "Thinking effort",
+                          valueLabel:
+                            selectedThinkingEffort?.label ?? "Default",
+                          options: thinkingEfforts.map((option) => ({
+                            id: option.id,
+                            label: option.label,
+                          })),
+                          selectedOptionId: selectedThinkingEffort?.id ?? null,
+                          onSelect: selectThinkingEffort,
+                          emptyState: {
+                            actionLabel: "Use model default",
+                          },
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             </Popover>
 
             <Button
@@ -507,9 +664,9 @@ export function ChatComposer({
                 canSubmit ? "Send message" : "Sending is not available yet"
               }
               disabled={!canSubmit}
-              className="size-8 shrink-0 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+              className="size-7 shrink-0 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 sm:size-8"
             >
-              <ArrowUp className="size-4" aria-hidden />
+              <ArrowUp className="size-3.5 sm:size-4" aria-hidden />
             </Button>
           </div>
         </div>

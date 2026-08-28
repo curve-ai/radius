@@ -167,7 +167,7 @@
   --card-foreground: #25241d;
   --card-02: #eceae3; /* card-02 (between card-01 and card-03) */
   --card-03: #e7e5de; /* stronger static surface */
-  --popover: #f3f1eb; /* card surface (flyouts) */
+  --popover: #ffffff; /* elevated menus and flyouts use the white canvas */
   --popover-foreground: #25241d;
   --primary: #25241d; /* button-bg = fg (ink) */
   --primary-foreground: #ffffff; /* button-text = bg */
@@ -199,8 +199,12 @@
   --sidebar-foreground: #25241d;
   --sidebar-primary: #25241d;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-accent: color-mix(
+    in oklab,
+    var(--sidebar-foreground) 8%,
+    transparent
+  );
+  --sidebar-accent-foreground: var(--sidebar-foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: #25241d;
 
@@ -366,8 +370,8 @@
   --sidebar-foreground: #eeedeb;
   --sidebar-primary: #eeedeb;
   --sidebar-primary-foreground: #15130c;
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-accent: color-mix(in oklab, var(--background) 24%, transparent);
+  --sidebar-accent-foreground: var(--sidebar-foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: #948e82;
 
@@ -493,8 +497,94 @@
   --chart-bar-stroke: rgba(0, 0, 0, 0.5);
 }
 
+@keyframes radius-thinking-pixel-on {
+  0%,
+  45%,
+  100% {
+    opacity: 0.14;
+    transform: scale(1);
+  }
+  20% {
+    opacity: 0.82;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes radius-thinking-label-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.radius-thinking-pixel {
+  opacity: 0.14;
+}
+
+.radius-thinking-label {
+  color: var(--muted-foreground);
+}
+
+.radius-workspace-timeline-scope {
+  timeline-scope: --radius-workspace-scroll;
+}
+
+.radius-workspace-scroll-timeline {
+  scroll-timeline: --radius-workspace-scroll block;
+}
+
+@keyframes radius-collapsing-header-title {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.radius-collapsing-header-title {
+  opacity: 0;
+  transform: translate3d(0, 4px, 0);
+  animation-name: radius-collapsing-header-title;
+  animation-duration: 1ms;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: --radius-workspace-scroll;
+  animation-range: 24px 72px;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .radius-thinking-pixel {
+    animation: radius-thinking-pixel-on 650ms ease-in-out
+      var(--thinking-delay, 0ms) infinite;
+  }
+
+  .radius-thinking-label {
+    color: transparent;
+    background-image: linear-gradient(
+      90deg,
+      var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%
+    );
+    background-position: 100% 0;
+    background-size: 200% 100%;
+    background-clip: text;
+    animation: radius-thinking-label-shimmer 1.4s linear infinite;
+  }
+}
+
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
+  .radius-collapsing-header-title {
+    transform: none !important;
+  }
+
   .animate-appear,
   .animate-appear-zoom,
   .animate-shimmer,

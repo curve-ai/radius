@@ -1,11 +1,13 @@
 # Capability authorization logical model
 
-**Status:** Proposed for design review
+**Status:** Approved; implementation in progress
 
 **Date:** 2026-08-22
 
-**Implementation:** Not approved; no schema, migration, index, backfill, sync
-projection, or database change is authorized by this document.
+**Implementation:** Connector capability contracts, operations, providers,
+bindings, profile projections, the MCP client adapter, and required/optional
+agent availability resolution are implemented. Policy revisions, run snapshots,
+invocation approvals, and the guest MCP bridge remain in progress.
 
 ## Mission
 
@@ -21,6 +23,8 @@ exercise them. A capability descriptor sent to an agent is not bearer authority.
 ## Objectives
 
 - Record the capabilities requested by each immutable signed agent release.
+- Record whether an agent release supports the Radius MCP bridge through signed
+  manifest configuration or a bounded staging-time runtime probe.
 - Record which built-in and configured tool providers can implement those
   capabilities on one client instance.
 - Represent system, organization, and local-user policy without reducing access
@@ -78,7 +82,12 @@ exercise them. A capability descriptor sent to an agent is not bearer authority.
 
 **Agent-release request**
 : One operation requested by one immutable signed agent release. A request is a
-  prerequisite, never a grant.
+prerequisite, never a grant.
+
+**Agent tool interface**
+: A versioned host integration surface an agent can consume, such as the
+  Radius-managed MCP bridge. Support may be declared in the signed manifest or
+  reported by a bounded probe of the exact signed release during staging.
 
 **Tool provider**
 : A device-local configured executor, such as Radius's built-in filesystem or
@@ -118,12 +127,22 @@ Names below are candidate logical names, not approved physical table names.
 | `agent_release_revocations` | Release UUID | Revoking issuer, revocation time, stable reason code, optional evidence reference | At most one effective revocation per release. Revocation is append-only and does not edit the release. |
 | `agent_installations` | Opaque installation UUID | Client instance, agent identity, selected release, lifecycle state, installation/update times | At most one active installation of one agent identity on one client. Disable or uninstall rather than deleting referenced history. |
 | `agent_release_capability_requests` | Release plus capability-operation key | Required/optional requirement, manifest position if presentation order matters | One request per release and operation. Capability lists are rows, never a JSON or comma-delimited list. |
+| `agent_release_tool_interface_declarations` | Release plus tool-interface key | Interface kind, required/optional requirement, declaration source (`manifest` or `runtime_discovery`) | One declaration per release and interface. Absence means unsupported. |
+| `agent_release_tool_interface_versions` | Declaration plus protocol version | One accepted protocol version | Declaration plus protocol version is unique. Versions are rows, never a JSON list. |
+| `agent_installation_interface_probe_reports` | Opaque report UUID | Agent installation, exact release, interface kind and negotiated version, probe outcome, creation time | A successful report belongs to the selected release and current installation. Later probes supersede rather than edit evidence. |
+| `agent_installation_probe_capability_requests` | Probe report plus capability operation | Required/optional requirement reported by the runtime | One request per report and operation. Reports may request but never grant authority. |
 
 Capability-specific manifest data that Radius must authorize is modeled as a
 typed child subject. For example, declared network destinations are individual
 `agent_release_network_destination_requests` rows. Extension JSON may be kept
 only when it has a versioned validator and is not trusted as an authorization
 selector until the host adapter validates it.
+
+For a `manifest` declaration, the release capability requests are the
+provider's configured requirements. For `runtime_discovery`, the release
+declaration permits a bounded staging probe and the successful installation
+probe report supplies the device-local request set. Runtime discovery cannot
+introduce a capability contract or operation unknown to the host.
 
 ### Capability and provider subjects
 
@@ -189,8 +208,8 @@ populated dimension must match.
 | --- | --- | --- | --- |
 | `run_authorization_snapshots` | Opaque snapshot UUID | Agent run, positive snapshot revision, optional superseded snapshot, installation, exact agent release, creation time, canonical resolution hash | Run plus snapshot revision is unique. Revision 1 is initial; a refresh creates the next immutable revision rather than editing the old one. |
 | `run_authorization_policy_revisions` | Snapshot plus policy revision | Contribution kind and assignment specificity | Records every policy revision used by the resolver. |
-| `run_capability_authorizations` | Opaque authorization UUID | Snapshot, release request, exact tool binding, effect (`allow` or `ask`), capability/resource descriptor evidence | Snapshot plus request plus binding is unique. Only `allow` and `ask` entries are advertised as callable. |
-| `run_capability_denials` | Snapshot plus release request | Result (`deny` or `unavailable`) and stable reason code | One summary denial per requested operation when no binding is callable. Human-readable wording is derived for presentation. |
+| `run_capability_authorizations` | Opaque authorization UUID | Snapshot, exact manifest or probe request, exact tool binding, effect (`allow` or `ask`), capability/resource descriptor evidence | Snapshot plus request plus binding is unique. Only `allow` and `ask` entries are advertised as callable. |
+| `run_capability_denials` | Snapshot plus manifest or probe request | Result (`deny` or `unavailable`) and stable reason code | One summary denial per requested operation when no binding is callable. Human-readable wording is derived for presentation. |
 
 Typed child relationships record the local resources included by one run
 authorization, mirroring the policy resource relationships. The snapshot stores
@@ -225,7 +244,11 @@ revision; it never mutates the approval event into a reusable grant.
 | Agent identity to releases | One identity has zero or more releases; every release has exactly one identity | Restrict once a release is installed or referenced; use revocation. |
 | Agent release to revocation | A release has zero or one effective revocation; every revocation identifies exactly one release | Preserve with release history. |
 | Agent release to capability requests | One release has zero or more requests; every request has exactly one release and operation | Cascade only while an uninstalled draft is being imported; otherwise restrict through immutable release history. |
+| Agent release to tool-interface declarations | One release has zero or more declarations; every declaration belongs to one release | Cascade only while importing an uninstalled draft; otherwise restrict through release history. |
+| Tool-interface declaration to accepted versions | One declaration has one or more accepted versions; every version belongs to one declaration | Cascade only while importing an uninstalled draft; otherwise restrict. |
 | Client instance to agent installations | One client has zero or more installations; every installation belongs to exactly one client | Restrict while run or policy history exists; use disabled/uninstalled state. |
+| Agent installation to interface probe reports | One installation has zero or more immutable reports; every report belongs to one installation and exact release | Preserve reports used for availability or run evidence; supersede rather than edit. |
+| Interface probe report to capability requests | One successful report has zero or more requests; every request belongs to one report and operation | Preserve with the report; an unsuccessful report has no requests. |
 | Capability contract to operations | One contract has one or more operations; every operation has exactly one contract | Restrict after any manifest, policy, provider, or run reference exists. |
 | Tool provider to bindings | One provider has zero or more bindings; every binding has exactly one provider | Restrict after policy, run, or tool history; disable the provider/binding. |
 | Policy to revisions | One policy has one or more revisions; every revision has exactly one policy | Restrict assigned revisions; never cascade audit history. |
@@ -246,7 +269,9 @@ property on an agent or capability.
 
 A requested operation is `unavailable` unless all are true:
 
-1. The exact operation appears in the verified active release manifest.
+1. The exact operation appears in the verified active release manifest, or in
+   the latest successful bounded probe permitted by that release's signed
+   `runtime_discovery` declaration.
 2. The client has an enabled tool binding for the exact contract/schema version.
 3. Every required local resource exists and is linked on this client.
 4. Required credential-store entries exist and are usable.
@@ -255,6 +280,17 @@ A requested operation is `unavailable` unless all are true:
 
 Transient provider health is checked at invocation time. A stale health probe
 must not turn an unauthorized operation into an authorized one.
+
+Before an agent is offered for a new task, Radius resolves all `required`
+interface declarations and capability requests against the current device. An
+agent is not presented in the task picker when a required MCP interface or
+operation has no connected, healthy, compatible binding. Missing `optional`
+operations do not hide the agent; those operations are omitted from its
+handshake and connector-backed product affordances.
+
+An installed-agent management surface may still show an unavailable agent with
+the reason and a path to Connectors. Hiding from task selection must not make an
+installed package impossible to inspect, update, or delete.
 
 ### 2. Ceiling evaluation
 
@@ -325,13 +361,30 @@ may then issue a refreshed snapshot so the agent can adapt.
 
 ## Agent handshake
 
-The runtime derives a versioned handshake from the current run snapshot. A
+Agent-interface negotiation happens before the runtime receives tools:
+
+1. Radius reads the signed release's interface declaration.
+2. A `manifest` declaration provides the configured capability requests.
+3. A `runtime_discovery` declaration allows Radius to run the exact staged
+   release in a bounded describe mode and record its interface report.
+4. Radius intersects the resulting requests with ready local connector
+   bindings and policy.
+5. Radius registers the virtual MCP bridge only when at least one operation is
+   callable.
+
+The runtime then derives a versioned handshake from the current run snapshot. A
 representative shape is:
 
 ```json
 {
   "protocolVersion": 1,
   "authorizationRevision": "sha256:...",
+  "toolInterfaces": [
+    {
+      "kind": "radius.mcp",
+      "protocolVersion": "2026-07-28"
+    }
+  ],
   "capabilities": [
     {
       "key": "workspace.files",
@@ -377,6 +430,10 @@ The handshake never contains:
 - a durable token that can be reused by another run or agent;
 - capabilities the active release did not request.
 
+If no compatible connector-backed operation is callable, the handshake omits
+`radius.mcp` entirely. Radius does not register an empty MCP bridge or expose
+connector terminology to an agent that cannot use it.
+
 ## Structural versus application-enforced invariants
 
 ### Structural integrity
@@ -411,6 +468,12 @@ relationships or depend on runtime state:
   operating-system credential store.
 - Exactly one active release is selected for an enabled installation.
 - The selected release belongs to the installation's agent identity.
+- An interface probe runs only when the exact release has a signed
+  `runtime_discovery` declaration for that interface.
+- A successful interface probe reports one protocol version accepted by the
+  release declaration and belongs to the installation's selected release.
+- A probe capability request references a host-known operation. It cannot add a
+  new contract or schema definition.
 - A run snapshot evaluates the exact installed release used by the run.
 - A refreshed snapshot supersedes only the preceding snapshot of the same run.
 - Every provider, project root, and local resource in a run authorization
@@ -431,6 +494,7 @@ relationships or depend on runtime state:
 Remain local-only:
 
 - agent installations and selected local releases;
+- installation interface probe reports and runtime-discovered requests;
 - configured tool providers and credential-store references;
 - provider enablement and transient health;
 - project-root resource scopes and all absolute paths;
@@ -476,6 +540,15 @@ administration, and operated policy services remain Cloud responsibilities.
     evaluation still works; an expired mandatory organization assertion fails
     closed unless a separately approved public contract defines a bounded cached
     grace period.
+13. A release declares required `radius.mcp` support but the current device has
+    no connected compatible connector: the agent is absent from task selection
+    and remains visible only in agent management with a connector-required
+    explanation.
+14. A release declares optional `radius.mcp` support with no ready connector:
+    the agent remains selectable and receives no MCP bridge or connector tools.
+15. A release selects `runtime_discovery`: only a successful bounded probe of
+    the exact active release may supply requests, and every request still passes
+    operation-level policy and binding resolution.
 
 ## Decisions proposed for approval
 
@@ -494,6 +567,9 @@ administration, and operated policy services remain Cloud responsibilities.
    reauthorize every invocation.
 8. Keep authorization configuration local in v1; make any organization-policy
    delivery or authorization sync a separate public-contract proposal.
+9. Let signed agent releases declare MCP support through manifest configuration
+   or a bounded staging-time runtime probe, with required/optional presentation
+   behavior resolved against the current device.
 
 Approval of this logical direction would authorize a subsequent physical-schema
 proposal for review. It would not by itself authorize Drizzle edits, migration

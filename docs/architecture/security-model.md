@@ -18,6 +18,16 @@ The permission mode and approval policy are separate controls. Full Access may s
 
 Developer builds may expose Full Access for local testing. Distributed builds default to Auto, and organization policy may disable Full Access entirely.
 
+### Current local-alpha enforcement
+
+The first ACP desktop integration exposes Ask for approval and Full access in
+the existing composer while the complete policy resolver is still under
+review. Ask for approval currently cancels permission requests, so it fails
+closed rather than simulating an approval. Full access may select only an ACP
+`allow_once` option for the current operation. It never selects
+`allow_always`, persists a remembered grant, or bypasses the future capability
+broker. Distributed defaults remain governed by the policy above.
+
 ## Reference-product lesson
 
 Leading coding agents do not depend on hiding the local harness:
@@ -43,7 +53,7 @@ Untrusted or inspectable
 Trusted enforcement
 ├── signed workspace host
 ├── capability and approval broker
-├── OS and VM isolation
+├── OS and per-agent microVM isolation
 ├── image signature verification
 ├── scoped credential issuer
 └── vendor authorization service
@@ -138,9 +148,9 @@ Hard prohibitions:
 
 A trusted package and a directory of mutually untrusted publishers have different threat models.
 
-Before accepting untrusted publishers, add:
+Every macOS agent package runs in a separate lightweight VM. Before accepting
+untrusted publishers, also add:
 
-- Stronger per-publisher isolation, likely separate microVMs.
 - Publisher verification and incident-response requirements.
 - Mandatory SBOM and provenance attestations.
 - Automated malware and vulnerability scanning.

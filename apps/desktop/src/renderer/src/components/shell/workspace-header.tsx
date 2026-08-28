@@ -7,12 +7,18 @@ import { cn } from "@renderer/lib/utils";
 import { WorkspaceToolPanelTrigger } from "./workspace-tool-panel";
 
 export function WorkspaceHeader({
+  collapsingTitle = false,
   minimal = false,
+  title,
+  toolPanelAvailable = true,
   toolPanelOpen,
   desktopToolPanelVisible,
   onToolPanelOpenChange,
 }: {
+  collapsingTitle?: boolean;
   minimal?: boolean;
+  title?: string;
+  toolPanelAvailable?: boolean;
   toolPanelOpen: boolean;
   desktopToolPanelVisible: boolean;
   onToolPanelOpenChange: (open: boolean) => void;
@@ -58,23 +64,33 @@ export function WorkspaceHeader({
             "electron-window-drag pointer-events-none absolute inset-y-0 left-0 right-0",
             titlebarControlsOverlapHeader &&
               "radius-workspace-header-drag-offset",
-            !minimal && "right-12",
+            !minimal && toolPanelAvailable && "right-12",
           )}
         />
         {minimal ? (
-          <span className="sr-only">{WORKSPACE_TITLES[activeView]}</span>
+          <span className="sr-only">
+            {title ?? WORKSPACE_TITLES[activeView]}
+          </span>
         ) : (
           <>
-            <span className="min-w-0 flex-1 truncate type-base text-foreground">
-              {WORKSPACE_TITLES[activeView]}
+            <span
+              aria-hidden={collapsingTitle ? "true" : undefined}
+              className={cn(
+                "min-w-0 flex-1 truncate type-base text-foreground",
+                collapsingTitle && "radius-collapsing-header-title",
+              )}
+            >
+              {title ?? WORKSPACE_TITLES[activeView]}
             </span>
-            <div className="electron-window-no-drag ml-2 shrink-0">
-              <WorkspaceToolPanelTrigger
-                desktopOpen={toolPanelOpen}
-                desktopVisible={desktopToolPanelVisible}
-                onDesktopOpenChange={onToolPanelOpenChange}
-              />
-            </div>
+            {toolPanelAvailable ? (
+              <div className="electron-window-no-drag ml-2 shrink-0">
+                <WorkspaceToolPanelTrigger
+                  desktopOpen={toolPanelOpen}
+                  desktopVisible={desktopToolPanelVisible}
+                  onDesktopOpenChange={onToolPanelOpenChange}
+                />
+              </div>
+            ) : null}
           </>
         )}
       </header>

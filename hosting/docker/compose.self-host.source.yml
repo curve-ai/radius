@@ -1,0 +1,26 @@
+# Build the Radius-owned images from the current checkout.
+# The released self-host distribution uses the GHCR images in the base file.
+services:
+  postgres:
+    image: radius-postgres:${RADIUS_VERSION:?set RADIUS_VERSION}
+    build:
+      context: ../..
+      dockerfile: hosting/postgres/Containerfile
+
+  platform-api:
+    image: radius-platform-api:${RADIUS_VERSION:?set RADIUS_VERSION}
+    build:
+      context: ../..
+      dockerfile: apps/platform-api/Dockerfile
+
+  platform-jobs:
+    image: radius-platform-jobs:${RADIUS_VERSION:?set RADIUS_VERSION}
+    build:
+      context: ../..
+      dockerfile: apps/platform-jobs/Dockerfile
+
+  platform-web:
+    image: radius-platform-web:${RADIUS_VERSION:?set RADIUS_VERSION}
+    build:
+      context: ../..
+      dockerfile: apps/platform-web/Dockerfile

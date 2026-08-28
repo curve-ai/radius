@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "agentId": "fx",
+  "providerId": "vercel-labs",
+  "displayName": "fx",
+  "releaseVersion": "0.0.5-radius.1",
+  "protocol": {
+    "kind": "acp-stdio",
+    "version": 1
+  },
+  "image": {
+    "reference": "radius.local/fx:0.0.5",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "platform": "linux/arm64",
+    "translation": "none"
+  },
+  "process": {
+    "arguments": ["/usr/local/bin/agent", "acp"],
+    "user": "10000:10000",
+    "statePath": "/opt/data"
+  },
+  "resources": {
+    "cpus": 2,
+    "memoryMb": 2048,
+    "rootfsMb": 256,
+    "stateMb": 1024,
+    "processLimit": 256,
+    "openFileLimit": 1024
+  },
+  "networkAllowlist": ["chatgpt.com", "auth.openai.com"],
+  "capabilities": [
+    "workspace.files.read",
+    "workspace.files.write",
+    "shell.execute",
+    "subagents.create"
+  ],
+  "authRequirements": [
+    {
+      "key": "codex-subscription",
+      "authority": {
+        "key": "openai-codex",
+        "purpose": "model_provider",
+        "issuer": "https://auth.openai.com",
+        "displayName": "Codex"
+      },
+      "flow": {
+        "key": "subscription-oauth",
+        "kind": "provider_native_oauth",
+        "publicClientId": null,
+        "audience": "https://chatgpt.com/backend-api/codex",
+        "deviceBindingSupported": false
+      },
+      "requirement": "required",
+      "portability": "device_only",
+      "runtimeDelivery": "agent_state_adapter",
+      "custodyKinds": ["encrypted_agent_state"],
+      "scopes": []
+    }
+  ],
+  "models": [],
+  "defaultModelId": null
+}

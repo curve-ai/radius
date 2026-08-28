@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Cloud, Database, HardDrive, List, Settings } from "lucide-react";
+import { Database, HardDrive, List } from "lucide-react";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import type { WorkspaceView } from "@renderer/components/shell/types";
@@ -38,24 +38,6 @@ function WorkspaceToolPanelContents({
   onNavigate: (view: WorkspaceView) => void;
   onCompactNavigate?: () => void;
 }): ReactNode {
-  const [syncState, setSyncState] = useState("Checking");
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.radius
-      .syncStatus()
-      .then((status) => {
-        if (!cancelled) setSyncState(status.state);
-      })
-      .catch(() => {
-        if (!cancelled) setSyncState("Unavailable");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const checks = [
     {
       label: "Runtime",
@@ -68,18 +50,6 @@ function WorkspaceToolPanelContents({
       value: "Ready",
       icon: Database,
       view: "artifacts",
-    },
-    {
-      label: "Cloud sync",
-      value: syncState,
-      icon: Cloud,
-      view: "settings",
-    },
-    {
-      label: "Platform",
-      value: window.radius.platform,
-      icon: Settings,
-      view: "settings",
     },
   ] satisfies Array<{
     label: string;

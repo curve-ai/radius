@@ -1,0 +1,9 @@
+FROM postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+
+LABEL org.opencontainers.image.title="Radius PostgreSQL"
+LABEL org.opencontainers.image.description="Pinned official PostgreSQL base for the self-hosted Radius Platform"
+LABEL org.opencontainers.image.source="https://github.com/curve-ai/radius"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# Keep this image equal to the official PostgreSQL base until an extension is
+# explicitly approved, added to extensions.lock, pinned, licensed, and verified.

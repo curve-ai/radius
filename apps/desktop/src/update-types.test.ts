@@ -18,7 +18,7 @@ const idleStatus: DesktopUpdateStatus = {
 
 describe("desktop update contract", () => {
   test("uses distinct IPC channels", () => {
-    assert.equal(new Set(Object.values(DESKTOP_UPDATE_CHANNELS)).size, 3);
+    assert.equal(new Set(Object.values(DESKTOP_UPDATE_CHANNELS)).size, 4);
   });
 
   test("normalizes progress to the integer percentage shown by the UI", () => {

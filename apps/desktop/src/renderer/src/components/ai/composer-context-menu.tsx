@@ -27,7 +27,7 @@ export function ComposerContextMenu({
       <PopoverContent
         side="top"
         align="start"
-        sideOffset={0}
+        sideOffset={4}
         collisionPadding={8}
         aria-label="Composer context"
         className={cn(

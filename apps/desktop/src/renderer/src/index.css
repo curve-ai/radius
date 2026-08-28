@@ -2,7 +2,7 @@ html,
 body,
 #root {
   width: 100%;
-  min-width: 720px;
+  min-width: 480px;
   height: 100%;
   margin: 0;
   overflow: hidden;
@@ -80,9 +80,9 @@ html[data-platform="darwin"] .radius-sidebar-material,
 html[data-platform="darwin"] .radius-settings-sidebar-material {
   background: linear-gradient(
     90deg,
-    color-mix(in oklab, var(--sidebar) 18%, transparent) 0%,
-    color-mix(in oklab, var(--sidebar) 48%, transparent) 55%,
-    color-mix(in oklab, var(--sidebar) 92%, transparent) 100%
+    color-mix(in oklab, var(--sidebar) 8%, transparent) 0%,
+    color-mix(in oklab, var(--sidebar) 24%, transparent) 55%,
+    color-mix(in oklab, var(--sidebar) 64%, transparent) 100%
   );
 }
 
@@ -90,10 +90,17 @@ html[data-platform="darwin"] .radius-settings-sidebar-material {
 .dark[data-platform="darwin"] .radius-settings-sidebar-material {
   background: linear-gradient(
     90deg,
-    color-mix(in oklab, var(--sidebar) 28%, transparent) 0%,
-    color-mix(in oklab, var(--sidebar) 58%, transparent) 55%,
-    color-mix(in oklab, var(--sidebar) 92%, transparent) 100%
+    color-mix(in oklab, var(--sidebar) 12%, transparent) 0%,
+    color-mix(in oklab, var(--sidebar) 30%, transparent) 55%,
+    color-mix(in oklab, var(--sidebar) 70%, transparent) 100%
   );
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-platform="darwin"] .radius-sidebar-material,
+  html[data-platform="darwin"] .radius-settings-sidebar-material {
+    background: var(--sidebar);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

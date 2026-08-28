@@ -55,7 +55,9 @@ The future contract must support concepts such as:
 - Explicit context references and requested output.
 - User-approved data transfer between agents.
 
-The detailed SDK schema is intentionally deferred until the single-agent runtime contract is validated.
+The proposed SDK and CLI developer contract is documented in
+[`../agent-sdk-and-cli.md`](../agent-sdk-and-cli.md). Its concrete TypeScript
+surface remains subject to validation against the single-agent runtime.
 
 ## Options considered
 
@@ -102,4 +104,5 @@ This option is rejected. It would double protocol, authentication, debugging, ev
 - The platform must not depend on raw chain-of-thought.
 - Progress should use plans, summaries, and typed tool events.
 - Cross-agent orchestration remains a later product phase.
-- The SDK task schema is a future design exercise rather than an alpha blocker.
+- The proposed SDK task schema is not an alpha blocker and must be validated
+  against the real single-agent runtime before implementation is accepted.

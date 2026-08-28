@@ -1,0 +1,165 @@
+@utility glass-1 {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 255, 0.7));
+  backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(209, 213, 219, 0.4);
+  box-shadow:
+    0 4px 24px -2px rgba(0, 0, 0, 0.06),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.03);
+
+  @apply dark:border-border/10 dark:border-b-border/5 dark:border-t-border/20 dark:from-card/5 dark:to-card/0 dark:bg-linear-to-b;
+}
+@utility glass-2 {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(240, 242, 255, 0.8));
+  backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(209, 213, 219, 0.3);
+  box-shadow:
+    0 6px 20px -2px rgba(0, 0, 0, 0.08),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.04);
+
+  @apply dark:border-border/10 dark:border-b-border/5 dark:border-t-border/20 dark:from-card/10 dark:to-card/5 dark:bg-linear-to-b;
+}
+@utility glass-3 {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(248, 250, 255, 0.5));
+  backdrop-filter: blur(10px) saturate(150%);
+  border: 1px solid rgba(209, 213, 219, 0.5);
+  box-shadow:
+    0 2px 12px -2px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.02);
+
+  @apply dark:border-border/10 dark:border-t-border/20 dark:border-b-border/5 dark:from-primary/5 dark:to-primary/2 dark:bg-linear-to-b;
+}
+@utility glass-4 {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(240, 242, 255, 0.6));
+  backdrop-filter: blur(14px) saturate(170%);
+  border: 1px solid rgba(209, 213, 219, 0.4);
+  border-bottom: 1px solid rgba(156, 163, 175, 0.6);
+  box-shadow:
+    0 4px 16px -2px rgba(0, 0, 0, 0.07),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.04);
+
+  @apply dark:border-border/10 dark:border-t-border/30 dark:from-primary/10 dark:to-primary/5 dark:bg-linear-to-b dark:border-b-0;
+}
+@utility glass-5 {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 1), rgba(240, 242, 255, 0.7));
+  backdrop-filter: blur(18px) saturate(190%);
+  border: 1px solid rgba(209, 213, 219, 0.3);
+  border-bottom: 1px solid rgba(156, 163, 175, 0.5);
+  box-shadow:
+    0 8px 24px -4px rgba(0, 0, 0, 0.09),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.05);
+
+  @apply dark:border-border/10 dark:border-t-border/30 dark:from-primary/15 dark:to-primary/5 dark:bg-linear-to-b dark:border-b-0;
+}
+
+/* Text gradient utilities */
+@utility text-gradient-subtle {
+  background: linear-gradient(135deg, var(--foreground) 0%, var(--muted-foreground) 80%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@utility text-gradient-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary) 60%, var(--muted-foreground) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@utility text-gradient-brand {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--foreground) 70%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Complex shadow utilities */
+@utility shadow-tile {
+  box-shadow:
+    0 1px 2px -1px rgba(0, 0, 0, 0.02),
+    0 2px 4px -2px rgba(0, 0, 0, 0.03),
+    0 4px 8px -4px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(0, 0, 0, 0.01);
+}
+
+@utility shadow-tile-hover {
+  box-shadow:
+    0 2px 4px -1px rgba(0, 0, 0, 0.03),
+    0 4px 8px -2px rgba(0, 0, 0, 0.04),
+    0 8px 16px -4px rgba(0, 0, 0, 0.05),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
+}
+
+@utility shadow-elevated {
+  box-shadow:
+    0 4px 8px -2px rgba(0, 0, 0, 0.04),
+    0 8px 16px -4px rgba(0, 0, 0, 0.05),
+    0 16px 32px -8px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+}
+
+@utility shadow-floating {
+  box-shadow:
+    0 8px 16px -4px rgba(0, 0, 0, 0.06),
+    0 16px 32px -8px rgba(0, 0, 0, 0.07),
+    0 32px 64px -16px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(0, 0, 0, 0.02),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.01);
+}
+
+/* Fade effects */
+@utility fade-x {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 25%,
+    black 75%,
+    transparent 100%
+  );
+}
+@utility fade-y {
+  mask-image: linear-gradient(
+    to top,
+    transparent 0%,
+    black 25%,
+    black 75%,
+    transparent 100%
+  );
+}
+@utility fade-top {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 35%);
+}
+@utility fade-bottom {
+  mask-image: linear-gradient(to top, transparent 0%, black 35%);
+}
+@utility fade-top-lg {
+  mask-image: linear-gradient(to bottom, transparent 15%, black 100%);
+}
+@utility fade-bottom-lg {
+  mask-image: linear-gradient(to top, transparent 15%, black 100%);
+}
+@utility fade-left {
+  mask-image: linear-gradient(to right, transparent 0%, black 35%);
+}
+@utility fade-right {
+  mask-image: linear-gradient(to left, transparent 0%, black 35%);
+}
+@utility fade-left-lg {
+  mask-image: linear-gradient(to right, transparent 15%, black 100%);
+}
+@utility fade-right-lg {
+  mask-image: linear-gradient(to left, transparent 15%, black 100%);
+}
+
+/* Text size utilities */
+@utility text-xxs {
+  font-size: 10px;
+  line-height: 1.25;
+}

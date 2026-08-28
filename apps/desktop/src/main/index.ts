@@ -9,17 +9,30 @@ import {
 import path from "node:path";
 
 import { DESKTOP_UPDATE_CHANNELS } from "../update-types";
+import { initializeBundledAgents } from "./bundled-agents";
+import {
+  cancelAgentSession,
+  connectAgentAuthentication,
+  disconnectAgentAuthentication,
+  getDesktopRuntimeStatus,
+  listDesktopAgents,
+  startAgentPrompt,
+  stopAgentRuntime,
+} from "./agent-runtime";
 import { closeStorage, initializeStorage } from "./storage";
+import { reportPlatformClientInstallation } from "./platform-reporting";
 import {
   chooseProjectFolderForRenderer,
   createProjectFromSelection,
   discardProjectFolderSelection,
   listProjectSidebar,
   listRecentSidebar,
+  listSessionTranscriptForRenderer,
   renameProjectFromRenderer,
   revealProjectInFinder,
   relinkProjectFolder,
   setSessionPinnedFromRenderer,
+  setSessionArchivedFromRenderer,
 } from "./projects";
 import { initializeScheduler, stopScheduler } from "./scheduler";
 import {
@@ -31,22 +44,64 @@ import {
   stopSync,
 } from "./sync";
 import {
+  checkDesktopUpdate,
   getDesktopUpdateStatus,
   initializeDesktopUpdater,
   performDesktopUpdate,
   stopDesktopUpdater,
 } from "./updater";
+import {
+  deleteConnectorForRenderer,
+  disconnectConnectorForRenderer,
+  initializeConnectorRegistry,
+  installConnectorForRenderer,
+  listConnectorToolsForRenderer,
+  listConnectorsForRenderer,
+} from "./connectors";
+import {
+  installCatalogConnectorForRenderer,
+  listConnectorCatalogForRenderer,
+} from "./connector-catalog";
+import {
+  getBrowserConnectionStatus,
+  initializeBrowserBridge,
+  revealBrowserExtension,
+  stopBrowserBridge,
+} from "./browser-bridge";
 
 const requestedUserDataPath = process.env.RADIUS_USER_DATA_PATH?.trim();
 if (requestedUserDataPath) {
   app.setPath("userData", path.resolve(requestedUserDataPath));
 }
 
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+
+app.on("second-instance", () => {
+  const mainWindow = BrowserWindow.getAllWindows()[0];
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
+const isSafeExternalUrl = (value: string): boolean => {
+  const url = new URL(value);
+  if (url.protocol === "https:") return true;
+
+  return (
+    url.protocol === "http:" &&
+    (url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "[::1]")
+  );
+};
+
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 900,
+    minWidth: 480,
     minHeight: 620,
     show: false,
     title: "Radius",
@@ -74,7 +129,7 @@ const createWindow = (): void => {
   mainWindow.once("ready-to-show", () => mainWindow.show());
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) {
+    if (isSafeExternalUrl(url)) {
       void shell.openExternal(url);
     }
 
@@ -88,9 +143,19 @@ const createWindow = (): void => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   app.setAppUserModelId("ai.curve.radius");
   try {
     const storageContext = await initializeStorage();
+    void reportPlatformClientInstallation(storageContext).catch((error) => {
+      console.error(
+        "[platform] Radius could not report this client installation",
+        error instanceof Error ? error.message : "PLATFORM_REPORT_FAILED",
+      );
+    });
+    await initializeBundledAgents().catch((error) => {
+      console.error("[agents] Radius could not prepare bundled agents", error);
+    });
     ipcMain.handle("radius:storage-status", () => ({ ready: true as const }));
     ipcMain.handle("radius:set-native-theme", (_event, preference) => {
       if (
@@ -106,6 +171,10 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:list-projects", listProjectSidebar);
     ipcMain.handle("radius:list-recent-sessions", listRecentSidebar);
     ipcMain.handle(
+      "radius:list-session-transcript",
+      listSessionTranscriptForRenderer,
+    );
+    ipcMain.handle(
       "radius:choose-project-folder",
       chooseProjectFolderForRenderer,
     );
@@ -118,6 +187,49 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:rename-project", renameProjectFromRenderer);
     ipcMain.handle("radius:reveal-project", revealProjectInFinder);
     ipcMain.handle("radius:set-session-pinned", setSessionPinnedFromRenderer);
+    ipcMain.handle(
+      "radius:set-session-archived",
+      setSessionArchivedFromRenderer,
+    );
+    ipcMain.handle("radius:list-connectors", listConnectorsForRenderer);
+    ipcMain.handle("radius:list-connector-tools", (_event, installationId) =>
+      listConnectorToolsForRenderer(installationId),
+    );
+    ipcMain.handle("radius:list-connector-catalog", (_event, search) =>
+      listConnectorCatalogForRenderer(search),
+    );
+    ipcMain.handle("radius:install-catalog-connector", (_event, id) =>
+      installCatalogConnectorForRenderer(id),
+    );
+    ipcMain.handle("radius:install-connector", (_event, input) =>
+      installConnectorForRenderer(input),
+    );
+    ipcMain.handle("radius:disconnect-connector", (_event, providerId) =>
+      disconnectConnectorForRenderer(providerId),
+    );
+    ipcMain.handle("radius:delete-connector", (_event, installationId) =>
+      deleteConnectorForRenderer(installationId),
+    );
+    ipcMain.handle("radius:list-agents", listDesktopAgents);
+    ipcMain.handle("radius:connect-agent-authentication", (_event, agentId) =>
+      connectAgentAuthentication(typeof agentId === "string" ? agentId : ""),
+    );
+    ipcMain.handle(
+      "radius:disconnect-agent-authentication",
+      (_event, agentId) =>
+        disconnectAgentAuthentication(
+          typeof agentId === "string" ? agentId : "",
+        ),
+    );
+    ipcMain.handle("radius:runtime-status", getDesktopRuntimeStatus);
+    ipcMain.handle("radius:browser-status", getBrowserConnectionStatus);
+    ipcMain.handle("radius:reveal-browser-extension", revealBrowserExtension);
+    ipcMain.handle("radius:start-agent-prompt", (_event, input) =>
+      startAgentPrompt(input),
+    );
+    ipcMain.handle("radius:cancel-agent-session", (_event, sessionId) =>
+      cancelAgentSession(typeof sessionId === "string" ? sessionId : ""),
+    );
     ipcMain.handle("radius:sync-status", getSyncStatus);
     ipcMain.handle("radius:sync-now", runSyncNow);
     ipcMain.handle("radius:set-sync-enabled", (_event, enabled) =>
@@ -127,8 +239,16 @@ app.whenReady().then(async () => {
       connectCloud(input),
     );
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.status, getDesktopUpdateStatus);
+    ipcMain.handle(DESKTOP_UPDATE_CHANNELS.check, checkDesktopUpdate);
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.perform, performDesktopUpdate);
     createWindow();
+    void initializeBrowserBridge().catch((error) => {
+      console.error(
+        "[browser] Radius could not initialize the Chrome bridge",
+        error,
+      );
+    });
+    await initializeConnectorRegistry();
     initializeDesktopUpdater();
     void initializeScheduler(storageContext).catch((error) => {
       console.error(
@@ -157,7 +277,12 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   shutdownStarted = true;
   stopDesktopUpdater();
-  void Promise.allSettled([stopScheduler(), stopSync()]).finally(() => {
+  stopAgentRuntime();
+  void Promise.allSettled([
+    stopBrowserBridge(),
+    stopScheduler(),
+    stopSync(),
+  ]).finally(() => {
     closeStorage();
     app.quit();
   });

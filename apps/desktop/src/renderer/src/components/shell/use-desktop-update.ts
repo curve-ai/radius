@@ -4,6 +4,7 @@ import type { DesktopUpdateStatus } from "../../../../update-types";
 
 export function useDesktopUpdate(): {
   status: DesktopUpdateStatus | null;
+  checkForUpdates: () => Promise<void>;
   performUpdate: () => Promise<void>;
 } {
   const [status, setStatus] = useState<DesktopUpdateStatus | null>(null);
@@ -35,6 +36,24 @@ export function useDesktopUpdate(): {
     };
   }, []);
 
+  const checkForUpdates = useCallback(async (): Promise<void> => {
+    if (typeof window.radius.checkForUpdates !== "function") return;
+    try {
+      await window.radius.checkForUpdates();
+    } catch {
+      setStatus((current) =>
+        current
+          ? {
+              ...current,
+              state: "error",
+              percent: null,
+              errorCode: "UPDATE_FAILED",
+            }
+          : null,
+      );
+    }
+  }, []);
+
   const performUpdate = useCallback(async (): Promise<void> => {
     if (typeof window.radius.performUpdate !== "function") return;
     try {
@@ -53,5 +72,5 @@ export function useDesktopUpdate(): {
     }
   }, []);
 
-  return { status, performUpdate };
+  return { status, checkForUpdates, performUpdate };
 }

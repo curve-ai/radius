@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog";
+import { InlineFeedbackTransition } from "@renderer/components/ui/inline-feedback-transition";
 import type { ProjectSidebarRecord } from "./project-context-value";
 import { projectErrorMessage } from "./project-errors";
 import { ProjectNameField } from "./project-name-field";
@@ -125,11 +126,13 @@ export function EditProjectDialog({
               </div>
             </div>
 
-            {error && (
-              <p role="alert" className="text-sm leading-5 text-negative">
-                {error}
-              </p>
-            )}
+            <InlineFeedbackTransition>
+              {error ? (
+                <p role="alert" className="text-sm leading-5 text-negative">
+                  {error}
+                </p>
+              ) : null}
+            </InlineFeedbackTransition>
           </div>
 
           <DialogFooter className="px-6 pb-6 pt-6">

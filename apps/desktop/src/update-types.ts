@@ -17,6 +17,7 @@ export type DesktopUpdateStatus = {
 
 export const DESKTOP_UPDATE_CHANNELS = {
   status: "radius:update-status",
+  check: "radius:check-for-updates",
   perform: "radius:perform-update",
   changed: "radius:update-status-changed",
 } as const;

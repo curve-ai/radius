@@ -7,7 +7,8 @@ Radius executes code and brokers access to user files and tools. Changes to perm
 - Search existing issues and architecture decisions.
 - Open an issue for new capabilities, protocol changes, dependencies with native privileges, or changes to a trust boundary.
 - Keep pull requests focused. Separate mechanical refactors from behavior changes.
-- Submit only code, documentation, and assets that you have the right to license under MIT.
+- Submit only code, documentation, and assets that you have the right to
+  license under MIT.
 
 ## Local checks
 
@@ -20,6 +21,11 @@ bun run package
 ```
 
 Add focused tests as runtime and protocol packages are introduced. Security-sensitive behavior must include failure-path coverage.
+
+Desktop and packaged smokes use the normal Radius profile by default so
+persistence is exercised across launches. Use an isolated clone only for
+database-sensitive or destructive work. See
+[`docs/guides/desktop-testing.md`](docs/guides/desktop-testing.md).
 
 ## Pull requests
 

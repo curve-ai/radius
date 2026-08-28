@@ -14,6 +14,7 @@ interface StoredCredentialVault {
   publicKeyJwk: JsonWebKey;
   encryptedDatabaseKey: string;
   encryptedPrivateKeyJwk: string;
+  encryptedSecrets?: Record<string, string>;
 }
 
 export interface CredentialVault {
@@ -21,7 +22,12 @@ export interface CredentialVault {
   publicKeyJwk: JsonWebKey;
   databaseKey: string;
   privateKeyJwk: JsonWebKey;
+  getSecret(reference: string): Promise<string | null>;
+  setSecret(reference: string, value: string): Promise<void>;
+  deleteSecret(reference: string): Promise<boolean>;
 }
+
+const secretReferencePattern = /^[a-z0-9][a-z0-9._:-]{0,199}$/;
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -48,6 +54,92 @@ function decryptJsonWebKey(value: string): JsonWebKey {
   ) as JsonWebKey;
 }
 
+function validateSecretReference(reference: string): void {
+  if (!secretReferencePattern.test(reference)) {
+    throw new Error("Invalid credential secret reference");
+  }
+}
+
+async function writeStoredVault(
+  vaultPath: string,
+  stored: StoredCredentialVault,
+): Promise<void> {
+  const temporaryPath = `${vaultPath}.tmp-${process.pid}-${randomUUID()}`;
+  await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await rename(temporaryPath, vaultPath);
+}
+
+function credentialVaultFromStored(
+  stored: StoredCredentialVault,
+  vaultPath: string,
+): CredentialVault {
+  let secrets = { ...(stored.encryptedSecrets ?? {}) };
+  let mutationTail: Promise<void> = Promise.resolve();
+  const mutate = (operation: () => Promise<void>): Promise<void> => {
+    const pending = mutationTail.then(operation);
+    mutationTail = pending.catch(() => undefined);
+    return pending;
+  };
+  return {
+    clientInstanceId: stored.clientInstanceId,
+    publicKeyJwk: stored.publicKeyJwk,
+    databaseKey: safeStorage.decryptString(
+      Buffer.from(stored.encryptedDatabaseKey, "base64"),
+    ),
+    privateKeyJwk: decryptJsonWebKey(stored.encryptedPrivateKeyJwk),
+    async getSecret(reference) {
+      validateSecretReference(reference);
+      await mutationTail;
+      const encrypted = secrets[reference];
+      return encrypted
+        ? safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+        : null;
+    },
+    async setSecret(reference, value) {
+      validateSecretReference(reference);
+      if (!value) throw new Error("Credential secret cannot be empty");
+      await mutate(async () => {
+        const previous = secrets;
+        const next = {
+          ...secrets,
+          [reference]: safeStorage.encryptString(value).toString("base64"),
+        };
+        stored.encryptedSecrets = next;
+        try {
+          await writeStoredVault(vaultPath, stored);
+          secrets = next;
+        } catch (error) {
+          stored.encryptedSecrets = previous;
+          throw error;
+        }
+      });
+    },
+    async deleteSecret(reference) {
+      validateSecretReference(reference);
+      let deleted = false;
+      await mutate(async () => {
+        if (!(reference in secrets)) return;
+        const previous = secrets;
+        const next = { ...secrets };
+        delete next[reference];
+        stored.encryptedSecrets = next;
+        try {
+          await writeStoredVault(vaultPath, stored);
+          secrets = next;
+          deleted = true;
+        } catch (error) {
+          stored.encryptedSecrets = previous;
+          throw error;
+        }
+      });
+      return deleted;
+    },
+  };
+}
+
 export async function openCredentialVault(
   userDataPath: string,
   databasePath: string,
@@ -63,14 +155,7 @@ export async function openCredentialVault(
     const stored = JSON.parse(storedVault) as StoredCredentialVault;
     if (stored.version !== 1)
       throw new Error("Unsupported credential-vault version");
-    return {
-      clientInstanceId: stored.clientInstanceId,
-      publicKeyJwk: stored.publicKeyJwk,
-      databaseKey: safeStorage.decryptString(
-        Buffer.from(stored.encryptedDatabaseKey, "base64"),
-      ),
-      privateKeyJwk: decryptJsonWebKey(stored.encryptedPrivateKeyJwk),
-    };
+    return credentialVaultFromStored(stored, vaultPath);
   }
 
   if (await fileExists(databasePath)) {
@@ -93,19 +178,9 @@ export async function openCredentialVault(
     encryptedPrivateKeyJwk: safeStorage
       .encryptString(JSON.stringify(privateKeyJwk))
       .toString("base64"),
+    encryptedSecrets: {},
   };
 
-  const temporaryPath = `${vaultPath}.tmp-${process.pid}`;
-  await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await rename(temporaryPath, vaultPath);
-
-  return {
-    clientInstanceId: stored.clientInstanceId,
-    publicKeyJwk,
-    databaseKey,
-    privateKeyJwk,
-  };
+  await writeStoredVault(vaultPath, stored);
+  return credentialVaultFromStored(stored, vaultPath);
 }

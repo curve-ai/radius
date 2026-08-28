@@ -99,7 +99,7 @@ export function ProjectComposerMenu(): ReactNode {
             onClick={openCreateProjectDialog}
           >
             <ActionToolPanelItemIcon>
-              <SquarePlus aria-hidden />
+              <SquarePlus strokeWidth={1.5} aria-hidden />
             </ActionToolPanelItemIcon>
             <ActionToolPanelItemContent>
               <ActionToolPanelItemLabel>

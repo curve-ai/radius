@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  pushTypeScriptOciImage,
+  type OciCommandRunner,
+  type TypeScriptOciBuildResult,
+} from "./index.js";
+
+test("uses a temporary Docker config and never places the password in argv", async () => {
+  const root = await mkdtemp(join(tmpdir(), "radius-oci-push-"));
+  const contextPath = join(root, "context");
+  await mkdir(contextPath);
+  await writeFile(join(contextPath, "Containerfile"), "FROM scratch\n");
+  const calls: Parameters<OciCommandRunner>[0][] = [];
+  const runner: OciCommandRunner = async (options) => {
+    calls.push(options);
+    if (options.args.includes("inspect")) {
+      return { stdout: `Name: registry.example/acme/agent:test\nDigest: sha256:${"d".repeat(64)}\n`, stderr: "" };
+    }
+    return { stdout: "", stderr: "" };
+  };
+  const build = {
+    buildDigest: "a".repeat(64),
+    imageReference: "radius.local/dev/agent:test",
+    imageDigest: `sha256:${"b".repeat(64)}`,
+    layoutPath: join(root, "oci-layout"),
+    contextPath,
+    manifest: {} as TypeScriptOciBuildResult["manifest"],
+    bundleSha256: "c".repeat(64),
+  } satisfies TypeScriptOciBuildResult;
+
+  const digest = await pushTypeScriptOciImage({
+    build,
+    imageReference: "registry.example/acme/agent:test",
+    credentials: {
+      registry: "registry.example",
+      username: "upload",
+      password: "top-secret",
+    },
+    commandRunner: runner,
+  });
+
+  assert.equal(digest, `sha256:${"d".repeat(64)}`);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0]?.stdin, "top-secret\n");
+  assert.equal(calls.some((call) => call.args.includes("top-secret")), false);
+  assert.ok(calls.every((call) => call.env?.DOCKER_CONFIG));
+});

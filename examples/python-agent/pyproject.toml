@@ -1,0 +1,28 @@
+[project]
+name = "radius-python-example"
+version = "0.0.1"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "radius-agent-sdk",
+]
+
+[tool.uv.sources]
+radius-agent-sdk = { path = "../../sdks/python" }
+
+[tool.radius]
+schemaVersion = 1
+agent = "agent_python1"
+name = "Python Example Agent"
+capabilities = []
+networkAllowlist = []
+
+[tool.radius.runtime]
+kind = "python"
+module = "radius_python_agent.agent"
+python = "3.12"
+lockfile = "uv.lock"
+
+[tool.radius.resources]
+cpu = 2
+memoryMb = 4096
+diskMb = 5120

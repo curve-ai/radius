@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "agents": [
+    {
+      "project": "proj_radius_fx",
+      "releaseTemplate": "fx/release-template.json",
+      "imageLayout": "fx/oci-layout"
+    }
+  ]
+}

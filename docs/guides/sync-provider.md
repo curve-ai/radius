@@ -25,7 +25,7 @@ and operations. Read
 and [`ADR-004`](../architecture/adr/004-libsql-local-persistence.md) for the
 local persistence boundary.
 
-Do not connect a cloned desktop directly to MongoDB, PostgreSQL, or another raw
+Do not connect a cloned desktop directly to PostgreSQL or another raw
 database. Put an authenticated sync service in front of the store, or install a
 trusted provider adapter designed for a narrow single-user deployment.
 
@@ -82,7 +82,7 @@ interface SyncProvider {
 ```
 
 The public protocol should describe application records and changes, not SQL,
-libSQL pages, MongoDB documents, or Turso WAL frames. Providers may use any
+libSQL pages, database-native documents, or Turso WAL frames. Providers may use any
 physical store behind their service.
 
 The contract must support:
@@ -152,7 +152,7 @@ stops transfer without deleting canonical local data.
 
 ## Implement a compatible service
 
-A self-hosted service may use Turso, PostgreSQL, MongoDB, object storage, or a
+A self-hosted service may use Turso, PostgreSQL, object storage, or a
 different backend. Storage choice is private to the service. It must implement
 the published protocol rather than expose its database wire protocol.
 
@@ -208,7 +208,7 @@ Do not treat this example as a committed configuration schema.
 3. **Done:** implement atomic local change capture and the initial migration.
 4. **Done:** implement sync-core retry, cursor, acknowledgement, and status.
 5. **Done:** add signed HTTP provider wiring and narrow status/run-now IPC.
-6. **Done:** implement guarded Curve Cloud routes and typed MongoDB projections.
+6. **Done:** implement guarded Curve Cloud routes and typed Drizzle PostgreSQL projections.
 7. **Done:** Electron authentication and token refresh are implemented;
    the renderer invokes them from its deep Settings surface.
 8. **Done:** implement optional content-addressed file upload/download.
@@ -238,7 +238,7 @@ Every provider should pass the same conformance scenarios:
 
 Changes to the public sync protocol, storage coordination, or provider
 interface start in Radius as an architecture proposal. Curve-specific identity,
-MongoDB projections, billing, organization policy, operated infrastructure, and
+private Cloud projections, billing, organization policy, operated infrastructure, and
 support tooling stay outside Radius.
 
 Never include production endpoints, credentials, private schemas, customer

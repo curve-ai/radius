@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Radius Browser</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <div class="heading-row">
+        <h1>Radius Browser</h1>
+        <span id="connection-state" class="state">Checking</span>
+      </div>
+      <p id="status-copy">
+        Radius can use tabs in this Chrome profile while browser access is on.
+      </p>
+      <dl>
+        <div>
+          <dt>Controlled tabs</dt>
+          <dd id="controlled-tabs">0</dd>
+        </div>
+      </dl>
+      <button id="toggle-access" type="button" disabled>
+        Pause browser access
+      </button>
+      <p class="footnote">
+        The installed agent chooses browser actions. Radius applies permissions
+        and keeps extension credentials out of the agent runtime.
+      </p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

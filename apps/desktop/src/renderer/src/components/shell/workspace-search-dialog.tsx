@@ -203,7 +203,7 @@ export function WorkspaceSearchDialog({
             ) : error && sessions.length === 0 ? (
               <p className="px-7 py-6 text-sm text-negative">{error}</p>
             ) : filteredChats.length === 0 ? (
-              <p className="px-7 py-6 text-sm text-muted-foreground">
+              <p className="px-7 py-1.5 text-sm text-muted-foreground">
                 {query.trim() ? "No chats found." : "No chats yet."}
               </p>
             ) : null}

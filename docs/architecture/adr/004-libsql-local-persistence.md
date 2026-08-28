@@ -56,7 +56,7 @@ Rejected for the Radius core. Managed sync could reduce implementation effort,
 but requiring a hosted account would violate independent local operation.
 Turso may later be implemented by an optional Cloud provider.
 
-### Local MongoDB
+### Local document-database server
 
 Rejected. Shipping and supervising a database server would add installation,
 upgrade, resource, port, repair, and security responsibilities that are not
@@ -70,7 +70,7 @@ justified for the desktop operational store.
 - The public storage package should keep libSQL-specific details behind a narrow
   repository interface so the engine can be replaced without changing Radius
   protocols.
-- Remote MongoDB or other Cloud storage remains an independent projection and
+- Remote Cloud storage remains an independent projection and
   control-plane concern rather than a mirror of the local database file.
 
 ## Validation

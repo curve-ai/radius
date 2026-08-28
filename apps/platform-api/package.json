@@ -1,0 +1,30 @@
+{
+  "name": "@curve-ai/radius-platform-api",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "admin": "tsx src/admin.ts",
+    "dev": "bun --watch src/server.ts",
+    "start": "bun src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@curve-ai/platform-contracts": "0.0.1",
+    "@curve-ai/platform-database": "0.0.1",
+    "@curve-ai/platform-providers": "0.0.1",
+    "hono": "4.13.3",
+    "openid-client": "6.8.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "22.19.1",
+    "jose": "6.2.10",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}
