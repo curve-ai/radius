@@ -29,6 +29,20 @@ const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
 const clientId = "19353755-3c5e-4529-b58d-c74dacf7b68d";
 const hash = "a".repeat(64);
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 const manifest: ConnectorManifest = {
   schemaVersion: 1,
   publisherKey: "curve-ai",
@@ -85,7 +99,7 @@ async function withDatabase(
     await callback(database);
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await removeTemporaryDirectory(directory);
   }
 }
 

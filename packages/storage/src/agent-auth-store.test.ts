@@ -19,6 +19,20 @@ const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
 const clientId = "19353755-3c5e-4529-b58d-c74dacf7b68d";
 const now = Date.parse("2026-08-24T20:00:00.000Z");
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 const releaseInput: InstallAgentReleaseInput = {
   clientInstanceId: clientId,
   providerKey: "vercel-labs",
@@ -78,7 +92,7 @@ async function withDatabase(
     await callback(database);
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await removeTemporaryDirectory(directory);
   }
 }
 
