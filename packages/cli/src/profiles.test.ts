@@ -20,8 +20,10 @@ test("stores only normalized non-secret target profile data", async () => {
     self_hosted: { apiUrl: "http://127.0.0.1:3100" },
     cloud: { apiUrl: "https://acme.curvehq.sh" },
   });
-  const mode = (await stat(path)).mode & 0o777;
-  assert.equal(mode, 0o600);
+  if (process.platform !== "win32") {
+    const mode = (await stat(path)).mode & 0o777;
+    assert.equal(mode, 0o600);
+  }
 });
 
 test("rejects insecure remote profile origins", async () => {

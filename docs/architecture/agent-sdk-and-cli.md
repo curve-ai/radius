@@ -29,7 +29,7 @@ The first public implementation now includes:
   compatibility, identity, deployment-prepare, and deployment-finalize HTTP
   contracts, HTTPS/loopback enforcement, bearer authentication, bounded JSON,
   structured errors, and idempotency headers.
-- Non-secret CLI target profiles with mode-0600 storage, active-profile
+- Non-secret CLI target profiles with mode-0600 storage on POSIX, active-profile
   switching, `platform-info`, and `whoami`. Interactive login stores tokens in
   the native operating-system credential manager; CI can supply an explicit
   environment token. Tokens never enter profile files.
