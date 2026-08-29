@@ -110,9 +110,11 @@ function Message({
   completedPlan?: SessionPlan;
 }): ReactNode {
   const [copied, setCopied] = useState(false);
+  const reduceMotion = useReducedMotion();
   const user = event.role === "user";
   const system =
     event.role === "system" || event.messageKind === "system_notice";
+  const copyIconTransform = reduceMotion === true ? "scale(1)" : "scale(0.96)";
 
   const copyMarkdown = async (): Promise<void> => {
     await navigator.clipboard.writeText(event.text);
@@ -151,11 +153,34 @@ function Message({
                   onClick={() => void copyMarkdown()}
                   className="-ml-1 size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                 >
-                  {copied ? (
-                    <Check className="size-3" aria-hidden />
-                  ) : (
-                    <Copy className="size-3" aria-hidden />
-                  )}
+                  <span className="relative block size-3 shrink-0">
+                    <AnimatePresence initial={false} mode="popLayout">
+                      <motion.span
+                        key={copied ? "copied" : "copy"}
+                        initial={{ opacity: 0, transform: copyIconTransform }}
+                        animate={{ opacity: 1, transform: "scale(1)" }}
+                        exit={{
+                          opacity: 0,
+                          transform: copyIconTransform,
+                          transition: {
+                            duration: reduceMotion === true ? 0.1 : 0.08,
+                            ease: TRANSCRIPT_STATE_EASE,
+                          },
+                        }}
+                        transition={{
+                          duration: reduceMotion === true ? 0.1 : 0.12,
+                          ease: TRANSCRIPT_STATE_EASE,
+                        }}
+                        className="block size-3"
+                      >
+                        {copied ? (
+                          <Check className="size-3" aria-hidden />
+                        ) : (
+                          <Copy className="size-3" aria-hidden />
+                        )}
+                      </motion.span>
+                    </AnimatePresence>
+                  </span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={6}>
