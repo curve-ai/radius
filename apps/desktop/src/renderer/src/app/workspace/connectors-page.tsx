@@ -1047,28 +1047,30 @@ export function ConnectorsPage(): ReactNode {
 
   return (
     <>
-      <AnimatePresence
-        initial={false}
-        mode="popLayout"
-        custom={viewMotionContext}
-      >
-        <motion.div
-          key={viewKey}
+      <div className="relative">
+        <AnimatePresence
+          initial={false}
+          mode="popLayout"
           custom={viewMotionContext}
-          variants={CONNECTOR_VIEW_VARIANTS}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={{
-            duration: reduceMotion === true ? 0.1 : 0.16,
-            ease: CONNECTOR_VIEW_EASE,
-          }}
-          data-connector-view-depth={viewDepth}
-          className="w-full"
         >
-          {viewContent}
-        </motion.div>
-      </AnimatePresence>
+          <motion.div
+            key={viewKey}
+            custom={viewMotionContext}
+            variants={CONNECTOR_VIEW_VARIANTS}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{
+              duration: reduceMotion === true ? 0.1 : 0.16,
+              ease: CONNECTOR_VIEW_EASE,
+            }}
+            data-connector-view-depth={viewDepth}
+            className="w-full"
+          >
+            {viewContent}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
       <Dialog
         open={addOpen}
