@@ -48,6 +48,10 @@ type TraceRowEvent = Extract<
     eventType: "reasoning_summary" | "message" | "tool_call" | "error";
   }
 >;
+type ToolOutcome = Extract<
+  SessionTranscriptEvent,
+  { eventType: "tool_result" }
+>["outcome"];
 
 function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, milliseconds) / 1_000;
@@ -172,6 +176,87 @@ function runLabel(
   return presentation?.label ?? "Thought";
 }
 
+function TraceRow({
+  event,
+  outcome,
+}: {
+  event: TraceRowEvent;
+  outcome?: ToolOutcome;
+}): ReactNode {
+  const [expanded, setExpanded] = useState(false);
+  const isError = event.eventType === "error";
+  const isToolCall = event.eventType === "tool_call";
+
+  const icon =
+    event.eventType === "reasoning_summary" ? (
+      <Brain className="size-3.5 shrink-0" aria-hidden />
+    ) : event.eventType === "message" ? (
+      <MessageSquareText className="size-3.5 shrink-0" aria-hidden />
+    ) : isError ? (
+      <CircleAlert className="size-3.5 shrink-0" aria-hidden />
+    ) : event.capability.includes("file") ? (
+      <FileTerminal className="size-3.5 shrink-0" aria-hidden />
+    ) : (
+      <Wrench className="size-3.5 shrink-0" aria-hidden />
+    );
+
+  const content = isToolCall ? (
+    <>
+      <span className="text-foreground">{event.operation}</span>
+      <span className="ml-2 font-mono text-[0.6875rem] text-muted-foreground">
+        {event.capability}
+      </span>
+    </>
+  ) : event.eventType === "reasoning_summary" ? (
+    event.summaryText
+  ) : event.eventType === "message" ? (
+    event.text
+  ) : (
+    event.message
+  );
+
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((current) => !current)}
+      className={cn(
+        "flex min-h-7 w-full min-w-0 gap-2 rounded-sm py-1 text-left text-[0.78125rem] leading-5 transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.99]",
+        expanded ? "items-start" : "items-center",
+        isError ? "text-negative" : "text-muted-foreground",
+      )}
+    >
+      <span className={cn("shrink-0", expanded && "mt-0.5")}>{icon}</span>
+      <span
+        className={cn(
+          "min-w-0 flex-1",
+          expanded ? "break-words whitespace-normal" : "truncate",
+        )}
+      >
+        {content}
+      </span>
+      {outcome ? (
+        <span
+          className={cn(
+            "ml-auto shrink-0 text-[0.6875rem]",
+            expanded && "mt-0.5",
+            outcome === "failed" && "text-negative",
+          )}
+        >
+          {outcome}
+        </span>
+      ) : null}
+      <ChevronDown
+        className={cn(
+          "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+          expanded && "mt-0.5 rotate-180",
+        )}
+        aria-hidden
+      />
+    </button>
+  );
+}
+
 function RunTrace({
   block,
 }: {
@@ -200,12 +285,7 @@ function RunTrace({
   );
   const liveDuration = useElapsed(startedAt, working);
   const duration = working ? liveDuration : settledDuration;
-  const autoExpanded =
-    working ||
-    presentation?.mode === "inline" ||
-    presentation?.initialState === "expanded";
-  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
-  const expanded = manualExpanded ?? autoExpanded;
+  const [expanded, setExpanded] = useState(false);
   const resultByToolCall = useMemo(
     () =>
       new Map(
@@ -252,7 +332,7 @@ function RunTrace({
       <span className="text-sm font-normal tabular-nums text-muted-foreground">
         {completed ? `Worked for ${duration}` : duration}
       </span>
-      {canExpand && presentation?.mode !== "inline" ? (
+      {canExpand ? (
         <ChevronDown
           className={cn(
             "size-3.5 text-muted-foreground transition-transform duration-200",
@@ -269,13 +349,11 @@ function RunTrace({
       aria-label="Agent work"
       className="mb-3 w-full border-b border-border"
     >
-      {canExpand && presentation?.mode !== "inline" ? (
+      {canExpand ? (
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() =>
-            setManualExpanded((current) => !(current ?? autoExpanded))
-          }
+          onClick={() => setExpanded((current) => !current)}
           className={cn(
             "-ml-1.5 flex min-h-7 w-fit gap-2 rounded-sm px-1.5 text-left transition-colors duration-150 hover:bg-accent active:scale-[0.99]",
             working || state === "failed" ? "items-center" : "items-baseline",
@@ -305,81 +383,15 @@ function RunTrace({
           }}
         >
           <div className="overflow-hidden">
-            <div className="ml-[5px] mt-1 border-l border-border pb-1 pl-[1.125rem]">
+            <div className="ml-[5px] mt-1 max-h-64 overflow-y-auto overscroll-contain border-l border-border pb-1 pl-[1.125rem] pr-1">
               <div className="flex flex-col gap-0.5">
                 {rows.map((event) => {
-                  if (event.eventType === "reasoning_summary") {
-                    return (
-                      <div
-                        key={event.eventId}
-                        className="flex min-h-7 items-start gap-2 py-1 text-[0.78125rem] leading-5 text-muted-foreground"
-                      >
-                        <Brain
-                          className="mt-0.5 size-3.5 shrink-0"
-                          aria-hidden
-                        />
-                        <span>{event.summaryText}</span>
-                      </div>
-                    );
-                  }
-                  if (event.eventType === "message") {
-                    return (
-                      <div
-                        key={event.eventId}
-                        className="flex min-h-7 items-start gap-2 py-1 text-[0.78125rem] leading-5 text-muted-foreground"
-                      >
-                        <MessageSquareText
-                          className="mt-0.5 size-3.5 shrink-0"
-                          aria-hidden
-                        />
-                        <span>{event.text}</span>
-                      </div>
-                    );
-                  }
-                  if (event.eventType === "error") {
-                    return (
-                      <div
-                        key={event.eventId}
-                        className="flex min-h-7 items-start gap-2 py-1 text-[0.78125rem] leading-5 text-negative"
-                      >
-                        <CircleAlert
-                          className="mt-0.5 size-3.5 shrink-0"
-                          aria-hidden
-                        />
-                        <span>{event.message}</span>
-                      </div>
-                    );
-                  }
-
-                  const outcome = resultByToolCall.get(event.eventId);
                   return (
-                    <div
+                    <TraceRow
                       key={event.eventId}
-                      className="flex min-h-7 items-center gap-2 py-1 text-[0.78125rem] text-muted-foreground"
-                    >
-                      {event.capability.includes("file") ? (
-                        <FileTerminal
-                          className="size-3.5 shrink-0"
-                          aria-hidden
-                        />
-                      ) : (
-                        <Wrench className="size-3.5 shrink-0" aria-hidden />
-                      )}
-                      <span className="text-foreground">{event.operation}</span>
-                      <span className="truncate font-mono text-[0.6875rem]">
-                        {event.capability}
-                      </span>
-                      {outcome ? (
-                        <span
-                          className={cn(
-                            "ml-auto text-[0.6875rem]",
-                            outcome === "failed" && "text-negative",
-                          )}
-                        >
-                          {outcome}
-                        </span>
-                      ) : null}
-                    </div>
+                      event={event}
+                      outcome={resultByToolCall.get(event.eventId)}
+                    />
                   );
                 })}
               </div>
