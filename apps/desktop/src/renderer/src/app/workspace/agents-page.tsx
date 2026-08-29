@@ -173,7 +173,8 @@ export function AgentsPage(): ReactNode {
                 agent.authentication.state === "not_required";
               const pending = pendingAgentId === agent.id;
               const StatusIcon = connected ? CircleCheck : ShieldCheck;
-              const authenticationStateKey = `${agent.authentication.state}:${pending ? "pending" : "settled"}`;
+              const authenticationStateKey = agent.authentication.state;
+              const actionStateKey = `${authenticationStateKey}:${pending ? "pending" : "settled"}`;
               return (
                 <div
                   key={agent.id}
@@ -226,7 +227,7 @@ export function AgentsPage(): ReactNode {
                   <div className="relative flex min-h-8 w-36 shrink-0 justify-end">
                     <AnimatePresence initial={false} mode="popLayout">
                       <motion.div
-                        key={`action:${authenticationStateKey}`}
+                        key={`action:${actionStateKey}`}
                         initial={{ opacity: 0, transform: enterTransform }}
                         animate={{
                           opacity: 1,
