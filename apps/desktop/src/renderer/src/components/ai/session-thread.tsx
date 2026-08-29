@@ -19,6 +19,11 @@ import {
 import type { SessionTranscriptEvent } from "../../../../radius-api";
 import { Button } from "@renderer/components/ui/button";
 import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+} from "@renderer/components/ui/motion";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -52,6 +57,9 @@ type ToolOutcome = Extract<
   SessionTranscriptEvent,
   { eventType: "tool_result" }
 >["outcome"];
+
+const TRACE_ROW_TRANSITION_EASE = [0.23, 1, 0.32, 1] as const;
+const TRACE_ROW_LAYOUT_EASE = [0.77, 0, 0.175, 1] as const;
 
 function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, milliseconds) / 1_000;
@@ -184,8 +192,13 @@ function TraceRow({
   outcome?: ToolOutcome;
 }): ReactNode {
   const [expanded, setExpanded] = useState(false);
+  const reduceMotion = useReducedMotion();
   const isError = event.eventType === "error";
   const isToolCall = event.eventType === "tool_call";
+  const textEnterTransform =
+    reduceMotion === true ? "translateY(0px)" : "translateY(2px)";
+  const textExitTransform =
+    reduceMotion === true ? "translateY(0px)" : "translateY(-2px)";
 
   const icon =
     event.eventType === "reasoning_summary" ? (
@@ -216,27 +229,62 @@ function TraceRow({
   );
 
   return (
-    <button
+    <motion.button
       type="button"
       aria-expanded={expanded}
       onClick={() => setExpanded((current) => !current)}
+      layout={reduceMotion === true ? false : true}
+      layoutDependency={expanded}
+      transition={{
+        layout: {
+          duration: 0.18,
+          ease: TRACE_ROW_LAYOUT_EASE,
+        },
+      }}
       className={cn(
         "flex min-h-7 w-full min-w-0 gap-2 rounded-sm py-1 text-left text-[0.78125rem] leading-5 transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.99]",
         expanded ? "items-start" : "items-center",
         isError ? "text-negative" : "text-muted-foreground",
       )}
     >
-      <span className={cn("shrink-0", expanded && "mt-0.5")}>{icon}</span>
-      <span
-        className={cn(
-          "min-w-0 flex-1",
-          expanded ? "break-words whitespace-normal" : "truncate",
-        )}
+      <motion.span
+        layout={reduceMotion === true ? false : "position"}
+        layoutDependency={expanded}
+        className={cn("shrink-0", expanded && "mt-0.5")}
       >
-        {content}
+        {icon}
+      </motion.span>
+      <span className="relative min-w-0 flex-1">
+        <AnimatePresence initial={false} mode="popLayout">
+          <motion.span
+            key={expanded ? "expanded" : "compact"}
+            initial={{ opacity: 0, transform: textEnterTransform }}
+            animate={{ opacity: 1, transform: "translateY(0px)" }}
+            exit={{
+              opacity: 0,
+              transform: textExitTransform,
+              transition: {
+                duration: 0.1,
+                ease: TRACE_ROW_TRANSITION_EASE,
+              },
+            }}
+            transition={{
+              duration: reduceMotion === true ? 0.1 : 0.16,
+              ease: TRACE_ROW_TRANSITION_EASE,
+            }}
+            className={cn(
+              "block min-w-0",
+              expanded ? "break-words whitespace-normal" : "truncate",
+            )}
+          >
+            {content}
+          </motion.span>
+        </AnimatePresence>
       </span>
       {outcome ? (
-        <span
+        <motion.span
+          layout={reduceMotion === true ? false : "position"}
+          layoutDependency={expanded}
           className={cn(
             "ml-auto shrink-0 text-[0.6875rem]",
             expanded && "mt-0.5",
@@ -244,16 +292,22 @@ function TraceRow({
           )}
         >
           {outcome}
-        </span>
+        </motion.span>
       ) : null}
-      <ChevronDown
-        className={cn(
-          "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
-          expanded && "mt-0.5 rotate-180",
-        )}
-        aria-hidden
-      />
-    </button>
+      <motion.span
+        layout={reduceMotion === true ? false : "position"}
+        layoutDependency={expanded}
+        className={cn("shrink-0", expanded && "mt-0.5")}
+      >
+        <ChevronDown
+          className={cn(
+            "size-3.5 text-muted-foreground transition-transform duration-200",
+            expanded && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </motion.span>
+    </motion.button>
   );
 }
 
