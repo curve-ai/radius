@@ -58,7 +58,7 @@ type ToolOutcome = Extract<
   { eventType: "tool_result" }
 >["outcome"];
 
-const TRACE_ROW_TRANSITION_EASE = [0.23, 1, 0.32, 1] as const;
+const TRANSCRIPT_STATE_EASE = [0.23, 1, 0.32, 1] as const;
 const TRACE_ROW_LAYOUT_EASE = [0.77, 0, 0.175, 1] as const;
 
 function formatElapsed(milliseconds: number): string {
@@ -272,12 +272,12 @@ function TraceRow({
                 transform: textExitTransform,
                 transition: {
                   duration: 0.1,
-                  ease: TRACE_ROW_TRANSITION_EASE,
+                  ease: TRANSCRIPT_STATE_EASE,
                 },
               }}
               transition={{
                 duration: reduceMotion === true ? 0.1 : 0.16,
-                ease: TRACE_ROW_TRANSITION_EASE,
+                ease: TRANSCRIPT_STATE_EASE,
               }}
               className={cn(
                 "block min-w-0",
@@ -348,6 +348,7 @@ function RunTrace({
   const liveDuration = useElapsed(startedAt, working);
   const duration = working ? liveDuration : settledDuration;
   const [expanded, setExpanded] = useState(false);
+  const reduceMotion = useReducedMotion();
   const resultByToolCall = useMemo(
     () =>
       new Map(
@@ -374,26 +375,113 @@ function RunTrace({
   const canExpand = rows.length > 0;
   const label = runLabel(state, presentation);
   const completed = state === "completed";
+  const stateKey = state;
+  const stateEnterTransform =
+    reduceMotion === true ? "translateY(0px)" : "translateY(2px)";
+  const stateExitTransform =
+    reduceMotion === true ? "translateY(0px)" : "translateY(-2px)";
+  const indicatorEnterTransform =
+    reduceMotion === true
+      ? "translateY(0px) scale(1)"
+      : "translateY(2px) scale(1)";
+  const indicatorExitTransform =
+    reduceMotion === true
+      ? "translateY(0px) scale(1)"
+      : "translateY(0px) scale(0.96)";
 
   const header = (
     <>
-      {working ? (
-        <ThinkingGrid />
-      ) : state === "failed" ? (
-        <CircleAlert className="size-3.5 text-negative" aria-hidden />
-      ) : null}
-      <span
-        role={working ? "status" : undefined}
-        className={cn(
-          "text-sm font-normal",
-          working ? "radius-thinking-label" : "text-muted-foreground",
-        )}
-      >
-        {label}
-      </span>
-      <span className="text-sm font-normal tabular-nums text-muted-foreground">
-        {completed ? `Worked for ${duration}` : duration}
-      </span>
+      <AnimatePresence initial={false} mode="popLayout">
+        {working || state === "failed" ? (
+          <motion.span
+            key={working ? "working-indicator" : "failed-indicator"}
+            initial={{ opacity: 0, transform: indicatorEnterTransform }}
+            animate={{
+              opacity: 1,
+              transform: "translateY(0px) scale(1)",
+            }}
+            exit={{
+              opacity: 0,
+              transform: indicatorExitTransform,
+              transition: {
+                duration: 0.1,
+                ease: TRANSCRIPT_STATE_EASE,
+              },
+            }}
+            transition={{
+              duration: reduceMotion === true ? 0.1 : 0.16,
+              ease: TRANSCRIPT_STATE_EASE,
+            }}
+            className="shrink-0"
+          >
+            {working ? (
+              <ThinkingGrid />
+            ) : (
+              <CircleAlert className="size-3.5 text-negative" aria-hidden />
+            )}
+          </motion.span>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={`label-${stateKey}`}
+          role={working ? "status" : undefined}
+          layout={reduceMotion === true ? false : "position"}
+          layoutDependency={stateKey}
+          initial={{ opacity: 0, transform: stateEnterTransform }}
+          animate={{ opacity: 1, transform: "translateY(0px)" }}
+          exit={{
+            opacity: 0,
+            transform: stateExitTransform,
+            transition: {
+              duration: 0.1,
+              ease: TRANSCRIPT_STATE_EASE,
+            },
+          }}
+          transition={{
+            duration: reduceMotion === true ? 0.1 : 0.16,
+            ease: TRANSCRIPT_STATE_EASE,
+            layout: {
+              duration: 0.16,
+              ease: TRANSCRIPT_STATE_EASE,
+            },
+          }}
+          className={cn(
+            "text-sm font-normal",
+            working ? "radius-thinking-label" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </motion.span>
+      </AnimatePresence>
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={`duration-${stateKey}`}
+          layout={reduceMotion === true ? false : "position"}
+          layoutDependency={stateKey}
+          initial={{ opacity: 0, transform: stateEnterTransform }}
+          animate={{ opacity: 1, transform: "translateY(0px)" }}
+          exit={{
+            opacity: 0,
+            transform: stateExitTransform,
+            transition: {
+              duration: 0.1,
+              ease: TRANSCRIPT_STATE_EASE,
+            },
+          }}
+          transition={{
+            duration: reduceMotion === true ? 0.1 : 0.16,
+            ease: TRANSCRIPT_STATE_EASE,
+            layout: {
+              duration: 0.16,
+              ease: TRANSCRIPT_STATE_EASE,
+            },
+          }}
+          className="text-sm font-normal tabular-nums text-muted-foreground"
+        >
+          {completed ? `Worked for ${duration}` : duration}
+        </motion.span>
+      </AnimatePresence>
       {canExpand ? (
         <ChevronDown
           className={cn(
