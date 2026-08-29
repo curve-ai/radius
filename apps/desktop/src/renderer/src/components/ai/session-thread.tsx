@@ -229,10 +229,7 @@ function TraceRow({
   );
 
   return (
-    <motion.button
-      type="button"
-      aria-expanded={expanded}
-      onClick={() => setExpanded((current) => !current)}
+    <motion.div
       layout={reduceMotion === true ? false : true}
       layoutDependency={expanded}
       transition={{
@@ -241,73 +238,84 @@ function TraceRow({
           ease: TRACE_ROW_LAYOUT_EASE,
         },
       }}
-      className={cn(
-        "flex min-h-7 w-full min-w-0 gap-2 rounded-sm py-1 text-left text-[0.78125rem] leading-5 transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.99]",
-        expanded ? "items-start" : "items-center",
-        isError ? "text-negative" : "text-muted-foreground",
-      )}
+      className="w-full"
     >
-      <motion.span
-        layout={reduceMotion === true ? false : "position"}
-        layoutDependency={expanded}
-        className={cn("shrink-0", expanded && "mt-0.5")}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        className={cn(
+          "flex min-h-7 w-full min-w-0 gap-2 rounded-sm py-1 text-left text-[0.78125rem] leading-5 transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.99]",
+          expanded ? "items-start" : "items-center",
+          isError ? "text-negative" : "text-muted-foreground",
+        )}
       >
-        {icon}
-      </motion.span>
-      <span className="relative min-w-0 flex-1">
-        <AnimatePresence initial={false} mode="popLayout">
-          <motion.span
-            key={expanded ? "expanded" : "compact"}
-            initial={{ opacity: 0, transform: textEnterTransform }}
-            animate={{ opacity: 1, transform: "translateY(0px)" }}
-            exit={{
-              opacity: 0,
-              transform: textExitTransform,
-              transition: {
-                duration: 0.1,
-                ease: TRACE_ROW_TRANSITION_EASE,
-              },
-            }}
-            transition={{
-              duration: reduceMotion === true ? 0.1 : 0.16,
-              ease: TRACE_ROW_TRANSITION_EASE,
-            }}
-            className={cn(
-              "block min-w-0",
-              expanded ? "break-words whitespace-normal" : "truncate",
-            )}
-          >
-            {content}
-          </motion.span>
-        </AnimatePresence>
-      </span>
-      {outcome ? (
         <motion.span
           layout={reduceMotion === true ? false : "position"}
           layoutDependency={expanded}
-          className={cn(
-            "ml-auto shrink-0 text-[0.6875rem]",
-            expanded && "mt-0.5",
-            outcome === "failed" && "text-negative",
-          )}
+          className={cn("shrink-0", expanded && "mt-0.5")}
         >
-          {outcome}
+          {icon}
         </motion.span>
-      ) : null}
-      <motion.span
-        layout={reduceMotion === true ? false : "position"}
-        layoutDependency={expanded}
-        className={cn("shrink-0", expanded && "mt-0.5")}
-      >
-        <ChevronDown
-          className={cn(
-            "size-3.5 text-muted-foreground transition-transform duration-200",
-            expanded && "rotate-180",
-          )}
-          aria-hidden
-        />
-      </motion.span>
-    </motion.button>
+        <motion.span
+          layout={reduceMotion === true ? false : "position"}
+          layoutDependency={expanded}
+          className="relative min-w-0 flex-1"
+        >
+          <AnimatePresence initial={false} mode="popLayout">
+            <motion.span
+              key={expanded ? "expanded" : "compact"}
+              initial={{ opacity: 0, transform: textEnterTransform }}
+              animate={{ opacity: 1, transform: "translateY(0px)" }}
+              exit={{
+                opacity: 0,
+                transform: textExitTransform,
+                transition: {
+                  duration: 0.1,
+                  ease: TRACE_ROW_TRANSITION_EASE,
+                },
+              }}
+              transition={{
+                duration: reduceMotion === true ? 0.1 : 0.16,
+                ease: TRACE_ROW_TRANSITION_EASE,
+              }}
+              className={cn(
+                "block min-w-0",
+                expanded ? "break-words whitespace-normal" : "truncate",
+              )}
+            >
+              {content}
+            </motion.span>
+          </AnimatePresence>
+        </motion.span>
+        {outcome ? (
+          <motion.span
+            layout={reduceMotion === true ? false : "position"}
+            layoutDependency={expanded}
+            className={cn(
+              "ml-auto shrink-0 text-[0.6875rem]",
+              expanded && "mt-0.5",
+              outcome === "failed" && "text-negative",
+            )}
+          >
+            {outcome}
+          </motion.span>
+        ) : null}
+        <motion.span
+          layout={reduceMotion === true ? false : "position"}
+          layoutDependency={expanded}
+          className={cn("shrink-0", expanded && "mt-0.5")}
+        >
+          <ChevronDown
+            className={cn(
+              "size-3.5 text-muted-foreground transition-transform duration-200",
+              expanded && "rotate-180",
+            )}
+            aria-hidden
+          />
+        </motion.span>
+      </button>
+    </motion.div>
   );
 }
 
