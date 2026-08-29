@@ -8,9 +8,16 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@renderer/components/ui/button";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+} from "@renderer/components/ui/motion";
 import { Skeleton } from "@renderer/components/ui/skeleton";
 import { cn } from "@renderer/lib/utils";
 import type { DesktopAgentSummary } from "../../../../radius-api";
+
+const AGENT_AUTH_STATE_EASE = [0.23, 1, 0.32, 1] as const;
 
 function safeAgentError(cause: unknown): string {
   if (!(cause instanceof Error)) return "Agent sign-in could not be completed";
@@ -41,10 +48,15 @@ function authenticationLabel(agent: DesktopAgentSummary): string {
 }
 
 export function AgentsPage(): ReactNode {
+  const reduceMotion = useReducedMotion();
   const [agents, setAgents] = useState<DesktopAgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
+  const enterTransform =
+    reduceMotion === true ? "translateY(0px)" : "translateY(2px)";
+  const exitTransform =
+    reduceMotion === true ? "translateY(0px)" : "translateY(-2px)";
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -161,6 +173,7 @@ export function AgentsPage(): ReactNode {
                 agent.authentication.state === "not_required";
               const pending = pendingAgentId === agent.id;
               const StatusIcon = connected ? CircleCheck : ShieldCheck;
+              const authenticationStateKey = `${agent.authentication.state}:${pending ? "pending" : "settled"}`;
               return (
                 <div
                   key={agent.id}
@@ -178,33 +191,87 @@ export function AgentsPage(): ReactNode {
                         {agent.detail}
                       </span>
                     </div>
-                    <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-                      <StatusIcon className="size-3.5 shrink-0" aria-hidden />
-                      <span>{authenticationLabel(agent)}</span>
-                    </p>
+                    <div className="relative mt-1 min-h-5">
+                      <AnimatePresence initial={false} mode="popLayout">
+                        <motion.p
+                          key={`status:${authenticationStateKey}`}
+                          initial={{ opacity: 0, transform: enterTransform }}
+                          animate={{
+                            opacity: 1,
+                            transform: "translateY(0px)",
+                          }}
+                          exit={{
+                            opacity: 0,
+                            transform: exitTransform,
+                            transition: {
+                              duration: 0.1,
+                              ease: AGENT_AUTH_STATE_EASE,
+                            },
+                          }}
+                          transition={{
+                            duration: reduceMotion === true ? 0.1 : 0.16,
+                            ease: AGENT_AUTH_STATE_EASE,
+                          }}
+                          className="flex items-center gap-1.5 text-sm text-muted-foreground"
+                        >
+                          <StatusIcon
+                            className="size-3.5 shrink-0"
+                            aria-hidden
+                          />
+                          <span>{authenticationLabel(agent)}</span>
+                        </motion.p>
+                      </AnimatePresence>
+                    </div>
                   </div>
-                  {connected &&
-                  agent.authentication.state !== "not_required" ? (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      disabled={pending}
-                      onClick={() => void disconnect(agent.id)}
-                    >
-                      {pending ? "Signing out" : "Sign out"}
-                    </Button>
-                  ) : agent.authentication.state === "not_required" ? null : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={pending}
-                      onClick={() => void connect(agent.id)}
-                    >
-                      {pending ? "Waiting for browser" : "Sign in"}
-                    </Button>
-                  )}
+                  <div className="relative flex min-h-8 w-36 shrink-0 justify-end">
+                    <AnimatePresence initial={false} mode="popLayout">
+                      <motion.div
+                        key={`action:${authenticationStateKey}`}
+                        initial={{ opacity: 0, transform: enterTransform }}
+                        animate={{
+                          opacity: 1,
+                          transform: "translateY(0px)",
+                        }}
+                        exit={{
+                          opacity: 0,
+                          transform: exitTransform,
+                          transition: {
+                            duration: 0.1,
+                            ease: AGENT_AUTH_STATE_EASE,
+                          },
+                        }}
+                        transition={{
+                          duration: reduceMotion === true ? 0.1 : 0.16,
+                          ease: AGENT_AUTH_STATE_EASE,
+                        }}
+                        className="flex min-h-8 items-center justify-end"
+                      >
+                        {connected &&
+                        agent.authentication.state !== "not_required" ? (
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="ghost"
+                            disabled={pending}
+                            onClick={() => void disconnect(agent.id)}
+                          >
+                            {pending ? "Signing out" : "Sign out"}
+                          </Button>
+                        ) : agent.authentication.state ===
+                          "not_required" ? null : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={pending}
+                            onClick={() => void connect(agent.id)}
+                          >
+                            {pending ? "Waiting for browser" : "Sign in"}
+                          </Button>
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
                 </div>
               );
             })
