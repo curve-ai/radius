@@ -30,6 +30,12 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { Input } from "@renderer/components/ui/input";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type Variants,
+} from "@renderer/components/ui/motion";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import { Skeleton } from "@renderer/components/ui/skeleton";
 import { cn } from "@renderer/lib/utils";
@@ -40,6 +46,11 @@ import type {
 } from "../../../../radius-api";
 
 type CatalogCategory = DesktopConnectorCatalogEntry["category"];
+type ConnectorViewDirection = "back" | "forward";
+type ConnectorViewMotionContext = {
+  direction: ConnectorViewDirection;
+  reduceMotion: boolean;
+};
 
 type CatalogSection = {
   category: CatalogCategory;
@@ -55,6 +66,45 @@ const CATEGORY_LABELS: Record<CatalogCategory, string> = {
   finance: "Finance",
   communication: "Communication",
   other: "More connectors",
+};
+
+const CONNECTOR_VIEW_EASE = [0.23, 1, 0.32, 1] as const;
+const CONNECTOR_VIEW_VARIANTS: Variants = {
+  enter: ({
+    direction,
+    reduceMotion,
+  }: ConnectorViewMotionContext): {
+    opacity: number;
+    pointerEvents: "none";
+    transform: string;
+  } => {
+    const transform = reduceMotion
+      ? "translateX(0px)"
+      : direction === "forward"
+        ? "translateX(8px)"
+        : "translateX(-8px)";
+    return { opacity: 0, pointerEvents: "none", transform };
+  },
+  center: {
+    opacity: 1,
+    pointerEvents: "auto",
+    transform: "translateX(0px)",
+  },
+  exit: ({
+    direction,
+    reduceMotion,
+  }: ConnectorViewMotionContext): {
+    opacity: number;
+    pointerEvents: "none";
+    transform: string;
+  } => {
+    const transform = reduceMotion
+      ? "translateX(0px)"
+      : direction === "forward"
+        ? "translateX(-8px)"
+        : "translateX(8px)";
+    return { opacity: 0, pointerEvents: "none", transform };
+  },
 };
 
 function ConnectorSearch({
@@ -401,6 +451,7 @@ function ConnectorDetailView({
 }
 
 export function ConnectorsPage(): ReactNode {
+  const reduceMotion = useReducedMotion();
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [addUrl, setAddUrl] = useState("");
@@ -424,6 +475,8 @@ export function ConnectorsPage(): ReactNode {
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(
     null,
   );
+  const [viewDirection, setViewDirection] =
+    useState<ConnectorViewDirection>("forward");
   const [scope, setScope] = useState<"public" | "custom">("public");
   const [enabledToolsState, setEnabledToolsState] = useState<{
     installationId: string;
@@ -559,7 +612,18 @@ export function ConnectorsPage(): ReactNode {
     void load(query, selectedCategory);
   };
 
+  const openConnector = (catalogId: string): void => {
+    setViewDirection("forward");
+    setSelectedCatalogId(catalogId);
+  };
+
+  const closeConnector = (): void => {
+    setViewDirection("back");
+    setSelectedCatalogId(null);
+  };
+
   const openCategory = (category: CatalogCategory): void => {
+    setViewDirection("forward");
     setCatalog([]);
     setCatalogNextCursor(null);
     setCatalogError(null);
@@ -569,6 +633,7 @@ export function ConnectorsPage(): ReactNode {
   };
 
   const closeCategory = (): void => {
+    setViewDirection("back");
     setCatalog([]);
     setCatalogNextCursor(null);
     setCatalogError(null);
@@ -663,8 +728,14 @@ export function ConnectorsPage(): ReactNode {
     }
   };
 
+  let viewKey: string;
+  let viewDepth: 0 | 1 | 2;
+  let viewContent: ReactNode;
+
   if (selectedEntry) {
-    return (
+    viewKey = `detail:${selectedEntry.id}`;
+    viewDepth = 2;
+    viewContent = (
       <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-7 sm:px-8 sm:pt-9">
         <ConnectorDetailView
           backLabel={
@@ -685,16 +756,16 @@ export function ConnectorsPage(): ReactNode {
             enabledToolsState?.installationId !== selectedInstalled.id,
           )}
           pending={pendingAction !== null}
-          onBack={() => setSelectedCatalogId(null)}
+          onBack={closeConnector}
           onInstall={(id) => void installCatalogEntry(id)}
         />
       </section>
     );
-  }
-
-  if (selectedCategory) {
+  } else if (selectedCategory) {
     const categoryLabel = CATEGORY_LABELS[selectedCategory];
-    return (
+    viewKey = `category:${selectedCategory}`;
+    viewDepth = 1;
+    viewContent = (
       <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-7 sm:px-8 sm:pt-9">
         <Button type="button" variant="ghost" size="sm" onClick={closeCategory}>
           <ArrowLeft className="size-3.5" aria-hidden />
@@ -748,7 +819,7 @@ export function ConnectorsPage(): ReactNode {
                     installedByCatalogId.get(entry.sourceServerName) ?? null
                   }
                   pending={pendingAction !== null}
-                  onOpen={setSelectedCatalogId}
+                  onOpen={openConnector}
                   onInstall={(id) => void installCatalogEntry(id)}
                 />
               ))}
@@ -779,187 +850,227 @@ export function ConnectorsPage(): ReactNode {
         ) : null}
       </section>
     );
+  } else {
+    viewKey = "root";
+    viewDepth = 0;
+    viewContent = (
+      <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 sm:pt-12">
+        <div className="flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <h2 className="type-lg text-foreground">Connectors</h2>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="Refresh connectors"
+              title="Refresh connectors"
+              disabled={loading}
+              onClick={refresh}
+            >
+              <RefreshCw
+                className={cn("size-4", loading && "animate-spin")}
+                aria-hidden
+              />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={pendingAction !== null}
+              onClick={() => {
+                setAddError(null);
+                setAddOpen(true);
+              }}
+            >
+              <Plus className="size-3.5" aria-hidden />
+              Add
+            </Button>
+          </div>
+        </div>
+
+        <ConnectorSearch value={query} onChange={setQuery} />
+
+        {error ? (
+          <div
+            role="alert"
+            className="mt-5 flex items-center gap-2 text-sm text-negative"
+          >
+            <CircleAlert className="size-4 shrink-0" aria-hidden />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
+        <section
+          className="mt-8"
+          aria-labelledby="installed-connectors-heading"
+        >
+          <h3
+            id="installed-connectors-heading"
+            className="type-md-sm text-foreground"
+          >
+            Installed
+          </h3>
+          <div
+            className={cn(
+              "mt-3 flex items-center gap-3 overflow-x-auto",
+              (loading || connectors.length > 0) && "min-h-12 pb-1",
+            )}
+          >
+            {loading && connectors.length === 0 ? (
+              Array.from({ length: 8 }, (_, index) => (
+                <Skeleton key={index} className="size-12 shrink-0" />
+              ))
+            ) : connectors.length > 0 ? (
+              connectors.map((connector) => (
+                <ConnectorLogo
+                  key={connector.id}
+                  label={connector.displayName}
+                  logoUrl={connector.logoUrl}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No connectors installed yet.
+              </p>
+            )}
+          </div>
+        </section>
+
+        <SegmentedControl
+          className="mt-5"
+          size="md"
+          ariaLabel="Connector source"
+          options={[
+            { id: "public", label: "Public" },
+            { id: "custom", label: "Custom" },
+          ]}
+          value={scope}
+          onChange={setScope}
+        />
+
+        {scope === "custom" ? (
+          <CustomConnectorSection
+            connectors={customConnectors}
+            onDelete={setDeleteTarget}
+          />
+        ) : (
+          <>
+            {needsSetup.length > 0 ? (
+              <NeedsSetupSection connectors={needsSetup} />
+            ) : null}
+
+            {catalogError ? (
+              <div
+                role="status"
+                className="mt-5 flex items-center justify-between gap-4 border-y border-border py-3 text-sm text-muted-foreground"
+              >
+                <span>The public connector catalog is unavailable.</span>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="secondary"
+                  onClick={refresh}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : null}
+
+            {catalogSections.map((section) => {
+              const sectionId = `connector-section-${section.label
+                .replace(/\s+/g, "-")
+                .toLowerCase()}`;
+              return (
+                <section
+                  key={section.key}
+                  className="mt-9"
+                  aria-labelledby={sectionId}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <h3 id={sectionId} className="type-md-sm text-foreground">
+                      {section.label}
+                    </h3>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => openCategory(section.category)}
+                    >
+                      Show more
+                      <ChevronRight className="size-3.5" aria-hidden />
+                    </Button>
+                  </div>
+                  <div className="mt-3 grid border-t border-border min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
+                    {section.entries.map((entry) => (
+                      <CatalogRow
+                        key={entry.id}
+                        entry={entry}
+                        installed={
+                          installedByCatalogId.get(entry.sourceServerName) ??
+                          null
+                        }
+                        pending={pendingAction !== null}
+                        onOpen={openConnector}
+                        onInstall={(id) => void installCatalogEntry(id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+
+            {!loading && !catalogError && catalogSections.length === 0 ? (
+              <div className="py-14 text-center">
+                <p className="text-sm text-foreground">
+                  {query
+                    ? "No connectors match this search"
+                    : "No public connectors found"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {query
+                    ? "Try a product name, service, or capability."
+                    : "Refresh after the public catalog has been synchronized."}
+                </p>
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+    );
   }
 
+  const viewMotionContext: ConnectorViewMotionContext = {
+    direction: viewDirection,
+    reduceMotion: reduceMotion === true,
+  };
+
   return (
-    <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 sm:pt-12">
-      <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h2 className="type-lg text-foreground">Connectors</h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="Refresh connectors"
-            title="Refresh connectors"
-            disabled={loading}
-            onClick={refresh}
-          >
-            <RefreshCw
-              className={cn("size-4", loading && "animate-spin")}
-              aria-hidden
-            />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={pendingAction !== null}
-            onClick={() => {
-              setAddError(null);
-              setAddOpen(true);
+    <>
+      <div className="relative">
+        <AnimatePresence
+          initial={false}
+          mode="popLayout"
+          custom={viewMotionContext}
+        >
+          <motion.div
+            key={viewKey}
+            custom={viewMotionContext}
+            variants={CONNECTOR_VIEW_VARIANTS}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{
+              duration: reduceMotion === true ? 0.1 : 0.16,
+              ease: CONNECTOR_VIEW_EASE,
             }}
+            data-connector-view-depth={viewDepth}
+            className="w-full"
           >
-            <Plus className="size-3.5" aria-hidden />
-            Add
-          </Button>
-        </div>
+            {viewContent}
+          </motion.div>
+        </AnimatePresence>
       </div>
-
-      <ConnectorSearch value={query} onChange={setQuery} />
-
-      {error ? (
-        <div
-          role="alert"
-          className="mt-5 flex items-center gap-2 text-sm text-negative"
-        >
-          <CircleAlert className="size-4 shrink-0" aria-hidden />
-          <span>{error}</span>
-        </div>
-      ) : null}
-
-      <section className="mt-8" aria-labelledby="installed-connectors-heading">
-        <h3
-          id="installed-connectors-heading"
-          className="type-md-sm text-foreground"
-        >
-          Installed
-        </h3>
-        <div
-          className={cn(
-            "mt-3 flex items-center gap-3 overflow-x-auto",
-            (loading || connectors.length > 0) && "min-h-12 pb-1",
-          )}
-        >
-          {loading && connectors.length === 0 ? (
-            Array.from({ length: 8 }, (_, index) => (
-              <Skeleton key={index} className="size-12 shrink-0" />
-            ))
-          ) : connectors.length > 0 ? (
-            connectors.map((connector) => (
-              <ConnectorLogo
-                key={connector.id}
-                label={connector.displayName}
-                logoUrl={connector.logoUrl}
-              />
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No connectors installed yet.
-            </p>
-          )}
-        </div>
-      </section>
-
-      <SegmentedControl
-        className="mt-5"
-        size="md"
-        ariaLabel="Connector source"
-        options={[
-          { id: "public", label: "Public" },
-          { id: "custom", label: "Custom" },
-        ]}
-        value={scope}
-        onChange={setScope}
-      />
-
-      {scope === "custom" ? (
-        <CustomConnectorSection
-          connectors={customConnectors}
-          onDelete={setDeleteTarget}
-        />
-      ) : (
-        <>
-          {needsSetup.length > 0 ? (
-            <NeedsSetupSection connectors={needsSetup} />
-          ) : null}
-
-          {catalogError ? (
-            <div
-              role="status"
-              className="mt-5 flex items-center justify-between gap-4 border-y border-border py-3 text-sm text-muted-foreground"
-            >
-              <span>The public connector catalog is unavailable.</span>
-              <Button
-                type="button"
-                size="xs"
-                variant="secondary"
-                onClick={refresh}
-              >
-                Retry
-              </Button>
-            </div>
-          ) : null}
-
-          {catalogSections.map((section) => {
-            const sectionId = `connector-section-${section.label
-              .replace(/\s+/g, "-")
-              .toLowerCase()}`;
-            return (
-              <section
-                key={section.key}
-                className="mt-9"
-                aria-labelledby={sectionId}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <h3 id={sectionId} className="type-md-sm text-foreground">
-                    {section.label}
-                  </h3>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => openCategory(section.category)}
-                  >
-                    Show more
-                    <ChevronRight className="size-3.5" aria-hidden />
-                  </Button>
-                </div>
-                <div className="mt-3 grid border-t border-border min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-                  {section.entries.map((entry) => (
-                    <CatalogRow
-                      key={entry.id}
-                      entry={entry}
-                      installed={
-                        installedByCatalogId.get(entry.sourceServerName) ?? null
-                      }
-                      pending={pendingAction !== null}
-                      onOpen={setSelectedCatalogId}
-                      onInstall={(id) => void installCatalogEntry(id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-
-          {!loading && !catalogError && catalogSections.length === 0 ? (
-            <div className="py-14 text-center">
-              <p className="text-sm text-foreground">
-                {query
-                  ? "No connectors match this search"
-                  : "No public connectors found"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {query
-                  ? "Try a product name, service, or capability."
-                  : "Refresh after the public catalog has been synchronized."}
-              </p>
-            </div>
-          ) : null}
-        </>
-      )}
 
       <Dialog
         open={addOpen}
@@ -1083,7 +1194,7 @@ export function ConnectorsPage(): ReactNode {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </>
   );
 }
 
