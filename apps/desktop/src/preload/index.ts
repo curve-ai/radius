@@ -6,6 +6,7 @@ import {
 } from "../update-types";
 import type { RadiusApi } from "../radius-api";
 import type { BrowserConnectionStatus } from "../radius-api";
+import type { DesktopConnectorCatalogQuery } from "../radius-api";
 import type { StartAgentPromptInput } from "../radius-api";
 
 const radiusApi = {
@@ -35,8 +36,8 @@ const radiusApi = {
   listConnectors: () => ipcRenderer.invoke("radius:list-connectors"),
   listConnectorTools: (installationId: string) =>
     ipcRenderer.invoke("radius:list-connector-tools", installationId),
-  listConnectorCatalog: (search?: string) =>
-    ipcRenderer.invoke("radius:list-connector-catalog", search),
+  listConnectorCatalog: (query?: DesktopConnectorCatalogQuery) =>
+    ipcRenderer.invoke("radius:list-connector-catalog", query),
   installCatalogConnector: (id: string) =>
     ipcRenderer.invoke("radius:install-catalog-connector", id),
   installConnector: (input: { name: string; url: string }) =>

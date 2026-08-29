@@ -31,6 +31,12 @@ export type DesktopConnector = ConnectorSummary;
 export type DesktopConnectorCatalogEntry = ConnectorCatalogEntry;
 export type DesktopConnectorEnabledTool = ConnectorEnabledToolSummary;
 
+export interface DesktopConnectorCatalogQuery {
+  category?: DesktopConnectorCatalogEntry["category"];
+  cursor?: string;
+  search?: string;
+}
+
 export interface ProjectFolderSelection {
   selectionId: string;
   rootPath: string;
@@ -125,10 +131,10 @@ export interface RadiusApi {
   listConnectorTools(
     installationId: string,
   ): Promise<DesktopConnectorEnabledTool[]>;
-  listConnectorCatalog(search?: string): Promise<{
+  listConnectorCatalog(query?: DesktopConnectorCatalogQuery): Promise<{
     connectors: DesktopConnectorCatalogEntry[];
     nextCursor: string | null;
-    protocolVersion: 1;
+    protocolVersion: 2;
   }>;
   installCatalogConnector(id: string): Promise<DesktopConnector>;
   installConnector(input: {

@@ -1,5 +1,6 @@
 import {
   ConnectorCatalogEntrySchema,
+  ConnectorCatalogCategorySchema,
   ConnectorCatalogListResponseSchema,
   ConnectorLogoResolutionSchema,
   type ConnectorCatalogEntry,
@@ -84,12 +85,36 @@ async function logoDataUrl(value: string | null): Promise<string | null> {
 }
 
 export async function listConnectorCatalogForRenderer(
-  search: unknown,
+  input: unknown,
 ): Promise<ConnectorCatalogListResponse> {
-  const query = typeof search === "string" ? search.trim().slice(0, 120) : "";
+  const request =
+    typeof input === "object" && input !== null
+      ? (input as {
+          category?: unknown;
+          cursor?: unknown;
+          search?: unknown;
+        })
+      : {};
+  const search =
+    typeof request.search === "string"
+      ? request.search.trim().slice(0, 120)
+      : "";
+  const category =
+    request.category === undefined
+      ? null
+      : ConnectorCatalogCategorySchema.safeParse(request.category);
+  if (category && !category.success) {
+    throw new Error("CONNECTOR_CATALOG_CATEGORY_INVALID");
+  }
+  const cursor =
+    typeof request.cursor === "string"
+      ? request.cursor.trim().slice(0, 4096)
+      : "";
   const url = new URL("connectors", catalogBaseUrl());
   url.searchParams.set("limit", "100");
-  if (query) url.searchParams.set("search", query);
+  if (search) url.searchParams.set("search", search);
+  if (category?.success) url.searchParams.set("category", category.data);
+  if (cursor) url.searchParams.set("cursor", cursor);
   const response = await fetch(url, {
     signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
     headers: { accept: "application/json" },

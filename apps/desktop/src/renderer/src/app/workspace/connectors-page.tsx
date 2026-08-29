@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  ChevronRight,
   CircleAlert,
   ExternalLink,
   Plug,
@@ -38,11 +39,16 @@ import type {
   DesktopConnectorEnabledTool,
 } from "../../../../radius-api";
 
-const CATEGORY_LABELS: Record<
-  DesktopConnectorCatalogEntry["category"],
-  string
-> = {
-  featured: "Featured",
+type CatalogCategory = DesktopConnectorCatalogEntry["category"];
+
+type CatalogSection = {
+  category: CatalogCategory;
+  entries: DesktopConnectorCatalogEntry[];
+  key: string;
+  label: string;
+};
+
+const CATEGORY_LABELS: Record<CatalogCategory, string> = {
   productivity: "Productivity",
   developer_tools: "Developer tools",
   data: "Data",
@@ -50,6 +56,31 @@ const CATEGORY_LABELS: Record<
   communication: "Communication",
   other: "More connectors",
 };
+
+function ConnectorSearch({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}): ReactNode {
+  return (
+    <div className="relative mt-7">
+      <Search
+        className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+      <Input
+        type="search"
+        value={value}
+        aria-label="Search connectors"
+        placeholder="Search connectors"
+        className="h-11 rounded-full pl-11 text-base md:text-base"
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
 
 function connectionLabel(
   state: DesktopConnector["providers"][number]["connectionState"],
@@ -182,6 +213,7 @@ function installStatus(connector: DesktopConnector | null): string {
 }
 
 function ConnectorDetailView({
+  backLabel,
   entry,
   installed,
   tools,
@@ -190,6 +222,7 @@ function ConnectorDetailView({
   onBack,
   onInstall,
 }: {
+  backLabel: string;
   entry: DesktopConnectorCatalogEntry;
   installed: DesktopConnector | null;
   tools: DesktopConnectorEnabledTool[];
@@ -209,7 +242,7 @@ function ConnectorDetailView({
     <>
       <Button type="button" variant="ghost" size="sm" onClick={onBack}>
         <ArrowLeft className="size-3.5" aria-hidden />
-        All connectors
+        {backLabel}
       </Button>
 
       <div className="mt-7 flex items-start gap-4">
@@ -380,8 +413,14 @@ export function ConnectorsPage(): ReactNode {
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [catalogNextCursor, setCatalogNextCursor] = useState<string | null>(
+    null,
+  );
+  const [selectedCategory, setSelectedCategory] =
+    useState<CatalogCategory | null>(null);
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(
     null,
   );
@@ -392,37 +431,49 @@ export function ConnectorsPage(): ReactNode {
   } | null>(null);
   const loadRequestRef = useRef(0);
 
-  const load = useCallback(async (search: string): Promise<void> => {
-    const requestId = ++loadRequestRef.current;
-    setLoading(true);
-    const [localResult, catalogResult] = await Promise.allSettled([
-      window.radius.listConnectors(),
-      window.radius.listConnectorCatalog(search),
-    ]);
-    if (requestId !== loadRequestRef.current) return;
-    if (localResult.status === "fulfilled") {
-      setConnectors(localResult.value);
-      setError(null);
-    } else {
-      setError(
-        localResult.reason instanceof Error
-          ? localResult.reason.message
-          : "Connectors could not be loaded",
-      );
-    }
-    if (catalogResult.status === "fulfilled") {
-      setCatalog(catalogResult.value.connectors);
-      setCatalogError(null);
-    } else {
-      setCatalogError("The public connector catalog is unavailable");
-    }
-    setLoading(false);
-  }, []);
+  const load = useCallback(
+    async (search: string, category: CatalogCategory | null): Promise<void> => {
+      const requestId = ++loadRequestRef.current;
+      setLoading(true);
+      const [localResult, catalogResult] = await Promise.allSettled([
+        window.radius.listConnectors(),
+        window.radius.listConnectorCatalog({
+          ...(category ? { category } : {}),
+          ...(search ? { search } : {}),
+        }),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
+      if (localResult.status === "fulfilled") {
+        setConnectors(localResult.value);
+        setError(null);
+      } else {
+        setError(
+          localResult.reason instanceof Error
+            ? localResult.reason.message
+            : "Connectors could not be loaded",
+        );
+      }
+      if (catalogResult.status === "fulfilled") {
+        setCatalog(catalogResult.value.connectors);
+        setCatalogNextCursor(catalogResult.value.nextCursor);
+        setCatalogError(null);
+      } else {
+        setCatalog([]);
+        setCatalogNextCursor(null);
+        setCatalogError("The public connector catalog is unavailable");
+      }
+      setLoading(false);
+    },
+    [],
+  );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(query), 250);
+    const timer = window.setTimeout(
+      () => void load(query, selectedCategory),
+      250,
+    );
     return () => window.clearTimeout(timer);
-  }, [load, query]);
+  }, [load, query, selectedCategory]);
 
   const installedByCatalogId = useMemo(
     () =>
@@ -450,16 +501,25 @@ export function ConnectorsPage(): ReactNode {
     [connectors],
   );
   const catalogSections = useMemo(() => {
-    const sections = new Map<string, DesktopConnectorCatalogEntry[]>();
-    const featured = catalog.filter((entry) => entry.featured);
-    if (featured.length > 0) sections.set("Featured", featured);
-    for (const entry of catalog.filter((item) => !item.featured)) {
-      const label = CATEGORY_LABELS[entry.category];
-      const values = sections.get(label) ?? [];
+    const sections: CatalogSection[] = [];
+    const categories = new Map<
+      CatalogCategory,
+      DesktopConnectorCatalogEntry[]
+    >();
+    for (const entry of catalog) {
+      const values = categories.get(entry.category) ?? [];
       values.push(entry);
-      sections.set(label, values);
+      categories.set(entry.category, values);
     }
-    return [...sections.entries()];
+    for (const [category, entries] of categories) {
+      sections.push({
+        category,
+        entries,
+        key: `category-${category}`,
+        label: CATEGORY_LABELS[category],
+      });
+    }
+    return sections;
   }, [catalog]);
   const selectedEntry = useMemo(
     () => catalog.find((entry) => entry.id === selectedCatalogId) ?? null,
@@ -496,7 +556,52 @@ export function ConnectorsPage(): ReactNode {
   }, [selectedInstalled]);
 
   const refresh = (): void => {
-    void load(query);
+    void load(query, selectedCategory);
+  };
+
+  const openCategory = (category: CatalogCategory): void => {
+    setCatalog([]);
+    setCatalogNextCursor(null);
+    setCatalogError(null);
+    setQuery("");
+    setSelectedCategory(category);
+    document.getElementById("main-content")?.scrollTo({ top: 0 });
+  };
+
+  const closeCategory = (): void => {
+    setCatalog([]);
+    setCatalogNextCursor(null);
+    setCatalogError(null);
+    setQuery("");
+    setSelectedCategory(null);
+    document.getElementById("main-content")?.scrollTo({ top: 0 });
+  };
+
+  const loadMore = async (): Promise<void> => {
+    if (!selectedCategory || !catalogNextCursor || loadingMore) return;
+    const requestId = loadRequestRef.current;
+    setLoadingMore(true);
+    try {
+      const result = await window.radius.listConnectorCatalog({
+        category: selectedCategory,
+        cursor: catalogNextCursor,
+        ...(query ? { search: query } : {}),
+      });
+      if (requestId !== loadRequestRef.current) return;
+      setCatalog((current) => {
+        const byId = new Map(current.map((entry) => [entry.id, entry]));
+        for (const entry of result.connectors) byId.set(entry.id, entry);
+        return [...byId.values()];
+      });
+      setCatalogNextCursor(result.nextCursor);
+      setCatalogError(null);
+    } catch {
+      if (requestId === loadRequestRef.current) {
+        setCatalogError("More connectors could not be loaded");
+      }
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   const installCustom = async (
@@ -507,7 +612,7 @@ export function ConnectorsPage(): ReactNode {
     setAddError(null);
     try {
       await window.radius.installConnector({ name: addName, url: addUrl });
-      await load(query);
+      await load(query, selectedCategory);
       setAddName("");
       setAddUrl("");
       setAddOpen(false);
@@ -530,7 +635,7 @@ export function ConnectorsPage(): ReactNode {
     setPendingAction(id);
     try {
       await window.radius.installCatalogConnector(id);
-      await load(query);
+      await load(query, selectedCategory);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -548,7 +653,7 @@ export function ConnectorsPage(): ReactNode {
     try {
       await window.radius.deleteConnector(deleteTarget.id);
       setDeleteTarget(null);
-      await load(query);
+      await load(query, selectedCategory);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Connector deletion failed",
@@ -562,6 +667,11 @@ export function ConnectorsPage(): ReactNode {
     return (
       <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-7 sm:px-8 sm:pt-9">
         <ConnectorDetailView
+          backLabel={
+            selectedCategory
+              ? CATEGORY_LABELS[selectedCategory]
+              : "All connectors"
+          }
           entry={selectedEntry}
           installed={selectedInstalled}
           tools={
@@ -578,6 +688,95 @@ export function ConnectorsPage(): ReactNode {
           onBack={() => setSelectedCatalogId(null)}
           onInstall={(id) => void installCatalogEntry(id)}
         />
+      </section>
+    );
+  }
+
+  if (selectedCategory) {
+    const categoryLabel = CATEGORY_LABELS[selectedCategory];
+    return (
+      <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-7 sm:px-8 sm:pt-9">
+        <Button type="button" variant="ghost" size="sm" onClick={closeCategory}>
+          <ArrowLeft className="size-3.5" aria-hidden />
+          All connectors
+        </Button>
+
+        <h2 className="mt-7 type-lg text-foreground">{categoryLabel}</h2>
+        <ConnectorSearch value={query} onChange={setQuery} />
+
+        {error ? (
+          <div
+            role="alert"
+            className="mt-5 flex items-center gap-2 text-sm text-negative"
+          >
+            <CircleAlert className="size-4 shrink-0" aria-hidden />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
+        {catalogError ? (
+          <div
+            role="status"
+            className="mt-5 flex items-center justify-between gap-4 border-y border-border py-3 text-sm text-muted-foreground"
+          >
+            <span>{catalogError}</span>
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              onClick={refresh}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : null}
+
+        {loading && catalog.length === 0 ? (
+          <div className="mt-8 grid gap-3 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
+            {Array.from({ length: 10 }, (_, index) => (
+              <Skeleton key={index} className="h-[4.5rem] w-full" />
+            ))}
+          </div>
+        ) : catalog.length > 0 ? (
+          <>
+            <div className="mt-8 grid border-t border-border min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
+              {catalog.map((entry) => (
+                <CatalogRow
+                  key={entry.id}
+                  entry={entry}
+                  installed={
+                    installedByCatalogId.get(entry.sourceServerName) ?? null
+                  }
+                  pending={pendingAction !== null}
+                  onOpen={setSelectedCatalogId}
+                  onInstall={(id) => void installCatalogEntry(id)}
+                />
+              ))}
+            </div>
+            {catalogNextCursor ? (
+              <div className="mt-7 flex justify-center">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={loadingMore}
+                  onClick={() => void loadMore()}
+                >
+                  {loadingMore ? "Loading" : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : !loading && !catalogError ? (
+          <div className="py-14 text-center">
+            <p className="text-sm text-foreground">
+              No {categoryLabel.toLowerCase()} match this search
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Try a product name, service, or capability.
+            </p>
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -618,20 +817,7 @@ export function ConnectorsPage(): ReactNode {
         </div>
       </div>
 
-      <div className="relative mt-7">
-        <Search
-          className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-          aria-hidden
-        />
-        <Input
-          type="search"
-          value={query}
-          aria-label="Search connectors"
-          placeholder="Search connectors"
-          className="h-11 rounded-full pl-11 text-base md:text-base"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      <ConnectorSearch value={query} onChange={setQuery} />
 
       {error ? (
         <div
@@ -716,17 +902,32 @@ export function ConnectorsPage(): ReactNode {
             </div>
           ) : null}
 
-          {catalogSections.map(([label, entries]) => {
-            const sectionId = `connector-section-${label
+          {catalogSections.map((section) => {
+            const sectionId = `connector-section-${section.label
               .replace(/\s+/g, "-")
               .toLowerCase()}`;
             return (
-              <section key={label} className="mt-9" aria-labelledby={sectionId}>
-                <h3 id={sectionId} className="type-md-sm text-foreground">
-                  {label}
-                </h3>
+              <section
+                key={section.key}
+                className="mt-9"
+                aria-labelledby={sectionId}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <h3 id={sectionId} className="type-md-sm text-foreground">
+                    {section.label}
+                  </h3>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => openCategory(section.category)}
+                  >
+                    Show more
+                    <ChevronRight className="size-3.5" aria-hidden />
+                  </Button>
+                </div>
                 <div className="mt-3 grid border-t border-border min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-                  {entries.map((entry) => (
+                  {section.entries.map((entry) => (
                     <CatalogRow
                       key={entry.id}
                       entry={entry}

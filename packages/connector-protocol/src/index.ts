@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONNECTOR_PROFILE_PROTOCOL_VERSION = 1;
-export const CONNECTOR_CATALOG_PROTOCOL_VERSION = 1;
+export const CONNECTOR_CATALOG_PROTOCOL_VERSION = 2;
 
 const uuid = z.string().uuid();
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
@@ -16,7 +16,6 @@ export const ConnectorAuthenticationSchema = z.enum([
   "bearer",
 ]);
 export const ConnectorCatalogCategorySchema = z.enum([
-  "featured",
   "productivity",
   "developer_tools",
   "data",
@@ -198,7 +197,6 @@ export const ConnectorCatalogEntrySchema = z.object({
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(500),
   category: ConnectorCatalogCategorySchema,
-  featured: z.boolean(),
   version: nonempty,
   transport: z.enum(["streamable_http", "stdio"]),
   remoteUrl: z.string().url().nullable(),

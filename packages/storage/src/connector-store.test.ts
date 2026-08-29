@@ -188,7 +188,6 @@ test("installs a public remote catalog entry as staged setup", async () => {
         title: "Example Slides",
         description: "Create and update presentations.",
         category: "productivity",
-        featured: false,
         version: "1.0.0",
         transport: "streamable_http",
         remoteUrl: "https://slides.example.com/mcp",

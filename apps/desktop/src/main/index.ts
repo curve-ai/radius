@@ -195,8 +195,8 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:list-connector-tools", (_event, installationId) =>
       listConnectorToolsForRenderer(installationId),
     );
-    ipcMain.handle("radius:list-connector-catalog", (_event, search) =>
-      listConnectorCatalogForRenderer(search),
+    ipcMain.handle("radius:list-connector-catalog", (_event, query) =>
+      listConnectorCatalogForRenderer(query),
     );
     ipcMain.handle("radius:install-catalog-connector", (_event, id) =>
       installCatalogConnectorForRenderer(id),
