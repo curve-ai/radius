@@ -18,11 +18,13 @@ export interface ActiveProjectSession {
 
 export interface ProjectContextValue {
   activateSession(sessionId: string): Promise<void>;
+  addProjectFolder(projectId: string): Promise<void>;
   activeProject: ProjectSidebarRecord | null;
   activeSession: ActiveProjectSession | null;
   archiveSession(sessionId: string): Promise<void>;
   clearActiveProject(): void;
   clearActiveSession(): void;
+  clearSessionRenameRequest(sessionId: string): void;
   editProject(projectId: string): void;
   error: string | null;
   loading: boolean;
@@ -31,8 +33,12 @@ export interface ProjectContextValue {
   recents: RecentSessionRecord[];
   isSessionUnread(sessionId: string): boolean;
   markSessionsRead(sessionIds: readonly string[]): void;
+  markSessionsUnread(sessionIds: readonly string[]): void;
   refresh(): Promise<void>;
-  relinkProject(projectId: string): Promise<boolean>;
+  requestSessionRename(sessionId: string): void;
+  removeProjectFolder(projectId: string, rootId: string): Promise<void>;
+  renameSession(sessionId: string, title: string): Promise<void>;
+  sessionRenameRequestId: string | null;
   revealProject(projectId: string): Promise<void>;
   selectProject(projectId: string): void;
   selectSession(sessionId: string): void;

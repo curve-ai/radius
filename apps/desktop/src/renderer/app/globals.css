@@ -3,6 +3,7 @@
 
 @import "tw-animate-css";
 @import "react-flagpack/dist/style.css";
+@import "katex/dist/katex.min.css";
 
 @plugin "@tailwindcss/typography";
 
@@ -62,17 +63,20 @@
      `max-w-page` utility; use it for the navbar, page <main>, and footer
      instead of hardcoding a width. */
   --container-page: 1300px;
-  /* Shared physical measure for filing prose. Unlike `ch`, this keeps the
-     left and right edges aligned when headings use a larger type size. */
-  --container-reader: 40rem;
+  /* Shared physical measure for reader and conversation content. Unlike `ch`,
+     this keeps the left and right edges aligned across mixed type sizes. */
+  --container-reader: 46rem;
 
-  /* Radius scale: xs/sm 4px, md/lg 8px, xl 12px, 2xl 16px.
-     Cards use 4px (rounded-sm), media/inputs/panels 8px (rounded-md/lg),
-     buttons are pills. Keep this; don't reach for rounded-xl/2xl on surfaces. */
-  --radius-sm: calc(var(--radius) - 4px); /* 4px — radius-xs */
-  --radius-md: var(--radius); /* 8px — radius-md (inputs) */
-  --radius-lg: var(--radius); /* 8px — radius-lg */
-  --radius-xl: calc(var(--radius) + 4px); /* 12px — radius-xl (rare) */
+  /* Radius scale: 4px detail, 8px cards, 12px controls and rows, 16px
+     content surfaces and elevated shells, and 20px large prompt surfaces.
+     Buttons remain pills. */
+  --radius-xs: calc(var(--radius) - 8px); /* 4px - compact details */
+  --radius-sm: calc(var(--radius) - 4px); /* 8px - cards */
+  --radius-md: var(--radius); /* 12px - inputs and compact controls */
+  --radius-lg: calc(var(--radius) + 4px); /* 16px - content surfaces */
+  --radius-xl: var(--radius); /* 12px - action rows */
+  --radius-2xl: calc(var(--radius) + 4px); /* 16px - elevated shells */
+  --radius-3xl: calc(var(--radius) + 8px); /* 20px - prompt surfaces */
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -236,7 +240,7 @@
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   /* Spacing and radius */
-  --radius: 0.5rem;
+  --radius: 0.75rem;
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -400,7 +404,7 @@
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   /* Spacing and radius */
-  --radius: 0.5rem;
+  --radius: 0.75rem;
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -827,6 +831,127 @@
 
 /* MDX and Code Block Styles */
 @layer components {
+  .radius-chat-panel-inset {
+    padding-inline-end: 1rem;
+  }
+
+  .radius-chat-scrollbar {
+    scrollbar-color: color-mix(
+        in oklab,
+        var(--muted-foreground) 24%,
+        transparent
+      )
+      transparent;
+    scrollbar-width: thin;
+  }
+
+  .radius-chat-scrollbar::-webkit-scrollbar {
+    width: 0.625rem;
+  }
+
+  .radius-chat-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .radius-chat-scrollbar::-webkit-scrollbar-thumb {
+    border: 0.1875rem solid transparent;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--muted-foreground) 24%, transparent);
+    background-clip: padding-box;
+  }
+
+  .radius-chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 38%, transparent);
+    background-clip: padding-box;
+  }
+
+  .radius-message-markdown {
+    overflow-wrap: anywhere;
+  }
+
+  .radius-message-markdown-code {
+    border-radius: var(--radius-sm);
+    background: var(--muted);
+    padding: 0.125rem 0.3rem;
+  }
+
+  .radius-message-markdown-pre .radius-message-markdown-code {
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .radius-message-code-highlight > .shiki {
+    margin: 0;
+    overflow: visible;
+    background: transparent !important;
+    padding: 0;
+  }
+
+  .radius-message-code-highlight code {
+    display: block;
+    min-width: max-content;
+  }
+
+  .dark .radius-message-code-highlight .shiki,
+  .dark .radius-message-code-highlight .shiki span {
+    color: var(--shiki-dark) !important;
+  }
+
+  .radius-message-diagram svg {
+    display: block;
+    max-height: 36rem;
+    max-width: 100%;
+  }
+
+  .radius-message-markdown .katex-display {
+    margin-block: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-block: 0.25rem;
+  }
+
+  .radius-message-markdown [data-footnotes] {
+    margin-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+    color: var(--muted-foreground);
+    font-size: 0.8125rem;
+  }
+
+  .radius-message-markdown [data-footnotes] h2 {
+    margin: 0 0 0.5rem;
+    color: var(--foreground);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.25rem;
+  }
+
+  .radius-message-table-breakout {
+    width: calc(100cqw - 2rem);
+    margin-inline-start: 50%;
+    transform: translateX(-50%);
+  }
+
+  @media (pointer: coarse) {
+    .radius-message-block-controls,
+    .radius-message-table-controls {
+      opacity: 1;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .radius-chat-panel-inset {
+      padding-inline-end: calc(
+        var(--workspace-chat-tool-panel-width, 0px) + 1.5rem
+      );
+    }
+
+    .radius-message-table-breakout {
+      width: calc(100cqw - var(--workspace-chat-tool-panel-width, 0px) - 3rem);
+    }
+  }
+
   /* Code block styling */
   .prose pre {
     @apply !bg-zinc-900 !text-zinc-50 overflow-x-auto rounded-lg border !p-4;

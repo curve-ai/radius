@@ -16,15 +16,15 @@ The first public implementation now includes:
   JSON generation.
 - `@curve-ai/sdk` with a real ACP v1 TypeScript agent server, text streaming,
   session lifecycle, and cancellation propagation.
-- `@curve-ai/cli` with safe `init`, config `validate`, native one-shot or
-  interactive `dev`, Python/command process launch paths, and deterministic
-  `deploy --dry-run` manifest output.
-- Recursive project watching that ignores generated/dependency trees, lets an
-  in-flight turn finish, then reloads config and replaces the development agent
-  before the next prompt. `--no-watch` disables it.
-- A working `dev --sandbox` path that bundles the TypeScript entrypoint,
-  creates a pinned non-root `linux/arm64` Node OCI image, imports it through the
-  Swift runtime helper, and prompts it through `MicrovmAcpRuntime`.
+- `@curve-ai/cli` with safe `init`, config `validate`, ready-application
+  `dev`, immutable `build`, and receipt-only `deploy` paths.
+- `radius dev` registers an independently running loopback ACP WebSocket agent
+  through a mode-0600 ephemeral descriptor, opens the installed Radius app,
+  reloads only declarative Radius configuration, and removes the registration
+  on exit. It does not launch, watch, build, or restart agent source.
+- `radius build` creates the pinned non-root `linux/arm64` OCI image, imports
+  it through the Swift runtime helper, proves the ACP handshake in the real
+  microVM, and writes an immutable receipt beneath `.radius/builds/`.
 - `@curve-ai/platform-contracts` and `@curve-ai/platform-client` with validated
   compatibility, identity, deployment-prepare, and deployment-finalize HTTP
   contracts, HTTPS/loopback enforcement, bearer authentication, bounded JSON,
@@ -36,10 +36,9 @@ The first public implementation now includes:
 - A public `apps/platform-api` Hono service with live health/compatibility,
   bearer authentication middleware, bounded request bodies, idempotency
   enforcement, structured errors, and injected identity/deployment providers.
-- Remote CLI deploy orchestration for compatibility check → deterministic OCI
-  build → deployment preparation → short-lived registry login/push → exact digest
-  finalization. Provider fakes prove the sequence, and the development provider
-  plus pinned Distribution registry prove a real push/finalize/promotion loop.
+- Remote CLI deploy orchestration for compatibility check → prior build receipt
+  → deployment preparation → short-lived registry login → exact OCI-layout push
+  → digest finalization. Deploy refuses stale receipts and never rebuilds.
 - Explicit `radius promote <agent-deployment-id>` and
   `radius rollback --to <agent-deployment-id>` commands that select existing
   immutable deployments with optimistic environment
@@ -89,6 +88,7 @@ deployment feel like:
 ```bash
 bunx @curve-ai/cli@latest init
 bunx @curve-ai/cli@latest dev
+bunx @curve-ai/cli@latest build
 bunx @curve-ai/cli@latest deploy
 ```
 
@@ -394,91 +394,63 @@ Proposed options:
 
 ## `radius dev`
 
-The default loop optimizes edit-to-run latency while keeping a sandbox-parity
-path available.
+Development connects the ready Radius application to an agent process that the
+developer already runs with the repository's normal tools.
 
 ```text
-source change
-    │ watch + validate + incremental bundle
+developer-owned watcher and process
+    │ ACP over authenticated loopback WebSocket
     ▼
-local development supervisor
-    │ ACP over authenticated local transport
-    ├──> Radius desktop development session
-    └──> optional linked Platform test page
+installed Radius development registration
+    │ real desktop UI, host tools, history, and approvals
+    ▼
+agent response
 ```
 
-### Default native development mode
+- Radius never owns the agent process, package manager, file watcher, or hot
+  reload policy.
+- The development endpoint must be `ws://` or `wss://` on loopback. Radius uses
+  ACP's official WebSocket transport and may attach a bearer value read from a
+  named environment variable.
+- The CLI writes one mode-0600 registration beneath Radius user data, launches
+  or focuses Radius, watches only the Radius config file, and deletes the
+  registration on termination.
+- The desktop watches registrations, gives an active development connection
+  precedence over an installed release with the same agent identity, and opens
+  a fresh ACP connection for each run. Agent restarts therefore affect the next
+  run without restarting Radius.
+- Cosmetic and endpoint config changes reload. Agent identity cannot change
+  while the registration is active. Invalid config retains the last valid
+  registration and reports the error in the CLI.
+- Development mode uses the real Radius desktop, host capability broker,
+  project context, history, and approval behavior, but no VM or OCI image.
+- Development registration is local-only and is never accepted as production
+  desired state.
 
-- Runs developer-owned code as a supervised local child process.
-- Uses the same ACP lifecycle and host capability broker as packaged agents.
-- Watches configured source and restarts only after a valid build.
-- Defers replacement until the next prompt so a source change does not kill an
-  in-flight turn; generated `.radius`, dependency, Git, coverage, and `dist`
-  paths are ignored.
-- Pins an in-flight run to the build that started it; a file change affects
-  only new runs.
-- Streams logs, progress, tool requests, artifacts, and failures to the CLI and
-  connected Radius desktop.
-- Requires explicit permission for local files and tools; development mode is
-  not implicit Full access.
-- Works without Cloud or a self-hosted Platform.
-
-Native mode is a developer-convenience boundary, not evidence that an OCI
-agent works inside the distributed microVM.
-
-Watching is enabled for interactive `radius dev` and can be disabled with
-`--no-watch`. One-shot `--prompt` runs use the source snapshot present when the
-command starts.
-
-### Sandbox parity mode
-
-`radius dev --sandbox` builds an OCI candidate from a bundled TypeScript
-entrypoint, imports it into Radius-owned storage, and runs it through the actual
-local microVM host. The current development path uses Docker Buildx as the
-builder, then leaves execution entirely to Radius. It is slower and is required
-before deploy unless CI or `deploy` performs the equivalent smoke.
-
-The current TypeScript sandbox builder requires Docker Buildx. Developers
-should eventually avoid Docker or Podman for static/supported build paths;
-BuildKit remains the explicit initial provider until Radius has a complete
-built-in builder.
-
-### Linked development mode
-
-With `--profile`, the CLI may register ephemeral developer presence with a
-Platform instance so its project test page can initiate runs and display live
-results. Agent execution remains on the developer's machine. The connection is
-outbound, scoped to the linked project/environment, revocable, and never opens
-an unauthenticated inbound port.
-
-Proposed options:
+Implemented options:
 
 ```text
---sandbox                use the real packaged microVM path
---profile <name>         expose dev presence to one Platform instance
---config <path>          select a non-default config
---env-file <path>        load local-only developer variables
---no-open                do not open Radius or a test page
---log-level <level>      control CLI verbosity
+--endpoint <ws-url>              override development.endpoint
+--authorization-env <name>      override development.authorizationEnv
+--config <path>                 select a non-default config
 ```
 
-Environment-file values are injected only into the local run. They are never
-copied into image layers, manifests, build logs, or deployment metadata.
+## `radius build`
 
-### Python native development
+Build is the package/runtime parity boundary. It is separate from live
+development and remote deployment.
 
-For a Python project, native development resolves the configured interpreter,
-verifies `uv.lock`, and runs the entrypoint through a locked environment, for
-example `uv run --locked`. Radius should initially require a compatible `uv`
-installation, then consider managing a pinned `uv` and Python toolchain after
-the workflow is proven. `uv` can manage missing Python installations, but
-automatic downloads must be explicit and visible to the developer.
+1. Load and validate the Radius config.
+2. Produce the deterministic TypeScript or Python `linux/arm64` OCI layout.
+3. Import that exact layout into Radius-owned image storage.
+4. Start it in the real microVM and complete ACP initialization plus session
+   creation.
+5. Stop the smoke runtime and write `receipt.json` beside the OCI layout.
+6. Update `.radius/builds/latest.json` only after verification succeeds.
 
-The file watcher restarts the Python ACP subprocess after syntax/configuration
-validation. It never mutates `uv.lock` during `dev` or `deploy`; dependency
-changes require the developer to update and commit the lock deliberately.
-
-### Python sandbox and deployment build
+The receipt contains the build digest, source OCI manifest digest, bundle hash,
+normalized agent manifest, relative layout/context paths, verification time,
+and verified platform. Failed builds and failed ACP smokes never become latest.
 
 Python deployment builds inside the target Linux architecture. It never copies
 the host `.venv`, macOS wheels, caches, or interpreter into the image.
@@ -546,21 +518,15 @@ whoami, and token management to reuse validated stored credentials.
 
 ## `radius deploy`
 
-V1 builds locally for both Cloud and self-hosted targets. A managed remote
-builder can be added later behind the same build contract.
+Deploy consumes a successful local build receipt for both Cloud and self-hosted
+targets. It never compiles source or recreates the OCI image.
 
 ```text
-agent source
-    │ validate config and compatibility
-    ▼
-normalized manifest + bundled source
-    │ deterministic build
-    ▼
-OCI image + SBOM + provenance
-    │ local sandbox smoke
+verified build receipt + OCI layout
+    │ validate receipt against current config
     ▼
 short-lived scoped registry credentials
-    │ push exact digest
+    │ load and push the existing OCI layout
     ▼
 immutable Platform agent deployment
     │ optional promotion
@@ -572,16 +538,16 @@ Deploy steps:
 
 1. Resolve the config, selected profile, organization, agent, and
    environment.
-2. Verify CLI, SDK, build package, manifest, host, and server compatibility.
-3. Refuse dirty generated state, missing declared files, undeclared required
-   capabilities, or credentials detected in build inputs.
-4. Produce a deterministic bundle, normalized manifest, OCI image, SBOM, and
-   provenance statement.
-5. Run manifest/protocol checks and the sandbox smoke unless an exact build
-   digest already has valid evidence.
-6. Create an idempotent deployment intent and request short-lived,
+2. Resolve the requested receipt, or the latest successful receipt by default.
+3. Require its normalized manifest to match the current Radius config. A stale
+   receipt fails with an instruction to run `radius build`.
+4. Verify Platform compatibility for the receipt's manifest version.
+5. Create an idempotent deployment intent and request short-lived,
    agent-scoped registry credentials.
-7. Push the image and evidence, then submit the exact digest.
+6. Load the receipt's OCI layout into the local image store, retag it only for
+   the scoped upload, push it, and inspect the registry digest. No Docker build
+   command runs during deploy.
+7. Submit the exact pushed digest and source manifest digest.
 8. Let the Platform independently verify digest, size, compatibility,
    provenance, and policy before creating an immutable deployment.
 9. Promote the deployment to the selected environment unless
@@ -606,9 +572,9 @@ Commands and options (implemented unless noted):
 
 ```bash
 radius deploy
+radius deploy --build <build-digest>
 radius deploy --environment staging
 radius deploy --organization acme --environment staging
-radius deploy --dry-run
 radius deploy --skip-promotion
 radius deploy --profile self-hosted
 
@@ -626,10 +592,6 @@ radius members role <membership-id> --role developer --organization acme
 radius members suspend|restore|remove <membership-id> --organization acme
 ```
 
-`--dry-run` writes the exact normalized manifest, build context, OCI metadata,
-SBOM, and provenance beneath `.radius/builds/` without uploading or mutating a
-Platform.
-
 Promotion and rollback never rebuild. They update desired deployment state
 with an expected revision so concurrent operators cannot silently overwrite
 one another.
@@ -640,7 +602,7 @@ one another.
   toolchain line.
 - The runtime SDK may evolve independently within declared compatibility
   ranges.
-- `dev` and `deploy` detect mismatched Radius package versions and fail with
+- `build` and `deploy` detect mismatched Radius package versions and fail with
   exact repair commands. They do not update dependencies without confirmation.
 - A manifest declares its contract version, minimum host version, and supported
   runtime architectures.
@@ -672,7 +634,7 @@ one another.
 - Secrets are materialized only for a run through host or Platform secret
   references and are never embedded in OCI layers.
 - Static capability declarations are requests, not grants.
-- Local native development is visibly distinct from sandbox verification.
+- Live development is visibly distinct from microVM build verification.
 - Registry credentials are short-lived and scoped to one agent/repository
   upload.
 - The Platform verifies uploaded evidence rather than trusting CLI success.
@@ -690,22 +652,24 @@ hand; account sign-in remains a declared deployment requirement after delivery.
 The first complete proof should be:
 
 1. Add Radius to an existing TypeScript repository with `radius init`.
-2. Implement or adapt one agent entrypoint.
-3. Run it from `radius dev` and test through the Radius desktop.
-4. Pass `radius dev --sandbox` through the deterministic OCI and microVM path.
-5. Log in to either Curve Cloud or a self-hosted instance.
-6. Run `radius deploy --environment staging`.
-7. Review the immutable deployment in the open dashboard.
-8. Promote it to production for the organization.
-9. Confirm an organization user can see and run the agent in Radius.
-10. Roll back to the prior deployment without rebuilding.
+2. Run the agent's own watcher with its ACP WebSocket development endpoint.
+3. Run `radius dev` to connect the ready Radius application to that endpoint.
+4. Change both the agent and declarative Radius config without a VM rebuild.
+5. Run `radius build` to create and microVM-verify the immutable OCI receipt.
+6. Log in to either Curve Cloud or a self-hosted instance.
+7. Run `radius deploy --environment staging`; deploy must reuse the receipt.
+8. Review the immutable deployment in the open dashboard.
+9. Promote it to production for the organization.
+10. Confirm an organization user can see and run the agent in Radius.
+11. Roll back to the prior deployment without rebuilding.
 
 After that TypeScript path is stable, the equivalent Python proof is:
 
 1. Initialize an existing `pyproject.toml`/`uv.lock` repository with
    `radius init --language python`.
-2. Run its ACP agent through `radius dev` using the locked local environment.
-3. Build a fresh Linux/arm64 environment with `radius dev --sandbox`.
+2. Expose its independently managed ACP development process over the same
+   loopback WebSocket contract and connect it with `radius dev`.
+3. Build a fresh Linux/arm64 environment with `radius build`.
 4. Deploy and roll back the resulting immutable OCI deployment through the same
    Platform commands used by TypeScript.
 
@@ -725,8 +689,7 @@ After that TypeScript path is stable, the equivalent Python proof is:
 - Final configuration and TypeScript SDK surface.
 - Publication and versioning of the Python SDK wheel outside this workspace.
 - Structured Python capability, artifact, and provenance helper APIs.
-- Native development transport between CLI and Radius desktop.
+- First-party Python helper for the ACP WebSocket development server.
 - Which general agent builds can avoid Docker/BuildKit.
 - Signing-key custody and publisher verification.
 - Release-version display format and content-digest deduplication rules.
-- Exact test-page behavior for linked development mode.

@@ -69,6 +69,7 @@ ui_files=(
   "sidebar.tsx"
   "skeleton.tsx"
   "switch.tsx"
+  "table.tsx"
   "tooltip.tsx"
 )
 

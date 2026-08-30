@@ -22,9 +22,11 @@ type SessionSearchItem = WorkspaceSessionRecord & {
 
 function Shortcut({ children }: { children: ReactNode }): ReactNode {
   return (
-    <kbd className="ml-auto shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-sans text-xs font-normal leading-none text-muted-foreground">
-      {children}
-    </kbd>
+    <span className="ml-auto shrink-0">
+      <kbd className="ml-1 inline-flex rounded-md bg-muted px-1.5 py-0.5 font-sans text-xs font-normal leading-none tabular-nums text-muted-foreground">
+        {children}
+      </kbd>
+    </span>
   );
 }
 

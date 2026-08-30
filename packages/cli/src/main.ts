@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 
 import { loadAgentConfig } from "./config.js";
+import { buildAgent } from "./build.js";
 import { deployAgent } from "./deploy.js";
 import { changeAgentDeployment } from "./deployments.js";
 import { runDevelopmentAgent } from "./dev.js";
@@ -90,26 +91,17 @@ export async function runCli(
     const parsed = parseArgs({
       args,
       allowPositionals: false,
-      allowNegative: true,
       options: {
         config: { type: "string" },
-        prompt: { type: "string", short: "p" },
-        sandbox: { type: "boolean", default: false },
-        watch: { type: "boolean", default: true },
-        "runtime-host": { type: "string" },
-        kernel: { type: "string" },
-        "runtime-root": { type: "string" },
+        endpoint: { type: "string" },
+        "authorization-env": { type: "string" },
       },
     });
     await runDevelopmentAgent({
       root,
       configPath: parsed.values.config,
-      prompt: parsed.values.prompt,
-      sandbox: parsed.values.sandbox,
-      watch: parsed.values.watch,
-      runtimeHostPath: parsed.values["runtime-host"],
-      kernelPath: parsed.values.kernel,
-      runtimeRoot: parsed.values["runtime-root"],
+      endpoint: parsed.values.endpoint,
+      authorizationEnv: parsed.values["authorization-env"],
       io,
     });
     return;
@@ -121,7 +113,7 @@ export async function runCli(
       allowPositionals: false,
       options: {
         config: { type: "string" },
-        "dry-run": { type: "boolean", default: false },
+        build: { type: "string" },
         environment: { type: "string" },
         organization: { type: "string" },
         profile: { type: "string" },
@@ -141,12 +133,34 @@ export async function runCli(
     await deployAgent({
       root,
       configPath: parsed.values.config,
-      dryRun: parsed.values["dry-run"],
+      buildReference: parsed.values.build,
       environment: parsed.values.environment,
       organization: parsed.values.organization,
       profile: parsed.values.profile,
       promote: !parsed.values["skip-promotion"],
       expectedDeploymentRevision: expectedRevision,
+      io,
+    });
+    return;
+  }
+
+  if (command === "build") {
+    const parsed = parseArgs({
+      args,
+      allowPositionals: false,
+      options: {
+        config: { type: "string" },
+        "runtime-host": { type: "string" },
+        kernel: { type: "string" },
+        "runtime-root": { type: "string" },
+      },
+    });
+    await buildAgent({
+      root,
+      configPath: parsed.values.config,
+      runtimeHostPath: parsed.values["runtime-host"],
+      kernelPath: parsed.values.kernel,
+      runtimeRoot: parsed.values["runtime-root"],
       io,
     });
     return;
@@ -440,8 +454,9 @@ Commands:
   radius logout [--profile <name>]
   radius init [--language typescript|python] [--agent-ref <ref>] [--skip-install]
   radius validate [--config <path>]
-  radius dev [--prompt <text>] [--sandbox] [--no-watch] [--config <path>]
-  radius deploy [--dry-run] [--organization <slug>] [--environment <slug>] [--profile <name>]
+  radius dev [--endpoint <ws-url>] [--authorization-env <name>] [--config <path>]
+  radius build [--config <path>]
+  radius deploy [--build <digest-or-receipt>] [--organization <slug>] [--environment <slug>] [--profile <name>]
   radius deployments list [--limit <n>] [--cursor <cursor>] [--json]
   radius environments status [--environment <slug>] [--limit <n>] [--json]
   radius promote <agent-deployment-id> [--environment <slug>] [--expected-revision <n>]

@@ -9,7 +9,10 @@ const timestamp = z.string().datetime({ offset: true });
 const sha256 = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const rawSha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const agentRef = z.string().regex(/^agent_[A-Za-z0-9_-]{6,64}$/);
-const slug = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
+export const PlatformOrganizationSlugSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,62}$/);
+const slug = PlatformOrganizationSlugSchema;
 const cursor = z.string().trim().min(1).max(512).nullable();
 
 export const DEVELOPER_TOKEN_SCOPES = [
@@ -103,6 +106,35 @@ export const PlatformIdentityResponseSchema = z.object({
   apiVersion: z.literal(RADIUS_PLATFORM_API_VERSION),
   accountId: uuid,
   organizations: z.array(PlatformOrganizationSummarySchema),
+});
+
+export const ProvisionOrganizationRequestSchema = z
+  .object({
+    apiVersion: z.literal(RADIUS_PLATFORM_API_VERSION),
+    organization: z.object({
+      id: uuid,
+      slug,
+      displayName: z.string().trim().min(1).max(120),
+    }),
+    owner: z.object({
+      accountId: uuid,
+      displayName: z.string().trim().min(1).max(120),
+      identity: z.object({
+        issuer: z.string().url().max(512),
+        subject: z.string().trim().min(1).max(512),
+        email: z.string().email().max(320),
+        emailVerified: z.literal(true),
+      }),
+    }),
+  })
+  .strict();
+
+export const ProvisionOrganizationResponseSchema = z.object({
+  apiVersion: z.literal(RADIUS_PLATFORM_API_VERSION),
+  organizationId: uuid,
+  accountId: uuid,
+  accountIdentityId: uuid,
+  membershipId: uuid,
 });
 
 export const DeveloperTokenSummarySchema = z.object({
@@ -455,6 +487,12 @@ export type PlatformIdentityResponse = z.infer<
 >;
 export type PlatformOrganizationRole = z.infer<
   typeof PlatformOrganizationRoleSchema
+>;
+export type ProvisionOrganizationRequest = z.infer<
+  typeof ProvisionOrganizationRequestSchema
+>;
+export type ProvisionOrganizationResponse = z.infer<
+  typeof ProvisionOrganizationResponseSchema
 >;
 export type OrganizationMembershipLifecycle = z.infer<
   typeof OrganizationMembershipLifecycleSchema

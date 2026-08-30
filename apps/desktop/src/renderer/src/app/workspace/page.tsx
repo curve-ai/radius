@@ -10,7 +10,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,12 +22,21 @@ import {
 
 import { appendAttachmentFiles } from "@renderer/components/ai/attachment-files";
 import {
+  CHAT_RESPONSE_EDGE_GAP_PX,
+  isChatFollowCancelKey,
+  submittedTurnScrollLayout,
+} from "@renderer/components/ai/chat-scroll";
+import {
   ChatComposer,
   type ChatAccessMode,
 } from "@renderer/components/ai/chat-composer";
 import { SessionThread } from "@renderer/components/ai/session-thread";
 import { PlanProgress } from "@renderer/components/ai/plan-progress";
 import { buildSessionPlanPresentation } from "@renderer/components/ai/session-transcript";
+import {
+  mergeSessionTranscriptStreamUpdate,
+  sameSessionTranscriptSnapshot,
+} from "@renderer/components/ai/session-stream";
 import { ProjectComposerMenu } from "@renderer/components/shell/project-composer-menu";
 import {
   useProjects,
@@ -49,6 +60,7 @@ import { cloudPageUrl } from "@renderer/lib/cloud-links";
 import type {
   DesktopAgentSummary,
   SessionTranscriptEvent,
+  SessionTranscriptStreamUpdate,
 } from "../../../../radius-api";
 import { ConnectorsPage } from "./connectors-page";
 import { AgentsPage } from "./agents-page";
@@ -58,6 +70,11 @@ type EmptyStateView = Exclude<ContentView, "workspace" | "connectors">;
 
 const CLOUD_PERMISSIONS_URL = cloudPageUrl("/permissions");
 const WORKSPACE_FEEDBACK_EASE = [0.23, 1, 0.32, 1] as const;
+
+interface PendingOutgoingTurn {
+  eventId: string;
+  sessionId: string;
+}
 
 const viewContent: Record<
   EmptyStateView,
@@ -146,35 +163,40 @@ function useDesktopAgents(): {
 
   useEffect(() => {
     let disposed = false;
-    void window.radius
-      .listAgents()
-      .then((nextAgents) => {
-        if (disposed) return;
-        const usableAgents = nextAgents.filter(
-          (agent) =>
-            agent.authentication.state === "connected" ||
-            agent.authentication.state === "not_required",
-        );
-        cachedDesktopAgents = usableAgents;
-        setAgents(usableAgents);
-        const agent = usableAgents[0] ?? null;
-        setSelectedAgentIdState(agent?.id ?? null);
-        selectModelForAgent(
-          agent,
-          agent?.defaultModelId ?? agent?.models[0]?.id ?? null,
-        );
-        setError(null);
-      })
-      .catch((cause) => {
-        if (disposed) return;
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Local agents could not be loaded",
-        );
-      });
+    const loadAgents = (): void => {
+      void window.radius
+        .listAgents()
+        .then((nextAgents) => {
+          if (disposed) return;
+          const usableAgents = nextAgents.filter(
+            (agent) =>
+              agent.authentication.state === "connected" ||
+              agent.authentication.state === "not_required",
+          );
+          cachedDesktopAgents = usableAgents;
+          setAgents(usableAgents);
+          const agent = usableAgents[0] ?? null;
+          setSelectedAgentIdState(agent?.id ?? null);
+          selectModelForAgent(
+            agent,
+            agent?.defaultModelId ?? agent?.models[0]?.id ?? null,
+          );
+          setError(null);
+        })
+        .catch((cause) => {
+          if (disposed) return;
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Local agents could not be loaded",
+          );
+        });
+    };
+    loadAgents();
+    const unsubscribe = window.radius.onAgentsChanged(loadAgents);
     return () => {
       disposed = true;
+      unsubscribe();
     };
   }, []);
 
@@ -205,7 +227,11 @@ function useDesktopAgents(): {
   };
 }
 
-function NewChatPage(): ReactNode {
+function NewChatPage({
+  onPendingOutgoingTurnChange,
+}: {
+  onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
+}): ReactNode {
   const dragDepthRef = useRef(0);
   const reduceMotion = useReducedMotion();
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -282,6 +308,10 @@ function NewChatPage(): ReactNode {
       });
       setPrompt("");
       setAttachments([]);
+      onPendingOutgoingTurnChange({
+        eventId: result.userMessageEventId,
+        sessionId: result.sessionId,
+      });
       await activateSession(result.sessionId);
     } catch (cause) {
       setSubmitError(
@@ -392,8 +422,12 @@ function NewChatPage(): ReactNode {
 
 function SessionPage({
   activeSession,
+  onPendingOutgoingTurnChange,
+  pendingOutgoingTurn,
 }: {
   activeSession: ActiveProjectSession;
+  onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
+  pendingOutgoingTurn: PendingOutgoingTurn | null;
 }): ReactNode {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [accessMode, setAccessMode] = useState<ChatAccessMode>("full");
@@ -404,6 +438,21 @@ function SessionPage({
   const [refreshKey, setRefreshKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
+  const [followingTurnEventId, setFollowingTurnEventId] = useState<
+    string | null
+  >(null);
+  const [turnSpacerHeight, setTurnSpacerHeight] = useState(0);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  const transcriptContentRef = useRef<HTMLDivElement>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const composerOverlayRef = useRef<HTMLDivElement>(null);
+  const composerOverlayHeightRef = useRef(0);
+  const composerResizeShouldStickRef = useRef(false);
+  const pendingInitialScrollSessionIdRef = useRef<string | null>(null);
+  const followSessionIdRef = useRef(activeSession.session.id);
+  const autoFollowingTurnRef = useRef(false);
+  const pendingAnchorFlightRef = useRef(false);
   const {
     agents,
     error: agentsError,
@@ -421,6 +470,72 @@ function SessionPage({
     [events],
   );
   const activePlan = planPresentation.activePlan;
+  const reduceMotion = useReducedMotion();
+
+  const resolveTerminalApproval = useCallback(
+    async (
+      approvalRequestEventId: string,
+      decision: "approved" | "denied",
+    ): Promise<void> => {
+      await window.radius.resolveTerminalApproval({
+        approvalRequestEventId,
+        decision,
+        sessionId: session.id,
+      });
+      setRefreshKey((current) => current + 1);
+    },
+    [session.id],
+  );
+
+  const updateFollowingTurn = useCallback((): void => {
+    if (!followingTurnEventId || !autoFollowingTurnRef.current) return;
+
+    const scroller = transcriptScrollRef.current;
+    const content = transcriptContentRef.current;
+    const end = transcriptEndRef.current;
+    if (!scroller || !content || !end || composerOverlayHeight === 0) return;
+
+    const anchor = content.querySelector<HTMLElement>(
+      `[data-session-event-id="${CSS.escape(followingTurnEventId)}"]`,
+    );
+    if (!anchor) return;
+
+    const scrollerBounds = scroller.getBoundingClientRect();
+    const anchorTop =
+      anchor.getBoundingClientRect().top -
+      scrollerBounds.top +
+      scroller.scrollTop;
+    const contentEnd =
+      end.getBoundingClientRect().top - scrollerBounds.top + scroller.scrollTop;
+    const {
+      anchorScrollTop: desiredAnchorScrollTop,
+      turnSpacerHeight: nextTurnSpacerHeight,
+    } = submittedTurnScrollLayout({
+      anchorTop,
+      composerHeight: composerOverlayHeight,
+      contentEnd,
+      viewportHeight: scroller.clientHeight,
+    });
+
+    if (nextTurnSpacerHeight !== turnSpacerHeight) {
+      setTurnSpacerHeight(nextTurnSpacerHeight);
+      return;
+    }
+
+    const targetScrollTop = pendingAnchorFlightRef.current
+      ? desiredAnchorScrollTop
+      : Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    scroller.scrollTo({
+      top: targetScrollTop,
+      behavior: reduceMotion === true ? "auto" : "smooth",
+    });
+    pendingAnchorFlightRef.current = false;
+  }, [
+    composerOverlayHeight,
+    followingTurnEventId,
+    reduceMotion,
+    turnSpacerHeight,
+  ]);
 
   useEffect(() => {
     let disposed = false;
@@ -432,7 +547,12 @@ function SessionPage({
           session.id,
         );
         if (disposed) return;
-        setEvents(nextEvents);
+        if (initial) pendingInitialScrollSessionIdRef.current = session.id;
+        setEvents((current) =>
+          sameSessionTranscriptSnapshot(current, nextEvents)
+            ? current
+            : nextEvents,
+        );
         setError(null);
       } catch (cause) {
         if (disposed) return;
@@ -458,6 +578,187 @@ function SessionPage({
     };
   }, [refreshKey, session.id, session.status]);
 
+  useEffect(() => {
+    const pendingUpdates: SessionTranscriptStreamUpdate[] = [];
+    let frame: number | null = null;
+    const flush = (): void => {
+      frame = null;
+      const updates = pendingUpdates.splice(0);
+      setEvents((current) =>
+        updates.reduce(mergeSessionTranscriptStreamUpdate, current),
+      );
+    };
+    const unsubscribe = window.radius.onSessionTranscriptStream((update) => {
+      if (update.sessionId !== session.id) return;
+      pendingUpdates.push(update);
+      frame ??= window.requestAnimationFrame(flush);
+    });
+
+    return () => {
+      unsubscribe();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [session.id]);
+
+  useLayoutEffect(() => {
+    const sessionChanged = followSessionIdRef.current !== session.id;
+    const outgoingEvent =
+      pendingOutgoingTurn?.sessionId === session.id
+        ? events.find(
+            (event) =>
+              event.eventId === pendingOutgoingTurn.eventId &&
+              event.eventType === "message" &&
+              event.role === "user",
+          )
+        : undefined;
+    if (!sessionChanged && !outgoingEvent) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (sessionChanged) {
+        followSessionIdRef.current = session.id;
+        autoFollowingTurnRef.current = false;
+        pendingAnchorFlightRef.current = false;
+        composerResizeShouldStickRef.current = false;
+        setFollowingTurnEventId(null);
+        setTurnSpacerHeight(0);
+      }
+      if (outgoingEvent) {
+        onPendingOutgoingTurnChange(null);
+        autoFollowingTurnRef.current = true;
+        pendingAnchorFlightRef.current = true;
+        composerResizeShouldStickRef.current = false;
+        setTurnSpacerHeight(0);
+        setFollowingTurnEventId(outgoingEvent.eventId);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [events, onPendingOutgoingTurnChange, pendingOutgoingTurn, session.id]);
+
+  useLayoutEffect(() => {
+    const overlay = composerOverlayRef.current;
+    if (!overlay) return;
+
+    const updateOverlayHeight = (height: number): void => {
+      const nextHeight = Math.ceil(height);
+      if (nextHeight === composerOverlayHeightRef.current) return;
+
+      const scroller = transcriptScrollRef.current;
+      composerResizeShouldStickRef.current = Boolean(
+        scroller &&
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 2,
+      );
+      composerOverlayHeightRef.current = nextHeight;
+      setComposerOverlayHeight(nextHeight);
+    };
+
+    updateOverlayHeight(overlay.getBoundingClientRect().height);
+    const observer = new ResizeObserver(([entry]) => {
+      updateOverlayHeight(
+        entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height,
+      );
+    });
+    observer.observe(overlay);
+
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const scroller = transcriptScrollRef.current;
+    if (
+      loading ||
+      composerOverlayHeight === 0 ||
+      !scroller ||
+      autoFollowingTurnRef.current
+    ) {
+      return;
+    }
+
+    const initialScrollPending =
+      pendingInitialScrollSessionIdRef.current === session.id;
+    if (!initialScrollPending && !composerResizeShouldStickRef.current) return;
+
+    scroller.scrollTop = scroller.scrollHeight;
+    if (initialScrollPending) pendingInitialScrollSessionIdRef.current = null;
+    composerResizeShouldStickRef.current = false;
+  }, [composerOverlayHeight, events, loading, session.id]);
+
+  useEffect(() => {
+    const scroller = transcriptScrollRef.current;
+    if (!scroller) return;
+
+    const stopFollowing = (): void => {
+      if (!autoFollowingTurnRef.current && !pendingAnchorFlightRef.current) {
+        return;
+      }
+
+      autoFollowingTurnRef.current = false;
+      pendingAnchorFlightRef.current = false;
+      composerResizeShouldStickRef.current = false;
+      scroller.scrollTo({ top: scroller.scrollTop, behavior: "auto" });
+      setFollowingTurnEventId(null);
+      setTurnSpacerHeight(0);
+    };
+    const handlePointerDown = (event: PointerEvent): void => {
+      const bounds = scroller.getBoundingClientRect();
+      if (event.clientX >= bounds.right - 16) stopFollowing();
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const target =
+        event.target instanceof HTMLElement ? event.target : undefined;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable ||
+        target?.closest("button, a, [role='button']")
+      ) {
+        return;
+      }
+
+      if (isChatFollowCancelKey(event.key)) {
+        stopFollowing();
+      }
+    };
+
+    scroller.addEventListener("wheel", stopFollowing, { passive: true });
+    scroller.addEventListener("touchmove", stopFollowing, { passive: true });
+    scroller.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      scroller.removeEventListener("wheel", stopFollowing);
+      scroller.removeEventListener("touchmove", stopFollowing);
+      scroller.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!followingTurnEventId) return;
+    const scroller = transcriptScrollRef.current;
+    const content = transcriptContentRef.current;
+    if (!scroller || !content) return;
+
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        updateFollowingTurn();
+      });
+    });
+    observer.observe(scroller);
+    observer.observe(content);
+
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [followingTurnEventId, updateFollowingTurn]);
+
+  useLayoutEffect(() => {
+    updateFollowingTurn();
+  }, [events, session.id, updateFollowingTurn]);
+
   const addAttachments = (files: readonly File[]): void => {
     if (files.length === 0) return;
     setAttachments((current) => appendAttachmentFiles(current, files));
@@ -474,7 +775,7 @@ function SessionPage({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await window.radius.startAgentPrompt({
+      const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
         modelId: selectedModelId,
@@ -485,6 +786,10 @@ function SessionPage({
       });
       setPrompt("");
       setAttachments([]);
+      onPendingOutgoingTurnChange({
+        eventId: result.userMessageEventId,
+        sessionId: result.sessionId,
+      });
       setRefreshKey((current) => current + 1);
     } catch (cause) {
       setSubmitError(
@@ -500,14 +805,26 @@ function SessionPage({
   return (
     <section
       aria-label={session.title}
-      className="flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-reader flex-col px-4 py-8 sm:px-6 sm:py-10">
+      <div
+        ref={transcriptScrollRef}
+        className="radius-chat-panel-inset radius-chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain pl-4 sm:pl-6"
+      >
+        <div
+          ref={transcriptContentRef}
+          className="mx-auto flex w-full max-w-reader flex-col pt-8 sm:pt-10"
+          style={{
+            paddingBottom:
+              composerOverlayHeight +
+              CHAT_RESPONSE_EDGE_GAP_PX +
+              turnSpacerHeight,
+          }}
+        >
           {loading ? (
             <div aria-label="Loading session" className="flex flex-col gap-7">
               <div className="flex justify-end">
-                <Skeleton className="h-16 w-[72%] rounded-md" />
+                <Skeleton className="h-16 w-[72%] rounded-lg" />
               </div>
               <div className="space-y-2">
                 <Skeleton className="h-4 w-28" />
@@ -551,6 +868,7 @@ function SessionPage({
           ) : (
             <SessionThread
               events={events}
+              onResolveTerminalApproval={resolveTerminalApproval}
               planPresentation={planPresentation}
             />
           )}
@@ -567,11 +885,15 @@ function SessionPage({
               </div>
             ) : null}
           </InlineFeedbackTransition>
+          <div ref={transcriptEndRef} aria-hidden="true" className="h-px" />
         </div>
       </div>
 
-      <div className="shrink-0 bg-background px-4 pb-3 pt-2 sm:px-6">
-        <div className="mx-auto w-full max-w-reader">
+      <div
+        ref={composerOverlayRef}
+        className="radius-chat-panel-inset pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-3 pl-4 sm:pl-6"
+      >
+        <div className="pointer-events-auto mx-auto w-full max-w-reader">
           {activePlan ? (
             <div className="mb-2 flex justify-center">
               <PlanProgress plan={activePlan} />
@@ -622,12 +944,18 @@ function SessionPage({
 
 export function WorkspacePage({ view }: { view: ContentView }): ReactNode {
   const { activeSession } = useProjects();
+  const [pendingOutgoingTurn, setPendingOutgoingTurn] =
+    useState<PendingOutgoingTurn | null>(null);
 
   if (view === "workspace") {
     return activeSession ? (
-      <SessionPage activeSession={activeSession} />
+      <SessionPage
+        activeSession={activeSession}
+        pendingOutgoingTurn={pendingOutgoingTurn}
+        onPendingOutgoingTurnChange={setPendingOutgoingTurn}
+      />
     ) : (
-      <NewChatPage />
+      <NewChatPage onPendingOutgoingTurnChange={setPendingOutgoingTurn} />
     );
   }
 

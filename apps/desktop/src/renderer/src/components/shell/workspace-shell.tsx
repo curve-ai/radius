@@ -75,6 +75,16 @@ export function WorkspaceShell({
     workbenchWidth,
     false,
   );
+  const desktopToolPanelRendered =
+    toolPanelAvailable && toolPanelOpen && desktopToolPanelVisible;
+  const toolPanelOverlaysChat =
+    activeView === "workspace" && activeSession !== null;
+  const chatToolPanelWidth =
+    desktopToolPanelRendered && toolPanelOverlaysChat
+      ? viewportWidth >= 1_680
+        ? "21rem"
+        : "20.75rem"
+      : "0px";
   const animateToolPanelGeometry = actionToolPanelShouldAnimate(
     reduceMotion,
     "animate",
@@ -170,7 +180,12 @@ export function WorkspaceShell({
 
           <div
             ref={workbenchRef}
-            className="@container/workspace-workbench flex min-h-0 min-w-0 flex-1 overflow-hidden"
+            className="@container/workspace-workbench relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+            style={
+              {
+                "--workspace-chat-tool-panel-width": chatToolPanelWidth,
+              } as CSSProperties
+            }
           >
             <main
               id="main-content"
@@ -186,31 +201,33 @@ export function WorkspaceShell({
               {children}
             </main>
             <AnimatePresence initial={false} mode="popLayout">
-              {toolPanelAvailable &&
-                toolPanelOpen &&
-                desktopToolPanelVisible && (
-                  <motion.div
-                    key="workspace-tool-panel-rail"
-                    initial={
-                      animateToolPanelGeometry
-                        ? { opacity: 0, x: 8 }
-                        : { opacity: 0 }
-                    }
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={
-                      animateToolPanelGeometry
-                        ? { opacity: 0, x: 8 }
-                        : { opacity: 0 }
-                    }
-                    transition={{
-                      duration: reduceMotion ? 0.08 : 0.16,
-                      ease: [0.23, 1, 0.32, 1],
-                    }}
-                    className="shrink-0"
-                  >
-                    <WorkspaceToolPanel />
-                  </motion.div>
-                )}
+              {desktopToolPanelRendered && (
+                <motion.div
+                  key="workspace-tool-panel-rail"
+                  initial={
+                    animateToolPanelGeometry
+                      ? { opacity: 0, x: 8 }
+                      : { opacity: 0 }
+                  }
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={
+                    animateToolPanelGeometry
+                      ? { opacity: 0, x: 8 }
+                      : { opacity: 0 }
+                  }
+                  transition={{
+                    duration: reduceMotion ? 0.08 : 0.16,
+                    ease: [0.23, 1, 0.32, 1],
+                  }}
+                  className={cn(
+                    "shrink-0",
+                    toolPanelOverlaysChat &&
+                      "pointer-events-none absolute inset-y-0 right-0 z-30 w-fit",
+                  )}
+                >
+                  <WorkspaceToolPanel overlay={toolPanelOverlaysChat} />
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </LayoutGroup>

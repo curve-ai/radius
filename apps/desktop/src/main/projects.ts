@@ -1,13 +1,15 @@
 import {
+  addProjectRoot,
   createProject,
   listAllProjectSessions,
   listProjects,
   listRecentSessions,
   listSessionTranscript,
+  removeProjectRoot,
   setSessionArchived,
   setSessionPinned,
-  setProjectRoot,
   updateProjectName,
+  updateSessionTitle,
 } from "@curve-ai/radius-storage";
 import {
   BrowserWindow,
@@ -21,6 +23,11 @@ import path from "node:path";
 import { localDeviceIdentity } from "./device-identity";
 import { canonicalizeProjectRoot } from "./project-root-access";
 import { initializeStorage } from "./storage";
+import {
+  getStreamingSessionMessage,
+  isAgentSessionWorking,
+  overlayPendingHostApprovalDetails,
+} from "./agent-runtime";
 import type {
   ProjectFolderSelection,
   ProjectSidebarRecord,
@@ -29,10 +36,12 @@ import type {
 } from "../radius-api";
 
 const PROJECT_FOLDER_SELECTION_TTL_MS = 10 * 60 * 1_000;
-const projectFolderSelections = new Map<
-  string,
-  { rootPath: string; expiresAtMs: number; claimed: boolean }
->();
+interface ProjectFolderCapability {
+  rootPath: string;
+  expiresAtMs: number;
+  claimed: boolean;
+}
+const projectFolderSelections = new Map<string, ProjectFolderCapability>();
 
 function pruneExpiredProjectFolderSelections(now = Date.now()): void {
   for (const [selectionId, selection] of projectFolderSelections) {
@@ -53,6 +62,48 @@ function parseProjectName(value: unknown): string {
   return name;
 }
 
+function parseSessionTitle(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("A session title is required");
+  }
+  const title = value.trim();
+  if (!title) throw new Error("A session title is required");
+  if (title.length > 120) {
+    throw new Error("Session title must be 120 characters or fewer");
+  }
+  return title;
+}
+
+function parseFolderSelectionIds(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (
+    !Array.isArray(value) ||
+    value.some((selectionId) => typeof selectionId !== "string" || !selectionId)
+  ) {
+    throw new Error("The project-folder selections are invalid");
+  }
+  if (new Set(value).size !== value.length) {
+    throw new Error("Project-folder selections must be unique");
+  }
+  return value;
+}
+
+function projectRootSummary(root: {
+  id: string;
+  rootPath: string;
+}): ProjectSidebarRecord["roots"][number] {
+  return {
+    ...root,
+    name: path.basename(root.rootPath),
+  };
+}
+
+function projectRootSummaries(
+  roots: readonly { id: string; rootPath: string }[],
+): ProjectSidebarRecord["roots"] {
+  return roots.map(projectRootSummary);
+}
+
 export async function listProjectSidebar(): Promise<ProjectSidebarRecord[]> {
   const context = await initializeStorage();
   const identity = localDeviceIdentity(context.vault);
@@ -70,6 +121,7 @@ export async function listProjectSidebar(): Promise<ProjectSidebarRecord[]> {
       updatedAt: session.updatedAt,
       lastAssistantMessageAt: session.lastAssistantMessageAt,
       pinnedAt: session.pinnedAt,
+      working: isAgentSessionWorking(session.id),
     });
     sessionsByProject.set(session.projectId, projectSessions);
   }
@@ -77,7 +129,7 @@ export async function listProjectSidebar(): Promise<ProjectSidebarRecord[]> {
   return projectRecords.map((project) => ({
     id: project.id,
     name: project.name,
-    rootPath: project.rootPath,
+    roots: projectRootSummaries(project.roots),
     sessions: sessionsByProject.get(project.id) ?? [],
   }));
 }
@@ -94,6 +146,7 @@ export async function listRecentSidebar(): Promise<RecentSidebarSession[]> {
     updatedAt: session.updatedAt,
     lastAssistantMessageAt: session.lastAssistantMessageAt,
     pinnedAt: session.pinnedAt,
+    working: isAgentSessionWorking(session.id),
   }));
 }
 
@@ -106,7 +159,25 @@ export async function listSessionTranscriptForRenderer(
   }
 
   const context = await initializeStorage();
-  return listSessionTranscript(context.database, sessionId);
+  const transcript = overlayPendingHostApprovalDetails(
+    sessionId,
+    await listSessionTranscript(context.database, sessionId),
+  );
+  const streamingMessage = getStreamingSessionMessage(sessionId);
+  if (
+    !streamingMessage ||
+    transcript.some((event) => event.eventId === streamingMessage.eventId)
+  ) {
+    return transcript;
+  }
+
+  return [
+    ...transcript,
+    {
+      ...streamingMessage,
+      sessionRevision: (transcript.at(-1)?.sessionRevision ?? 0) + 1,
+    },
+  ];
 }
 
 async function chooseRootFolder(
@@ -145,30 +216,37 @@ export async function chooseProjectFolderForRenderer(
   return { selectionId, rootPath, defaultName: path.basename(rootPath) };
 }
 
-export async function createProjectFromSelection(
+export async function createProjectFromRenderer(
   _event: IpcMainInvokeEvent,
   input: unknown,
 ): Promise<ProjectSidebarRecord> {
   if (!input || typeof input !== "object") {
     throw new Error("Project details are required");
   }
-  const selectionId = Reflect.get(input, "selectionId");
-  if (typeof selectionId !== "string" || !selectionId) {
-    throw new Error("A project-folder selection is required");
-  }
+  const selectionIds = parseFolderSelectionIds(
+    Reflect.get(input, "selectionIds"),
+  );
   const name = parseProjectName(Reflect.get(input, "name"));
 
   pruneExpiredProjectFolderSelections();
-  const selection = projectFolderSelections.get(selectionId);
-  if (!selection) {
-    throw new Error(
-      "Project folder selection expired; choose the folder again",
-    );
+  const selections: ProjectFolderCapability[] = [];
+  for (const selectionId of selectionIds) {
+    const selection = projectFolderSelections.get(selectionId);
+    if (!selection) {
+      throw new Error(
+        "A project folder selection expired; choose the folder again",
+      );
+    }
+    selections.push(selection);
   }
-  if (selection.claimed) {
+  if (selections.some((selection) => selection.claimed)) {
     throw new Error("Project creation is already in progress");
   }
-  selection.claimed = true;
+  const rootPaths = selections.map((selection) => selection.rootPath);
+  if (new Set(rootPaths).size !== rootPaths.length) {
+    throw new Error("Each project source folder must be unique");
+  }
+  for (const selection of selections) selection.claimed = true;
 
   try {
     const context = await initializeStorage();
@@ -176,17 +254,19 @@ export async function createProjectFromSelection(
     const project = await createProject(context.database, {
       originClientInstanceId: identity.clientInstanceId,
       name,
-      rootPath: selection.rootPath,
+      rootPaths,
     });
-    projectFolderSelections.delete(selectionId);
+    for (const selectionId of selectionIds) {
+      projectFolderSelections.delete(selectionId);
+    }
     return {
       id: project.id,
       name: project.name,
-      rootPath: project.rootPath,
+      roots: projectRootSummaries(project.roots),
       sessions: [],
     };
   } catch (error) {
-    selection.claimed = false;
+    for (const selection of selections) selection.claimed = false;
     throw error;
   }
 }
@@ -200,24 +280,49 @@ export function discardProjectFolderSelection(
   }
 }
 
-export async function relinkProjectFolder(
+export async function addProjectFolderForRenderer(
   event: IpcMainInvokeEvent,
   projectId: unknown,
-): Promise<boolean> {
+): Promise<ProjectSidebarRecord["roots"][number] | null> {
   if (typeof projectId !== "string" || !projectId) {
     throw new Error("A project identifier is required");
   }
   const rootPath = await chooseRootFolder(event);
-  if (!rootPath) return false;
+  if (!rootPath) return null;
 
   const context = await initializeStorage();
   const identity = localDeviceIdentity(context.vault);
-  await setProjectRoot(context.database, {
+  const root = await addProjectRoot(context.database, {
     projectId,
     clientInstanceId: identity.clientInstanceId,
     rootPath,
   });
-  return true;
+  return projectRootSummary(root);
+}
+
+export async function removeProjectFolderForRenderer(
+  _event: IpcMainInvokeEvent,
+  input: unknown,
+): Promise<void> {
+  if (!input || typeof input !== "object") {
+    throw new Error("Project folder details are required");
+  }
+  const projectId = Reflect.get(input, "projectId");
+  const rootId = Reflect.get(input, "rootId");
+  if (typeof projectId !== "string" || !projectId) {
+    throw new Error("A project identifier is required");
+  }
+  if (typeof rootId !== "string" || !rootId) {
+    throw new Error("A project source-folder identifier is required");
+  }
+
+  const context = await initializeStorage();
+  const identity = localDeviceIdentity(context.vault);
+  await removeProjectRoot(context.database, {
+    projectId,
+    clientInstanceId: identity.clientInstanceId,
+    rootId,
+  });
 }
 
 export async function renameProjectFromRenderer(
@@ -242,6 +347,28 @@ export async function renameProjectFromRenderer(
   });
 }
 
+export async function renameSessionFromRenderer(
+  _event: IpcMainInvokeEvent,
+  input: unknown,
+): Promise<void> {
+  if (!input || typeof input !== "object") {
+    throw new Error("Session details are required");
+  }
+  const sessionId = Reflect.get(input, "sessionId");
+  if (typeof sessionId !== "string" || !sessionId) {
+    throw new Error("A session identifier is required");
+  }
+  const title = parseSessionTitle(Reflect.get(input, "title"));
+
+  const context = await initializeStorage();
+  const identity = localDeviceIdentity(context.vault);
+  await updateSessionTitle(context.database, {
+    sessionId,
+    originClientInstanceId: identity.clientInstanceId,
+    title,
+  });
+}
+
 export async function revealProjectInFinder(
   _event: IpcMainInvokeEvent,
   projectId: unknown,
@@ -255,10 +382,14 @@ export async function revealProjectInFinder(
   const project = (
     await listProjects(context.database, identity.clientInstanceId)
   ).find((candidate) => candidate.id === projectId);
-  if (!project?.rootPath) {
-    throw new Error("Link this project to a local folder first");
+  if (!project || project.roots.length === 0) {
+    throw new Error("Add a source folder to this project first");
   }
-  shell.showItemInFolder(project.rootPath);
+  const errors = await Promise.all(
+    project.roots.map((root) => shell.openPath(root.rootPath)),
+  );
+  const error = errors.find(Boolean);
+  if (error) throw new Error(error);
 }
 
 export async function setSessionPinnedFromRenderer(

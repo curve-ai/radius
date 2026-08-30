@@ -40,7 +40,8 @@ set.
 
 `scripts/npm-release.ts`:
 
-1. requires built `dist/index.js` and `dist/index.d.ts` for every package;
+1. requires built `dist/index.js` and `dist/index.d.ts` for every package and
+   retains the SDK's explicit `dist/development.*` WebSocket entrypoint;
 2. excludes test output and all source/workspace-only files;
 3. stages a public manifest with `private` removed, Node 22 engines, dist-only
    exports, public access metadata, repository links, and exact dependencies;
@@ -66,7 +67,8 @@ publish. To test without weakening the real artifacts, verification:
   temporary tarballs;
 - resolves all third-party dependencies from `https://registry.npmjs.org/`
   with an isolated npm configuration; and
-- imports `@curve-ai/sdk`, `@curve-ai/agent-contracts`, and
+- imports `@curve-ai/sdk`, `@curve-ai/sdk/development`,
+  `@curve-ai/agent-contracts`, and
   `@curve-ai/platform-client`, then runs packaged CLI help, init, and validate.
 
 This mirror is temporary and is never a publish artifact.

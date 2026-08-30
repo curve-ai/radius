@@ -20,13 +20,25 @@ Developer builds may expose Full Access for local testing. Distributed builds de
 
 ### Current local-alpha enforcement
 
-The first ACP desktop integration exposes Ask for approval and Full access in
-the existing composer while the complete policy resolver is still under
-review. Ask for approval currently cancels permission requests, so it fails
-closed rather than simulating an approval. Full access may select only an ACP
-`allow_once` option for the current operation. It never selects
+The first ACP desktop integration exposes Ask for approval and Project access
+in the existing composer while the complete policy resolver is still under
+review. Ask for approval currently cancels general agent-originated permission
+requests, so they fail closed rather than simulating an approval. Host terminal
+and file operations use Radius's exact approval flow. Project access may select
+only an ACP `allow_once` option for other requested operations. It never selects
 `allow_always`, persists a remembered grant, or bypasses the future capability
 broker. Distributed defaults remain governed by the policy above.
+
+The macOS desktop now implements the first project-scoped host-capability
+slice. ACP terminals and text-file requests are advertised only for operations
+requested by the active release and only when the project has local source
+folders. Project access runs beneath Seatbelt with direct network disabled.
+The Ask profile prompts for commands and file writes; Project access uses
+project source folders automatically. Both profiles require one-command or
+one-file approval for exact paths outside those folders. Approvals are durable
+session events, but the granted external path is ephemeral and applies only to
+that operation. Durable project grants and organization policy remain later
+physical-model work.
 
 ## Reference-product lesson
 

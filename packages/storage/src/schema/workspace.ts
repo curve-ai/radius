@@ -60,6 +60,7 @@ export const projects = sqliteTable(
 export const projectRoots = sqliteTable(
   "project_roots",
   {
+    id: text("id").primaryKey(),
     projectId: id("project_id").references(() => projects.id, {
       onDelete: "cascade",
     }),
@@ -72,7 +73,10 @@ export const projectRoots = sqliteTable(
     updatedAtMs: integer("updated_at_ms").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.projectId, table.clientInstanceId] }),
+    index("project_roots_project_client_idx").on(
+      table.projectId,
+      table.clientInstanceId,
+    ),
     uniqueIndex("project_roots_client_path_uq").on(
       table.clientInstanceId,
       table.rootPath,

@@ -38,7 +38,8 @@ const packages: readonly ReleasePackage[] = [
   },
   {
     directory: "packages/agent-build",
-    description: "Deterministic OCI packaging for TypeScript and Python Radius agents.",
+    description:
+      "Deterministic OCI packaging for TypeScript and Python Radius agents.",
   },
   {
     directory: "packages/platform-contracts",
@@ -46,11 +47,13 @@ const packages: readonly ReleasePackage[] = [
   },
   {
     directory: "packages/platform-client",
-    description: "Validated HTTP client for Cloud and self-hosted Radius Platforms.",
+    description:
+      "Validated HTTP client for Cloud and self-hosted Radius Platforms.",
   },
   {
     directory: "packages/runtime",
-    description: "ACP client and supervised runtime primitives used by Radius tooling.",
+    description:
+      "ACP client and supervised runtime primitives used by Radius tooling.",
   },
   {
     directory: "packages/sdk",
@@ -58,7 +61,8 @@ const packages: readonly ReleasePackage[] = [
   },
   {
     directory: "packages/cli",
-    description: "Radius developer CLI for init, dev, packaging, deploy, and management.",
+    description:
+      "Radius developer CLI for init, dev, packaging, deploy, and management.",
   },
 ];
 
@@ -111,7 +115,8 @@ try {
       "--silent",
     ]);
     const filename = packed.trim().split(/\r?\n/).at(-1);
-    if (!filename) throw new Error(`npm pack produced no filename for ${source.name}`);
+    if (!filename)
+      throw new Error(`npm pack produced no filename for ${source.name}`);
     const tarball = join(tarballRoot, filename);
     const bytes = await readFile(tarball);
     releaseEntries.push({
@@ -130,9 +135,13 @@ try {
   const smoke = await createLocalDependencyMirror(tarballRoot, releaseEntries);
   await verifyExternalInstall(smoke.directory, smoke.entries);
 
-  console.info(`Verified ${releaseEntries.length} Radius npm package artifacts`);
+  console.info(
+    `Verified ${releaseEntries.length} Radius npm package artifacts`,
+  );
   for (const entry of releaseEntries) {
-    console.info(`${entry.name}@${entry.version}\t${entry.sha256}\t${entry.byteSize}`);
+    console.info(
+      `${entry.name}@${entry.version}\t${entry.sha256}\t${entry.byteSize}`,
+    );
   }
   if (explicitOutput) console.info(`Artifacts: ${outputRoot}`);
 } finally {
@@ -140,6 +149,23 @@ try {
 }
 
 function publicManifest(source: SourceManifest, description: string) {
+  const exports: Record<
+    string,
+    { types: string; import: string; default: string }
+  > = {
+    ".": {
+      types: "./dist/index.d.ts",
+      import: "./dist/index.js",
+      default: "./dist/index.js",
+    },
+  };
+  if (source.name === "@curve-ai/sdk") {
+    exports["./development"] = {
+      types: "./dist/development.d.ts",
+      import: "./dist/development.js",
+      default: "./dist/development.js",
+    };
+  }
   return {
     name: source.name,
     version: source.version,
@@ -148,13 +174,7 @@ function publicManifest(source: SourceManifest, description: string) {
     type: source.type ?? "module",
     main: "./dist/index.js",
     types: "./dist/index.d.ts",
-    exports: {
-      ".": {
-        types: "./dist/index.d.ts",
-        import: "./dist/index.js",
-        default: "./dist/index.js",
-      },
-    },
+    exports,
     bin: source.bin,
     files: ["dist", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md"],
     engines: { node: ">=22" },
@@ -176,7 +196,8 @@ async function copyBuiltOutput(source: string, target: string): Promise<void> {
   await stat(join(source, "index.d.ts"));
   await cp(source, target, {
     recursive: true,
-    filter: (candidate) => !/\.test\.(?:js|d\.ts|js\.map|d\.ts\.map)$/.test(candidate),
+    filter: (candidate) =>
+      !/\.test\.(?:js|d\.ts|js\.map|d\.ts\.map)$/.test(candidate),
   });
 }
 
@@ -213,10 +234,12 @@ async function verifyExternalInstall(
       "--eval",
       [
         'import { defineAgent } from "@curve-ai/sdk";',
+        'import { serveDevelopmentAgent } from "@curve-ai/sdk/development";',
         'import { AgentManifestSchema } from "@curve-ai/agent-contracts";',
         'import { RadiusPlatformClient } from "@curve-ai/platform-client";',
         'import { credentialAccount } from "@curve-ai/cli";',
         'if (typeof defineAgent !== "function") process.exit(1);',
+        'if (typeof serveDevelopmentAgent !== "function") process.exit(1);',
         'if (typeof AgentManifestSchema?.parse !== "function") process.exit(1);',
         'if (typeof RadiusPlatformClient !== "function") process.exit(1);',
         'if (!credentialAccount({name:"smoke",apiUrl:"https://example.com"}).startsWith("profile:smoke:")) process.exit(1);',
@@ -235,7 +258,11 @@ async function verifyExternalInstall(
     join(project, "package.json"),
     `${JSON.stringify({ name: "external-agent", private: true, type: "module" }, null, 2)}\n`,
   );
-  await run(bin, ["init", "--skip-install", "--agent-ref", "agent_external1"], project);
+  await run(
+    bin,
+    ["init", "--skip-install", "--agent-ref", "agent_external1"],
+    project,
+  );
   await run(bin, ["validate"], project);
 }
 
@@ -305,7 +332,9 @@ function parseOutput(args: readonly string[]): string | null {
   if (args.length === 2 && args[0] === "--output" && args[1]) {
     return resolve(repositoryRoot, args[1]);
   }
-  throw new Error("Usage: bun scripts/npm-release.ts [--verify | --output <directory>]");
+  throw new Error(
+    "Usage: bun scripts/npm-release.ts [--verify | --output <directory>]",
+  );
 }
 
 function run(
@@ -327,7 +356,12 @@ function run(
     child.once("error", reject);
     child.once("close", (code) => {
       if (code === 0) resolveRun(stdout);
-      else reject(new Error(`${command} ${args.join(" ")} failed (${code})\n${stderr || stdout}`));
+      else
+        reject(
+          new Error(
+            `${command} ${args.join(" ")} failed (${code})\n${stderr || stdout}`,
+          ),
+        );
     });
   });
 }

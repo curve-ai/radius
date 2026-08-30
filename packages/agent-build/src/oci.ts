@@ -44,10 +44,13 @@ export async function buildTypeScriptOciLayout(
 ): Promise<TypeScriptOciBuildResult> {
   const config = AgentConfigSchema.parse(options.config);
   if (config.runtime.kind !== "typescript") {
-    throw new Error("TypeScript OCI build requires a TypeScript runtime config");
+    throw new Error(
+      "TypeScript OCI build requires a TypeScript runtime config",
+    );
   }
 
-  const outputRoot = options.outputRoot ?? join(options.root, ".radius", "builds");
+  const outputRoot =
+    options.outputRoot ?? join(options.root, ".radius", "builds");
   await mkdir(outputRoot, { recursive: true });
   const temporaryRoot = await mkdtemp(join(outputRoot, ".sandbox-"));
   const contextPath = join(temporaryRoot, "context");
@@ -65,6 +68,7 @@ export async function buildTypeScriptOciLayout(
       sourcemap: false,
       legalComments: "external",
       logLevel: "silent",
+      external: ["@curve-ai/sdk/development"],
     });
 
     const bundle = await readFile(bundlePath);
@@ -109,10 +113,16 @@ export async function buildTypeScriptOciLayout(
 
     const layoutPath = join(temporaryRoot, "oci-layout");
     await mkdir(layoutPath, { recursive: true });
-    await runCommand("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
+    await runCommand(
+      "tar",
+      ["-xf", imageTarPath, "-C", layoutPath],
+      options.root,
+    );
     await rm(imageTarPath, { force: true });
 
-    const index = JSON.parse(await readFile(join(layoutPath, "index.json"), "utf8")) as {
+    const index = JSON.parse(
+      await readFile(join(layoutPath, "index.json"), "utf8"),
+    ) as {
       manifests?: Array<{ digest?: string }>;
     };
     const imageDigest = index.manifests?.[0]?.digest;
@@ -169,7 +179,8 @@ async function runCommand(
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+      else
+        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
     });
   });
 }

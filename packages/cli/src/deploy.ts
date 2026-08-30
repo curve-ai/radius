@@ -1,15 +1,7 @@
-import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-
 import {
-  buildPythonOciLayout,
-  buildTypeScriptOciLayout,
   canonicalJson,
   createAgentManifest,
   pushAgentOciImage,
-  type PythonOciBuildResult,
-  type TypeScriptOciBuildResult,
 } from "@curve-ai/build";
 import {
   type FinalizeAgentDeploymentRequest,
@@ -21,6 +13,7 @@ import {
 } from "@curve-ai/platform-client";
 
 import { loadAgentConfig } from "./config.js";
+import { loadBuildReceipt } from "./build.js";
 import type { CliIo } from "./io.js";
 import { RadiusProfileStore } from "./profiles.js";
 import { resolvePlatformTarget } from "./platform-target.js";
@@ -41,16 +34,12 @@ interface DeploymentPlatformClient {
   ): Promise<FinalizeAgentDeploymentResponse>;
 }
 
-type AgentOciBuildResult = TypeScriptOciBuildResult | PythonOciBuildResult;
-type AgentOciBuilder = (options: {
-  root: string;
-  config: Parameters<typeof buildTypeScriptOciLayout>[0]["config"];
-}) => Promise<AgentOciBuildResult>;
+import type { AgentOciBuildResult } from "./sandbox.js";
 
 export interface DeployOptions {
   root: string;
   configPath?: string;
-  dryRun: boolean;
+  buildReference?: string;
   environment?: string;
   organization?: string;
   profile?: string;
@@ -59,7 +48,7 @@ export interface DeployOptions {
   accessToken?: string;
   profileStore?: RadiusProfileStore;
   platformClient?: DeploymentPlatformClient;
-  buildOci?: AgentOciBuilder;
+  build?: AgentOciBuildResult;
   pushOci?: typeof pushAgentOciImage;
   io: CliIo;
 }
@@ -67,25 +56,17 @@ export interface DeployOptions {
 export async function deployAgent(options: DeployOptions): Promise<void> {
   const { config } = await loadAgentConfig(options.root, options.configPath);
   const manifest = createAgentManifest(config);
-  const manifestJson = canonicalJson(manifest);
-
-  if (options.dryRun) {
-    const digest = createHash("sha256").update(manifestJson).digest("hex");
-    const outputDirectory = join(options.root, ".radius", "builds", digest);
-    const manifestPath = join(outputDirectory, "manifest.json");
-    await mkdir(outputDirectory, { recursive: true });
-    await writeFile(manifestPath, manifestJson, "utf8");
-    options.io.out(`Manifest: ${manifestPath}`);
-    options.io.out(`Manifest SHA-256: ${digest}`);
-    return;
-  }
 
   if (!config.agent) {
     throw new Error("Remote deployment requires a linked agent reference");
   }
-  if (config.runtime.kind === "command") {
+  const loadedBuild = options.build
+    ? { build: options.build, receipt: null, path: null }
+    : await loadBuildReceipt(options.root, options.buildReference);
+  const build = loadedBuild.build;
+  if (canonicalJson(build.manifest) !== canonicalJson(manifest)) {
     throw new Error(
-      "Remote deployment requires a TypeScript or Python build runtime",
+      "Radius config changed after the selected build; run radius build again",
     );
   }
 
@@ -107,15 +88,7 @@ export async function deployAgent(options: DeployOptions): Promise<void> {
   const organization =
     options.organization ?? (await inferOrganization(client));
 
-  options.io.out("Building the immutable Radius agent deployment...");
-  const defaultBuilder =
-    config.runtime.kind === "python"
-      ? buildPythonOciLayout
-      : buildTypeScriptOciLayout;
-  const build = await (options.buildOci ?? defaultBuilder)({
-    root: options.root,
-    config,
-  });
+  options.io.out(`Deploying verified build ${build.buildDigest}...`);
   const environment = options.environment ?? "production";
   const prepareKey = `prepare-${organization}-${build.buildDigest}-${environment}`;
   const prepared = await client.prepareAgentDeployment(
@@ -189,9 +162,4 @@ function assertCredentialsUsable(expiresAt: string): void {
   }
 }
 
-export type {
-  AgentOciBuildResult,
-  PythonOciBuildResult,
-  DeploymentPlatformClient,
-  TypeScriptOciBuildResult,
-};
+export type { AgentOciBuildResult, DeploymentPlatformClient };

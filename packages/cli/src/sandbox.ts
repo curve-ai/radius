@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, parse } from "node:path";
 
 import {
@@ -11,6 +12,10 @@ import {
   parseAgentReleaseDescriptor,
 } from "@curve-ai/radius-runtime";
 import type { AgentConfig } from "@curve-ai/agent-contracts";
+import type {
+  PythonOciBuildResult,
+  TypeScriptOciBuildResult,
+} from "@curve-ai/build";
 
 import type { CliIo } from "./io.js";
 
@@ -23,32 +28,53 @@ export interface SandboxOptions {
   io: CliIo;
 }
 
+export type AgentOciBuildResult =
+  | PythonOciBuildResult
+  | TypeScriptOciBuildResult;
+
+export interface BuiltSandboxOptions extends SandboxOptions {
+  build: AgentOciBuildResult;
+}
+
 export async function startSandboxAgent(
   options: SandboxOptions,
 ): Promise<MicrovmAcpRuntime> {
   if (process.platform !== "darwin" || process.arch !== "arm64") {
-    throw new Error("Radius sandbox development currently requires Apple Silicon macOS");
+    throw new Error(
+      "Radius sandbox development currently requires Apple Silicon macOS",
+    );
   }
   if (options.config.runtime.kind === "command") {
-    throw new Error("Sandbox development requires a TypeScript or Python build runtime");
+    throw new Error(
+      "Sandbox development requires a TypeScript or Python build runtime",
+    );
   }
 
-  const radiusRoot = await findRadiusWorkspace(options.root);
+  const build = await (
+    options.config.runtime.kind === "python"
+      ? buildPythonOciLayout
+      : buildTypeScriptOciLayout
+  )({
+    root: options.root,
+    config: options.config,
+  });
+  return startBuiltSandboxAgent({ ...options, build });
+}
+
+export async function startBuiltSandboxAgent(
+  options: BuiltSandboxOptions,
+): Promise<MicrovmAcpRuntime> {
+  const defaults = await resolveDefaultRuntimeAssets(options.root);
   const runtimeHostPath =
     options.runtimeHostPath ??
     process.env.RADIUS_RUNTIME_HOST_PATH ??
-    join(
-      radiusRoot,
-      "apps/runtime-host-macos/.build/release/radius-runtime-host",
-    );
+    defaults.runtimeHostPath;
   const kernelPath =
-    options.kernelPath ??
-    process.env.RADIUS_KERNEL_PATH ??
-    join(radiusRoot, "apps/runtime-host-macos/.build/runtime-assets/vmlinux-arm64");
+    options.kernelPath ?? process.env.RADIUS_KERNEL_PATH ?? defaults.kernelPath;
   const runtimeRoot =
     options.runtimeRoot ??
     process.env.RADIUS_RUNTIME_ROOT ??
-    join(options.root, ".radius", "dev", "runtime");
+    join(options.root, ".radius", "build", "runtime");
 
   await Promise.all([
     requirePath(runtimeHostPath, "runtime helper"),
@@ -56,34 +82,25 @@ export async function startSandboxAgent(
     mkdir(runtimeRoot, { recursive: true }),
   ]);
 
-  options.io.out("Building linux/arm64 OCI agent image...");
-  const build = await (options.config.runtime.kind === "python"
-    ? buildPythonOciLayout
-    : buildTypeScriptOciLayout)({
-    root: options.root,
-    config: options.config,
-  });
-  options.io.out(`Built ${build.imageReference}@${build.imageDigest}`);
-
   const loadedDigest = await loadImage({
     runtimeHostPath,
-    layoutPath: build.layoutPath,
+    layoutPath: options.build.layoutPath,
     runtimeRoot,
-    imageReference: build.imageReference,
+    imageReference: options.build.imageReference,
   });
   options.io.out(
-    `Imported ${build.imageReference}@${loadedDigest} (source manifest ${build.imageDigest})`,
+    `Imported ${options.build.imageReference}@${loadedDigest} (source manifest ${options.build.imageDigest})`,
   );
 
   const release = parseAgentReleaseDescriptor({
     schemaVersion: 1,
-    agentId: `dev-${build.buildDigest.slice(0, 16)}`,
-    providerId: "radius-cli-dev",
+    agentId: `build-${options.build.buildDigest.slice(0, 16)}`,
+    providerId: "radius-cli-build",
     displayName: options.config.name,
-    releaseVersion: build.buildDigest.slice(0, 16),
+    releaseVersion: options.build.buildDigest.slice(0, 16),
     protocol: { kind: "acp-stdio", version: 1 },
     image: {
-      reference: build.imageReference,
+      reference: options.build.imageReference,
       digest: loadedDigest,
       platform: "linux/arm64",
       translation: "none",
@@ -158,7 +175,10 @@ async function loadImage(options: {
   return image.digest as `sha256:${string}`;
 }
 
-async function captureCommand(command: string, args: string[]): Promise<string> {
+async function captureCommand(
+  command: string,
+  args: string[],
+): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -177,22 +197,58 @@ async function captureCommand(command: string, args: string[]): Promise<string> 
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+      else
+        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
     });
   });
 }
 
-async function findRadiusWorkspace(start: string): Promise<string> {
+async function resolveDefaultRuntimeAssets(start: string): Promise<{
+  runtimeHostPath: string;
+  kernelPath: string;
+}> {
   let current = start;
   const filesystemRoot = parse(current).root;
   for (;;) {
-    const marker = join(current, "apps/runtime-host-macos/Config/runtime-assets.json");
+    const marker = join(
+      current,
+      "apps/runtime-host-macos/Config/runtime-assets.json",
+    );
     try {
       await access(marker);
-      return current;
+      return {
+        runtimeHostPath: join(
+          current,
+          "apps/runtime-host-macos/.build/release/radius-runtime-host",
+        ),
+        kernelPath: join(
+          current,
+          "apps/runtime-host-macos/.build/runtime-assets/vmlinux-arm64",
+        ),
+      };
     } catch {
       if (current === filesystemRoot) break;
       current = dirname(current);
+    }
+  }
+  if (process.platform === "darwin") {
+    for (const application of [
+      "/Applications/Radius.app",
+      join(homedir(), "Applications/Radius.app"),
+    ]) {
+      const resources = join(application, "Contents/Resources");
+      try {
+        await access(join(resources, "runtime/vmlinux-arm64"));
+        return {
+          runtimeHostPath: join(
+            resources,
+            "runtime/macos-arm64/radius-runtime-host",
+          ),
+          kernelPath: join(resources, "runtime/vmlinux-arm64"),
+        };
+      } catch {
+        // Continue to the next installed application location.
+      }
     }
   }
   throw new Error(

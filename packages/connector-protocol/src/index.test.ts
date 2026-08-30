@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AgentToolInterfaceSchema,
+  ConnectorCatalogListResponseSchema,
   ConnectorManifestSchema,
   ConnectorProfileChangeSchema,
 } from "./index.js";
@@ -81,4 +82,50 @@ test("requires tombstones for profile deletes", () => {
     },
   });
   assert.equal(result.success, false);
+});
+
+test("accepts catalog taxonomy facets and connector memberships", () => {
+  const response = ConnectorCatalogListResponseSchema.parse({
+    protocolVersion: 3,
+    connectors: [
+      {
+        id,
+        source: "official_mcp_registry",
+        sourceServerName: "io.github.example/server",
+        title: "Example",
+        description: "Example connector",
+        category: "developer_tools",
+        categoryIds: ["developer_tools", "data_databases"],
+        version: "1.0.0",
+        transport: "streamable_http",
+        remoteUrl: "https://example.com/mcp",
+        repositoryUrl: null,
+        websiteUrl: "https://example.com",
+        domain: "example.com",
+        logoUrl: null,
+        publishedAt: null,
+        updatedAt: "2026-08-29T12:00:00.000Z",
+      },
+    ],
+    categories: [
+      {
+        id: "developer_tools",
+        label: "Developer Tools",
+        description: "Code and developer workflows.",
+        count: 1,
+      },
+    ],
+    categoryPreviews: [
+      {
+        categoryId: "developer_tools",
+        connectors: [],
+      },
+    ],
+    nextCursor: null,
+  });
+
+  assert.deepEqual(response.connectors[0]?.categoryIds, [
+    "developer_tools",
+    "data_databases",
+  ]);
 });

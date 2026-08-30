@@ -43,6 +43,14 @@ licenses remain available in the installed dependency graph and must remain in
 generated release inventories. Radius's root MIT License does not relicense
 those dependencies.
 
+## macOS Seatbelt policy foundation
+
+The Radius desktop's macOS command sandbox includes adapted policy fragments
+from OpenAI Codex `rust-v0.133.0`, licensed under Apache-2.0. The adapted files
+retain source attribution beside the policy text. OpenAI's copyright and
+Apache-2.0 terms apply to those fragments; Radius's root MIT License does not
+relicense them.
+
 ## Platform OIDC client
 
 The Platform API uses the MIT-licensed `openid-client` package and its resolved

@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { runCli } from "./main.js";
-import { shouldIgnoreWatchPath } from "./dev.js";
 
 test("documents token lifecycle commands and validates scopes before network access", async () => {
   const help = captureIo();
@@ -139,30 +138,11 @@ test("validates an agent reference before writing files", async () => {
   await assert.rejects(readFile(join(root, "radius.config.ts"), "utf8"));
 });
 
-test("writes deterministic dry-run manifest output", async () => {
-  const root = await mkdtemp(join(tmpdir(), "radius-cli-deploy-"));
-  await writeFile(
-    join(root, "package.json"),
-    JSON.stringify({ name: "agent" }),
-  );
+test("documents the separated dev, build, and deploy workflow", async () => {
   const captured = captureIo();
-  await runCli(["init", "--skip-install"], { cwd: root, io: captured.io });
-
-  const first = captureIo();
-  const second = captureIo();
-  await runCli(["deploy", "--dry-run"], { cwd: root, io: first.io });
-  await runCli(["deploy", "--dry-run"], { cwd: root, io: second.io });
-  assert.deepEqual(second.out, first.out);
-
-  const manifestPath = first.out[0]?.replace("Manifest: ", "");
-  assert.ok(manifestPath);
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(manifest.protocol.kind, "acp-stdio");
-  assert.equal(manifest.runtime.kind, "typescript");
-});
-
-test("ignores generated and dependency paths while watching", () => {
-  assert.equal(shouldIgnoreWatchPath(".radius/builds/manifest.json"), true);
-  assert.equal(shouldIgnoreWatchPath("node_modules/package/index.js"), true);
-  assert.equal(shouldIgnoreWatchPath("src/agent.ts"), false);
+  await runCli(["--help"], { io: captured.io });
+  const help = captured.out.join("\n");
+  assert.match(help, /radius dev \[--endpoint <ws-url>\]/);
+  assert.match(help, /radius build \[--config <path>\]/);
+  assert.match(help, /radius deploy \[--build <digest-or-receipt>\]/);
 });

@@ -11,6 +11,7 @@ const session: WorkspaceSessionRecord = {
   updatedAt: "2026-08-27T15:02:00.000Z",
   lastAssistantMessageAt: "2026-08-27T15:01:00.000Z",
   pinnedAt: null,
+  working: false,
 };
 
 test("shows unread only for a newer assistant message outside the active session", () => {

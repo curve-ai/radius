@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONNECTOR_PROFILE_PROTOCOL_VERSION = 1;
-export const CONNECTOR_CATALOG_PROTOCOL_VERSION = 2;
+export const CONNECTOR_CATALOG_PROTOCOL_VERSION = 3;
 
 const uuid = z.string().uuid();
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
@@ -23,6 +23,16 @@ export const ConnectorCatalogCategorySchema = z.enum([
   "communication",
   "other",
 ]);
+export const ConnectorCatalogTaxonomyCategoryIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z][a-z0-9_]{1,63}$/);
+export const ConnectorCatalogTaxonomyCategorySchema = z.object({
+  id: ConnectorCatalogTaxonomyCategoryIdSchema,
+  label: z.string().trim().min(1).max(80),
+  description: z.string().trim().min(1).max(500),
+  count: z.number().int().nonnegative(),
+});
 export const ConnectorRequirementSchema = z.enum(["required", "optional"]);
 export const AgentToolInterfaceDeclarationSchema = z.enum([
   "manifest",
@@ -197,6 +207,7 @@ export const ConnectorCatalogEntrySchema = z.object({
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(500),
   category: ConnectorCatalogCategorySchema,
+  categoryIds: z.array(ConnectorCatalogTaxonomyCategoryIdSchema).max(32),
   version: nonempty,
   transport: z.enum(["streamable_http", "stdio"]),
   remoteUrl: z.string().url().nullable(),
@@ -208,9 +219,16 @@ export const ConnectorCatalogEntrySchema = z.object({
   updatedAt: timestamp,
 });
 
+export const ConnectorCatalogCategoryPreviewSchema = z.object({
+  categoryId: ConnectorCatalogTaxonomyCategoryIdSchema,
+  connectors: z.array(ConnectorCatalogEntrySchema).max(8),
+});
+
 export const ConnectorCatalogListResponseSchema = z.object({
   protocolVersion: z.literal(CONNECTOR_CATALOG_PROTOCOL_VERSION),
   connectors: z.array(ConnectorCatalogEntrySchema),
+  categories: z.array(ConnectorCatalogTaxonomyCategorySchema),
+  categoryPreviews: z.array(ConnectorCatalogCategoryPreviewSchema),
   nextCursor: nonempty.nullable(),
 });
 
@@ -234,6 +252,12 @@ export type ProfileConnectorConnectionRecord = z.infer<
 >;
 export type ConnectorCatalogCategory = z.infer<
   typeof ConnectorCatalogCategorySchema
+>;
+export type ConnectorCatalogTaxonomyCategory = z.infer<
+  typeof ConnectorCatalogTaxonomyCategorySchema
+>;
+export type ConnectorCatalogCategoryPreview = z.infer<
+  typeof ConnectorCatalogCategoryPreviewSchema
 >;
 export type ConnectorCatalogEntry = z.infer<typeof ConnectorCatalogEntrySchema>;
 export type ConnectorCatalogListResponse = z.infer<

@@ -13,13 +13,24 @@ import { connectAcpRuntime } from "./session.js";
 
 test("streams messages and bridges an exact permission decision", async () => {
   const sessionId = "runtime-test-session";
+  let fileSystemCapabilities = { readTextFile: false, writeTextFile: false };
+  let terminalCapability = false;
   let selectedModel: string | null = null;
   let suppliedMcpServerUrl: string | null = null;
   const fakeAgent = agent({ name: "runtime-test-agent" })
-    .onRequest(methods.agent.initialize, () => ({
-      protocolVersion: PROTOCOL_VERSION,
-      agentCapabilities: { loadSession: false },
-    }))
+    .onRequest(methods.agent.initialize, (context) => {
+      terminalCapability = context.params.clientCapabilities?.terminal === true;
+      fileSystemCapabilities = {
+        readTextFile:
+          context.params.clientCapabilities?.fs?.readTextFile === true,
+        writeTextFile:
+          context.params.clientCapabilities?.fs?.writeTextFile === true,
+      };
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        agentCapabilities: { loadSession: false },
+      };
+    })
     .onRequest(methods.agent.session.new, (context) => {
       const server = context.params.mcpServers[0];
       suppliedMcpServerUrl =
@@ -64,6 +75,7 @@ test("streams messages and bridges an exact permission decision", async () => {
 
   const updates: string[] = [];
   let permissionTitle: string | null = null;
+  let terminalReleased = false;
   const runtime = await connectAcpRuntime(fakeAgent, {
     cwd: "/tmp/radius-runtime-test",
     mcpServers: [
@@ -83,12 +95,47 @@ test("streams messages and bridges an exact permission decision", async () => {
       onUpdate: (notification) => {
         updates.push(notification.update.sessionUpdate);
       },
+      fileSystem: {
+        readTextFile: async (request) => {
+          assert.equal(request.path, "/tmp/radius-runtime-test/note.txt");
+          return { content: "saved" };
+        },
+        writeTextFile: async (request) => {
+          assert.equal(request.path, "/tmp/radius-runtime-test/note.txt");
+          assert.equal(request.content, "saved");
+        },
+      },
+      terminal: {
+        create: async (request) => {
+          assert.equal(request.command, "/bin/pwd");
+          assert.equal(request.cwd, "/tmp/radius-runtime-test");
+          return { terminalId: "terminal-1" };
+        },
+        output: async (request) => {
+          assert.equal(request.terminalId, "terminal-1");
+          return {
+            output: "/tmp/radius-runtime-test\n",
+            truncated: false,
+            exitStatus: { exitCode: 0, signal: null },
+          };
+        },
+        waitForExit: async () => ({ exitCode: 0, signal: null }),
+        kill: async () => undefined,
+        release: async () => {
+          terminalReleased = true;
+        },
+      },
     },
   });
 
   try {
     const result = await runtime.prompt("Hello");
     assert.equal(runtime.sessionId, sessionId);
+    assert.equal(terminalCapability, true);
+    assert.deepEqual(fileSystemCapabilities, {
+      readTextFile: true,
+      writeTextFile: true,
+    });
     assert.equal(selectedModel, "codex/deep");
     assert.equal(suppliedMcpServerUrl, "http://192.168.64.1:4567/mcp");
     assert.deepEqual(runtime.availableModels(), [
@@ -98,6 +145,7 @@ test("streams messages and bridges an exact permission decision", async () => {
     assert.equal(result.stopReason, "end_turn");
     assert.equal(result.text, "Hello from the agent");
     assert.equal(permissionTitle, "Use a test tool");
+    assert.equal(terminalReleased, true);
     assert.deepEqual(updates, ["agent_message_chunk", "tool_call"]);
   } finally {
     runtime.close();
@@ -108,6 +156,39 @@ async function sendTestTurn(
   request: PromptRequest,
   clientContext: AgentContext,
 ): Promise<void> {
+  await clientContext.request(methods.client.fs.writeTextFile, {
+    sessionId: request.sessionId,
+    path: "/tmp/radius-runtime-test/note.txt",
+    content: "saved",
+  });
+  const file = await clientContext.request(methods.client.fs.readTextFile, {
+    sessionId: request.sessionId,
+    path: "/tmp/radius-runtime-test/note.txt",
+  });
+  assert.equal(file.content, "saved");
+
+  const terminal = await clientContext.request(methods.client.terminal.create, {
+    sessionId: request.sessionId,
+    command: "/bin/pwd",
+    cwd: "/tmp/radius-runtime-test",
+  });
+  const terminalOutput = await clientContext.request(
+    methods.client.terminal.output,
+    {
+      sessionId: request.sessionId,
+      terminalId: terminal.terminalId,
+    },
+  );
+  assert.equal(terminalOutput.output, "/tmp/radius-runtime-test\n");
+  await clientContext.request(methods.client.terminal.waitForExit, {
+    sessionId: request.sessionId,
+    terminalId: terminal.terminalId,
+  });
+  await clientContext.request(methods.client.terminal.release, {
+    sessionId: request.sessionId,
+    terminalId: terminal.terminalId,
+  });
+
   await clientContext.notify(methods.client.session.update, {
     sessionId: request.sessionId,
     update: {

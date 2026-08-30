@@ -19,7 +19,9 @@ export interface InitOptions {
 
 const TOOLCHAIN_VERSION = "0.0.1";
 
-export async function initializeAgentProject(options: InitOptions): Promise<void> {
+export async function initializeAgentProject(
+  options: InitOptions,
+): Promise<void> {
   if (options.language === "python") {
     await initializePythonAgentProject(options);
     return;
@@ -38,6 +40,9 @@ export async function initializeAgentProject(options: InitOptions): Promise<void
       entrypoint: "radius/agent.ts",
       node: "22",
     },
+    development: {
+      endpoint: "ws://127.0.0.1:7331/acp",
+    },
     capabilities: [],
     networkAllowlist: [],
   });
@@ -47,11 +52,7 @@ export async function initializeAgentProject(options: InitOptions): Promise<void
   await assertWritable(configPath, options.force ?? false);
   await assertWritable(agentPath, options.force ?? false);
 
-  await writeFile(
-    configPath,
-    renderConfig(config),
-    "utf8",
-  );
+  await writeFile(configPath, renderConfig(config), "utf8");
   await mkdir(dirname(agentPath), { recursive: true });
   await writeFile(agentPath, renderAgent(), "utf8");
   await ensureGitignore(options.root);
@@ -60,10 +61,14 @@ export async function initializeAgentProject(options: InitOptions): Promise<void
 
   options.io.out(`Created ${configPath}`);
   options.io.out(`Created ${agentPath}`);
-  options.io.out("Next: radius validate && radius dev");
+  options.io.out(
+    "Next: run the agent with --radius-dev, then run radius validate && radius dev",
+  );
 }
 
-async function initializePythonAgentProject(options: InitOptions): Promise<void> {
+async function initializePythonAgentProject(
+  options: InitOptions,
+): Promise<void> {
   const pyprojectPath = join(options.root, "pyproject.toml");
   let pyproject = "";
   try {
@@ -84,7 +89,9 @@ dependencies = []
     tool?: { radius?: unknown };
   };
   if (parsed.tool?.radius !== undefined) {
-    throw new Error(`Refusing to overwrite existing [tool.radius] in ${pyprojectPath}`);
+    throw new Error(
+      `Refusing to overwrite existing [tool.radius] in ${pyprojectPath}`,
+    );
   }
   const projectName =
     typeof parsed.project?.name === "string"
@@ -125,7 +132,9 @@ dependencies = []
 
   options.io.out(`Updated ${pyprojectPath}`);
   options.io.out(`Created ${agentPath}`);
-  options.io.out("Next: radius validate && radius dev");
+  options.io.out(
+    "Next: expose a loopback ACP WebSocket endpoint, configure development.endpoint, then run radius dev",
+  );
 }
 
 async function assertWritable(path: string, force: boolean): Promise<void> {
@@ -179,7 +188,9 @@ function installToolchain(root: string): void {
     const result = spawnSync(command, args, { cwd: root, stdio: "inherit" });
     if (result.error) throw result.error;
     if (result.status !== 0) {
-      throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
+      throw new Error(
+        `${command} ${args.join(" ")} failed with ${result.status}`,
+      );
     }
   }
 }
@@ -212,7 +223,7 @@ function renderConfig(config: AgentConfig): string {
 }
 
 function renderAgent(): string {
-  return `import { defineAgent } from "@curve-ai/sdk";\n\nconst agent = defineAgent({\n  name: "radius-agent",\n  async run({ text }) {\n    return { text: \`Received: \${text}\` };\n  },\n});\n\nagent.serveStdio();\n`;
+  return `import { defineAgent } from "@curve-ai/sdk";\n\nconst agent = defineAgent({\n  name: "radius-agent",\n  async run({ text }) {\n    return { text: \`Received: \${text}\` };\n  },\n});\n\nif (process.argv.includes("--radius-dev")) {\n  const { serveDevelopmentAgent } = await import("@curve-ai/sdk/development");\n  const server = await serveDevelopmentAgent(agent);\n  console.log(\`Radius ACP development endpoint: \${server.endpoint}\`);\n} else {\n  agent.serveStdio();\n}\n`;
 }
 
 function renderPythonConfig(config: AgentConfig): string {

@@ -6,8 +6,11 @@
 
 **Implementation:** Connector capability contracts, operations, providers,
 bindings, profile projections, the MCP client adapter, and required/optional
-agent availability resolution are implemented. Policy revisions, run snapshots,
-invocation approvals, and the guest MCP bridge remain in progress.
+agent availability resolution are implemented. The first macOS ACP terminal
+and text-file adapters now enforce release requests, project roots, exact
+outside-path approvals, and invocation history without a schema change. Policy
+revisions, run snapshots, durable external-path grants, and the guest MCP bridge
+remain in progress.
 
 ## Mission
 
@@ -56,11 +59,13 @@ exercise them. A capability descriptor sent to an agent is not bearer authority.
 
 - The signed agent-release manifest requests capabilities but does not grant
   them.
-- `project_roots` already owns the device-local canonical path for one project.
-  This model references that relationship and does not copy its path.
-- Linking a project root establishes a resource boundary and user consent for
+- `project_roots` already owns the device-local canonical source-folder paths
+  for one project. This model references those relationships and does not copy
+  their paths.
+- Linking a project root establishes one resource boundary and user consent for
   that root. An agent must still request the relevant operation and pass policy
-  evaluation. Once allowed, operations contained by the root do not require
+  evaluation. Once allowed, operations contained by an authorized root do not
+  require
   per-file approval.
 - `tool_calls`, `approval_requests`, and `approval_decisions` remain immutable
   invocation history. They are not the source of durable grants.
@@ -191,8 +196,8 @@ deliberately rejected.
 Rules select resources through typed relationships rather than a security-
 critical JSON selector:
 
-- `authorization_rule_project_roots` references the existing composite project
-  root relationship without copying `root_path`.
+- `authorization_rule_project_roots` references the opaque `project_roots.id`
+  without copying `root_path`.
 - `authorization_rule_tool_providers` selects a configured provider/account.
 - `authorization_rule_network_destinations` selects individual canonical
   destinations.
@@ -350,7 +355,8 @@ Before every tool invocation, the broker verifies:
   the descriptor and versioned schema;
 - the package request, provider, resources, credentials, and policy remain
   active;
-- paths remain inside the canonical project root after symlink resolution;
+- paths remain inside an authorized canonical project root after symlink
+  resolution;
 - any network destination is explicitly authorized;
 - an `ask` operation has an unexpired approval for this exact immutable tool
   call input.

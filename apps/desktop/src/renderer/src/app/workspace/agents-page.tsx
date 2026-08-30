@@ -48,15 +48,29 @@ function authenticationLabel(agent: DesktopAgentSummary): string {
 }
 
 export function AgentsPage(): ReactNode {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotion() === true;
   const [agents, setAgents] = useState<DesktopAgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
-  const enterTransform =
-    reduceMotion === true ? "translateY(0px)" : "translateY(2px)";
-  const exitTransform =
-    reduceMotion === true ? "translateY(0px)" : "translateY(-2px)";
+  const enterTransform = reduceMotion ? "translateY(0px)" : "translateY(2px)";
+  const exitTransform = reduceMotion ? "translateY(0px)" : "translateY(-2px)";
+  const authStateMotionProps = {
+    initial: { opacity: 0, transform: enterTransform },
+    animate: { opacity: 1, transform: "translateY(0px)" },
+    exit: {
+      opacity: 0,
+      transform: exitTransform,
+      transition: {
+        duration: 0.1,
+        ease: AGENT_AUTH_STATE_EASE,
+      },
+    },
+    transition: {
+      duration: reduceMotion ? 0.1 : 0.16,
+      ease: AGENT_AUTH_STATE_EASE,
+    },
+  };
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -72,7 +86,11 @@ export function AgentsPage(): ReactNode {
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => void load());
-    return () => window.cancelAnimationFrame(frame);
+    const unsubscribe = window.radius.onAgentsChanged(() => void load());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      unsubscribe();
+    };
   }, [load]);
 
   const connect = async (agentId: string): Promise<void> => {
@@ -196,23 +214,7 @@ export function AgentsPage(): ReactNode {
                       <AnimatePresence initial={false} mode="popLayout">
                         <motion.p
                           key={`status:${authenticationStateKey}`}
-                          initial={{ opacity: 0, transform: enterTransform }}
-                          animate={{
-                            opacity: 1,
-                            transform: "translateY(0px)",
-                          }}
-                          exit={{
-                            opacity: 0,
-                            transform: exitTransform,
-                            transition: {
-                              duration: 0.1,
-                              ease: AGENT_AUTH_STATE_EASE,
-                            },
-                          }}
-                          transition={{
-                            duration: reduceMotion === true ? 0.1 : 0.16,
-                            ease: AGENT_AUTH_STATE_EASE,
-                          }}
+                          {...authStateMotionProps}
                           className="flex items-center gap-1.5 text-sm text-muted-foreground"
                         >
                           <StatusIcon
@@ -228,23 +230,7 @@ export function AgentsPage(): ReactNode {
                     <AnimatePresence initial={false} mode="popLayout">
                       <motion.div
                         key={`action:${actionStateKey}`}
-                        initial={{ opacity: 0, transform: enterTransform }}
-                        animate={{
-                          opacity: 1,
-                          transform: "translateY(0px)",
-                        }}
-                        exit={{
-                          opacity: 0,
-                          transform: exitTransform,
-                          transition: {
-                            duration: 0.1,
-                            ease: AGENT_AUTH_STATE_EASE,
-                          },
-                        }}
-                        transition={{
-                          duration: reduceMotion === true ? 0.1 : 0.16,
-                          ease: AGENT_AUTH_STATE_EASE,
-                        }}
+                        {...authStateMotionProps}
                         className="flex min-h-8 items-center justify-end"
                       >
                         {connected &&

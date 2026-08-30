@@ -4,7 +4,7 @@ import {
   RadiusPlatformClient,
   RadiusPlatformError,
 } from "@curve-ai/platform-client";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { PlatformWebAuthMode } from "./platform-auth";
@@ -16,8 +16,20 @@ export function platformApiUrl(): string {
   return process.env.RADIUS_PLATFORM_API_URL?.trim() || "http://127.0.0.1:3100";
 }
 
-export function platformPublicApiUrl(): string {
-  return process.env.RADIUS_PLATFORM_PUBLIC_API_URL?.trim() || platformApiUrl();
+export async function platformPublicApiUrl(): Promise<string> {
+  const configured = process.env.RADIUS_PLATFORM_PUBLIC_API_URL?.trim();
+  if (configured) return configured;
+  if (process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true") {
+    const requestHeaders = await headers();
+    const host =
+      requestHeaders.get("x-forwarded-host") || requestHeaders.get("host");
+    if (!host) throw new Error("Shared Platform requests require a host");
+    const protocol =
+      requestHeaders.get("x-forwarded-proto") ||
+      (host.includes("localhost") ? "http" : "https");
+    return `${protocol}://${host}`;
+  }
+  return platformApiUrl();
 }
 
 export function platformWebAuthMode(): PlatformWebAuthMode {
@@ -53,10 +65,14 @@ export const getPlatformContext = cache(async () => {
     client = platformServerClient();
     identity = await client.identity();
   } else {
+    const requestApiUrl =
+      process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true"
+        ? await platformPublicApiUrl()
+        : platformApiUrl();
     const cookieStore = await cookies();
     const cookieHeader = cookieStore.toString();
     client = new RadiusPlatformClient({
-      baseUrl: platformApiUrl(),
+      baseUrl: requestApiUrl,
       cookie: cookieHeader,
       allowInsecureHttp:
         process.env.RADIUS_PLATFORM_ALLOW_INSECURE_API === "true",

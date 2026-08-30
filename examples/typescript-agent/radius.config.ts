@@ -9,6 +9,9 @@ export default defineConfig({
     entrypoint: "radius/agent.ts",
     node: "22",
   },
+  development: {
+    endpoint: "ws://127.0.0.1:7331/acp",
+  },
   capabilities: [],
   networkAllowlist: [],
 });

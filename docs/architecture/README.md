@@ -46,7 +46,7 @@ The React renderer is unprivileged. Electron owns operating-system integration b
 - [`adr/004-libsql-local-persistence.md`](adr/004-libsql-local-persistence.md) — persist Radius-owned data in embedded libSQL through a host-owned storage service.
 - [`adr/005-pluggable-optional-sync.md`](adr/005-pluggable-optional-sync.md) — separate the public sync capability from operated provider services.
 - [`adr/006-durable-local-scheduling.md`](adr/006-durable-local-scheduling.md) — persist schedules and leased dispatch state in local libSQL.
-- [`adr/007-one-root-projects.md`](adr/007-one-root-projects.md) — group sessions under one explicit local root folder and enforce recursive containment.
+- [`adr/007-one-root-projects.md`](adr/007-one-root-projects.md) — group sessions under optional local source folders and enforce recursive containment.
 
 ## Supporting architecture
 

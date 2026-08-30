@@ -1,15 +1,24 @@
 import {
   appendSessionEvent,
   createSession,
+  getSessionProjectContext,
+  getSessionRevision,
   installAgentRelease,
+  listProjects,
   listSessionTranscript,
   type RadiusDatabase,
   type InstalledAgentRelease,
+  type SessionTranscriptEventRecord,
 } from "@curve-ai/radius-storage";
 import {
+  AcpRuntimeSession,
   MicrovmAcpRuntime,
+  acpStreamFromWebSocket,
   parseAgentReleaseDescriptor,
+  type AcpRuntimeHandlers,
   type AgentReleaseDescriptor,
+  type AcpRuntimePromptResult,
+  type DevelopmentAgentConnection,
   type RequestPermissionRequest,
   type MicrovmRuntimePaths,
   type SessionUpdate,
@@ -19,18 +28,21 @@ import {
   type BrowserToolServer,
 } from "@curve-ai/radius-browser-tools";
 import type { BrowserBridgeOperation } from "@curve-ai/radius-browser-protocol";
-import { app } from "electron";
+import { app, BrowserWindow } from "electron";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import type {
   DesktopAgentSummary,
   DesktopRuntimeStatus,
+  SessionTranscriptStreamUpdate,
   StartAgentPromptInput,
   StartAgentPromptResult,
+  StreamingSessionTranscriptMessage,
 } from "../radius-api";
+import { SESSION_TRANSCRIPT_STREAM_CHANNEL } from "../radius-api";
 import {
   agentPlanJournalEvents,
   createAgentPlanJournalState,
@@ -48,6 +60,17 @@ import {
 import { initializeStorage, type StorageContext } from "./storage";
 import { resolveAgentReleasePaths } from "./bundled-agents";
 import { browserBridge } from "./browser-bridge";
+import { listDevelopmentAgentConnections } from "./development-agents";
+import {
+  HostFileSystemManager,
+  type FileAccessResult,
+  type FileAuthorizationRequest,
+} from "./file-system-access";
+import {
+  MacOsTerminalManager,
+  type TerminalAuthorizationRequest,
+  type TerminalExecutionResult,
+} from "./terminal-execution";
 
 type SessionEvent = Parameters<typeof appendSessionEvent>[1];
 type SessionEventBody = SessionEvent extends infer Event
@@ -66,19 +89,179 @@ type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 interface RuntimeUpdateState {
+  hostToolKinds: Set<string>;
   plan: AgentPlanJournalState;
   toolCallEventIds: Map<string, string>;
 }
+type StreamedMessageEvent = NonNullable<SessionTranscriptStreamUpdate["event"]>;
+type AgentTarget =
+  | { kind: "development"; connection: DevelopmentAgentConnection }
+  | { kind: "release"; release: AgentReleaseDescriptor };
+interface RunningAgentRuntime {
+  prompt(text: string): Promise<AcpRuntimePromptResult>;
+  cancel(): Promise<void>;
+  stop(): Promise<void>;
+}
 
 let runtimeErrorCode: string | null = null;
-const runningSessions = new Map<string, MicrovmAcpRuntime>();
+const runningSessions = new Map<string, RunningAgentRuntime>();
+const runningTerminalManagers = new Map<string, MacOsTerminalManager>();
+const workingSessions = new Set<string>();
+const streamingSessionMessages = new Map<
+  string,
+  StreamingSessionTranscriptMessage
+>();
+
+type TerminalApprovalDecision = "approved" | "denied" | "cancelled" | "expired";
+
+interface PendingTerminalApproval {
+  sessionId: string;
+  exactReason: string;
+  exactToolInput: JsonValue;
+  toolCallEventId: string;
+  decide(decision: TerminalApprovalDecision): Promise<void>;
+}
+
+const pendingTerminalApprovals = new Map<string, PendingTerminalApproval>();
+const TERMINAL_APPROVAL_TIMEOUT_MS = 10 * 60 * 1_000;
+
+function broadcastSessionTranscriptStream(
+  update: SessionTranscriptStreamUpdate,
+): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(SESSION_TRANSCRIPT_STREAM_CHANNEL, update);
+  }
+}
+
+function publishStreamingSessionMessage(
+  sessionId: string,
+  event: StreamingSessionTranscriptMessage,
+  textDelta: string,
+  textOffset: number,
+): void {
+  streamingSessionMessages.set(sessionId, event);
+  broadcastSessionTranscriptStream({
+    sessionId,
+    eventId: event.eventId,
+    event: { ...event, text: textDelta },
+    mode: "append",
+    textOffset,
+  });
+}
+
+function clearStreamingSessionMessage(sessionId: string): void {
+  const event = streamingSessionMessages.get(sessionId);
+  if (!event) return;
+
+  streamingSessionMessages.delete(sessionId);
+  broadcastSessionTranscriptStream({
+    sessionId,
+    eventId: event.eventId,
+    event: null,
+    mode: "replace",
+  });
+}
+
+export function getStreamingSessionMessage(
+  sessionId: string,
+): StreamingSessionTranscriptMessage | null {
+  return streamingSessionMessages.get(sessionId) ?? null;
+}
+
+export function overlayPendingHostApprovalDetails(
+  sessionId: string,
+  events: readonly SessionTranscriptEventRecord[],
+): SessionTranscriptEventRecord[] {
+  const pending = [...pendingTerminalApprovals.entries()].filter(
+    ([, approval]) => approval.sessionId === sessionId,
+  );
+  if (pending.length === 0) return [...events];
+  const toolInputByEventId = new Map(
+    pending.map(([, approval]) => [
+      approval.toolCallEventId,
+      approval.exactToolInput,
+    ]),
+  );
+  const reasonByEventId = new Map(
+    pending.map(([approvalRequestEventId, approval]) => [
+      approvalRequestEventId,
+      approval.exactReason,
+    ]),
+  );
+  return events.map((event) => {
+    if (event.eventType === "tool_call") {
+      const input = toolInputByEventId.get(event.eventId);
+      return input ? { ...event, input } : event;
+    }
+    if (event.eventType === "approval_request") {
+      const reason = reasonByEventId.get(event.eventId);
+      return reason ? { ...event, reason } : event;
+    }
+    return event;
+  });
+}
+
+export async function resolveTerminalApproval(
+  rawInput: unknown,
+): Promise<void> {
+  if (!rawInput || typeof rawInput !== "object") {
+    throw new Error("Terminal approval decision is invalid");
+  }
+  const input = rawInput as Record<string, unknown>;
+  if (typeof input.sessionId !== "string" || !input.sessionId) {
+    throw new Error("Terminal approval session is required");
+  }
+  if (
+    typeof input.approvalRequestEventId !== "string" ||
+    !input.approvalRequestEventId
+  ) {
+    throw new Error("Terminal approval request is required");
+  }
+  if (input.decision !== "approved" && input.decision !== "denied") {
+    throw new Error("Terminal approval decision must be approved or denied");
+  }
+  const pending = pendingTerminalApprovals.get(input.approvalRequestEventId);
+  if (!pending || pending.sessionId !== input.sessionId) {
+    throw new Error("Terminal approval request is no longer pending");
+  }
+  await pending.decide(input.decision);
+}
+
+async function cancelPendingTerminalApprovals(
+  sessionId: string,
+): Promise<void> {
+  const pending = [...pendingTerminalApprovals.values()].filter(
+    (approval) => approval.sessionId === sessionId,
+  );
+  await Promise.all(pending.map((approval) => approval.decide("cancelled")));
+}
+
+export function isAgentSessionWorking(sessionId: string): boolean {
+  return workingSessions.has(sessionId);
+}
+
+function markSessionWorking(sessionId: string): void {
+  workingSessions.add(sessionId);
+}
+
+function clearSessionWorking(sessionId: string): void {
+  workingSessions.delete(sessionId);
+}
 
 export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
-  const releases = await loadConfiguredReleases();
-  if (releases.length === 0) return [];
+  const [releases, developmentConnections] = await Promise.all([
+    loadConfiguredReleases(),
+    listDevelopmentAgentConnections(),
+  ]);
+  if (releases.length === 0 && developmentConnections.length === 0) return [];
   const context = await initializeStorage();
-  const agents: DesktopAgentSummary[] = [];
-  for (const release of releases) {
+  const developmentAgentIds = new Set(
+    developmentConnections.map((connection) => connection.agentId),
+  );
+  const agents = developmentConnections.map(developmentAgentSummary);
+  for (const release of releases.filter(
+    (candidate) => !developmentAgentIds.has(candidate.agentId),
+  )) {
     const installation = await ensureAgentInstallation(context, release);
     const authentication = isFxRelease(release)
       ? await getFxAuthenticationStatus(context, installation.installationId, {
@@ -121,8 +304,13 @@ export async function disconnectAgentAuthentication(
 }
 
 export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
-  const [release] = await loadConfiguredReleases();
-  if (!release) {
+  const [developmentConnections, releases] = await Promise.all([
+    listDevelopmentAgentConnections(),
+    loadConfiguredReleases(),
+  ]);
+  const developmentConnection = developmentConnections[0];
+  const release = releases[0];
+  if (!developmentConnection && !release) {
     return {
       state: "unconfigured",
       agentId: null,
@@ -136,8 +324,10 @@ export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
       : runningSessions.size > 0
         ? "running"
         : "ready",
-    agentId: release.agentId,
-    releaseVersion: release.releaseVersion,
+    agentId: developmentConnection?.agentId ?? release?.agentId ?? null,
+    releaseVersion: developmentConnection
+      ? "development"
+      : (release?.releaseVersion ?? null),
     errorCode: runtimeErrorCode,
   };
 }
@@ -150,15 +340,18 @@ export async function startAgentPrompt(
   if (!prompt) throw new Error("A prompt is required");
   if (prompt.length > 100_000) throw new Error("The prompt is too long");
 
-  const release = await requireAgentRelease(input.agentId);
+  const target = await requireAgentTarget(input.agentId);
+  const release = target.kind === "release" ? target.release : null;
   const context = await initializeStorage();
-  const installation = await ensureAgentInstallation(context, release);
-  let modelId = input.modelId ?? release.defaultModelId;
+  const installation = release
+    ? await ensureAgentInstallation(context, release)
+    : null;
+  let modelId = input.modelId ?? release?.defaultModelId ?? null;
   let thinkingEffortId: string | null = null;
-  if (isFxRelease(release)) {
+  if (release && isFxRelease(release)) {
     const authentication = await getFxAuthenticationStatus(
       context,
-      installation.installationId,
+      installation!.installationId,
     );
     if (authentication.state !== "connected") {
       throw new Error("FX_AUTHENTICATION_REQUIRED");
@@ -185,25 +378,63 @@ export async function startAgentPrompt(
       }
       thinkingEffortId = input.thinkingEffortId;
     }
-  } else if (modelId && !release.models.some((model) => model.id === modelId)) {
+  } else if (
+    release &&
+    modelId &&
+    !release.models.some((model) => model.id === modelId)
+  ) {
     throw new Error("The selected model is not available for this agent");
   } else if (input.thinkingEffortId) {
     throw new Error("This agent does not support thinking effort selection");
+  } else if (!release && input.modelId) {
+    throw new Error(
+      "This development agent has not advertised model selection",
+    );
   }
   const identity = localDeviceIdentity(context.vault);
-  const priorEvents = input.sessionId
-    ? await listSessionTranscript(context.database, input.sessionId)
-    : [];
-  const session = input.sessionId
-    ? {
-        id: input.sessionId,
-        revision: priorEvents.at(-1)?.sessionRevision ?? 1,
-      }
-    : await createSession(context.database, {
-        originClientInstanceId: identity.clientInstanceId,
-        projectId: input.projectId ?? null,
-        title: promptTitle(prompt),
-      });
+  const [priorEvents, existingRevision, existingSessionContext] =
+    input.sessionId
+      ? await Promise.all([
+          listSessionTranscript(context.database, input.sessionId),
+          getSessionRevision(context.database, input.sessionId),
+          getSessionProjectContext(context.database, input.sessionId),
+        ])
+      : [[], null, null];
+  if (input.sessionId && !existingSessionContext) {
+    throw new Error("Session does not exist");
+  }
+  const projectId = input.sessionId
+    ? (existingSessionContext?.projectId ?? null)
+    : (input.projectId ?? null);
+  if (
+    input.sessionId &&
+    input.projectId !== undefined &&
+    input.projectId !== projectId
+  ) {
+    throw new Error("Session project context cannot be changed");
+  }
+  const project = projectId
+    ? (await listProjects(context.database, identity.clientInstanceId)).find(
+        (candidate) => candidate.id === projectId,
+      )
+    : null;
+  const projectRoots = await Promise.all(
+    (project?.roots ?? []).map((root) => realpath(root.rootPath)),
+  );
+  let session: { id: string; revision: number };
+  if (input.sessionId) {
+    if (existingRevision === null) throw new Error("Session does not exist");
+    if (isAgentSessionWorking(input.sessionId)) {
+      throw new Error("This chat already has an active run");
+    }
+    session = { id: input.sessionId, revision: existingRevision };
+  } else {
+    session = await createSession(context.database, {
+      originClientInstanceId: identity.clientInstanceId,
+      projectId,
+      title: promptTitle(prompt),
+    });
+  }
   const journal = new RuntimeSessionJournal(
     context.database,
     identity.clientInstanceId,
@@ -211,38 +442,45 @@ export async function startAgentPrompt(
     session.revision,
   );
   const userMessageEventId = randomUUID();
-  await journal.append({
-    eventId: userMessageEventId,
-    agentRunId: null,
-    eventType: "message",
-    role: "user",
-    messageKind: "prompt",
-    status: "completed",
-    model: null,
-    providerMessageId: null,
-    finishReason: null,
-    parts: [
-      {
-        id: randomUUID(),
-        position: 0,
-        partType: "text",
-        text: prompt,
-      },
-    ],
-  });
+  markSessionWorking(session.id);
+  try {
+    await journal.append({
+      eventId: userMessageEventId,
+      agentRunId: null,
+      eventType: "message",
+      role: "user",
+      messageKind: "prompt",
+      status: "completed",
+      model: null,
+      providerMessageId: null,
+      finishReason: null,
+      parts: [
+        {
+          id: randomUUID(),
+          position: 0,
+          partType: "text",
+          text: prompt,
+        },
+      ],
+    });
 
-  void runAgentSession({
-    accessMode: input.accessMode,
-    context,
-    modelId,
-    release,
-    prompt: promptWithHistory(priorEvents, prompt),
-    sessionId: session.id,
-    thinkingEffortId,
-    userMessageEventId,
-    journal,
-  });
-  return { sessionId: session.id };
+    void runAgentSession({
+      accessMode: input.accessMode,
+      context,
+      modelId,
+      target,
+      prompt: promptWithHistory(priorEvents, prompt),
+      projectRoots,
+      sessionId: session.id,
+      thinkingEffortId,
+      userMessageEventId,
+      journal,
+    });
+  } catch (error) {
+    clearSessionWorking(session.id);
+    throw error;
+  }
+  return { sessionId: session.id, userMessageEventId };
 }
 
 function parsePromptInput(input: unknown): StartAgentPromptInput {
@@ -307,42 +545,357 @@ function promptWithHistory(
 
 export async function cancelAgentSession(sessionId: string): Promise<void> {
   const runtime = runningSessions.get(sessionId);
-  if (!runtime) return;
-  await runtime.cancel();
+  await Promise.all([
+    runtime?.cancel(),
+    runningTerminalManagers.get(sessionId)?.close(),
+    cancelPendingTerminalApprovals(sessionId),
+  ]);
 }
 
 export function stopAgentRuntime(): void {
   for (const runtime of runningSessions.values()) runtime.stop();
+  for (const terminalManager of runningTerminalManagers.values()) {
+    void terminalManager.close();
+  }
+  for (const sessionId of workingSessions) {
+    void cancelPendingTerminalApprovals(sessionId);
+  }
+  for (const sessionId of [...streamingSessionMessages.keys()]) {
+    clearStreamingSessionMessage(sessionId);
+  }
   runningSessions.clear();
+  runningTerminalManagers.clear();
+  workingSessions.clear();
+}
+
+interface ToolApprovalContext {
+  agentRunId: string;
+  journal: RuntimeSessionJournal;
+  sessionId: string;
+}
+
+async function awaitToolApproval(
+  input: ToolApprovalContext,
+  request: {
+    detail: string;
+    exactReason: string;
+    exactToolInput: JsonValue;
+    reason: string;
+    toolCallEventId: string;
+  },
+  signal: AbortSignal,
+): Promise<TerminalApprovalDecision> {
+  const approvalRequestEventId = randomUUID();
+  const expiresAt = new Date(Date.now() + TERMINAL_APPROVAL_TIMEOUT_MS);
+  await input.journal.append({
+    eventId: randomUUID(),
+    agentRunId: input.agentRunId,
+    eventType: "agent_run_state_update",
+    state: "waiting_for_approval",
+    detail: request.detail,
+  });
+  await input.journal.append({
+    eventId: approvalRequestEventId,
+    agentRunId: input.agentRunId,
+    eventType: "approval_request",
+    toolCallEventId: request.toolCallEventId,
+    reason: request.reason,
+    expiresAt: expiresAt.toISOString(),
+  });
+
+  return new Promise<TerminalApprovalDecision>((resolve) => {
+    let settled = false;
+    const finish = async (
+      decision: TerminalApprovalDecision,
+    ): Promise<void> => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      pendingTerminalApprovals.delete(approvalRequestEventId);
+      await input.journal.append({
+        eventId: randomUUID(),
+        agentRunId: input.agentRunId,
+        eventType: "approval_decision",
+        approvalRequestEventId,
+        decision,
+        actorType:
+          decision === "approved" || decision === "denied" ? "user" : "system",
+        actorId: null,
+        note: null,
+      });
+      await input.journal.append({
+        eventId: randomUUID(),
+        agentRunId: input.agentRunId,
+        eventType: "agent_run_state_update",
+        state: "working",
+        detail:
+          decision === "approved" ? "Continuing with approved access" : null,
+      });
+      resolve(decision);
+    };
+    const onAbort = (): void => void finish("cancelled");
+    const timeout = setTimeout(
+      () => void finish("expired"),
+      TERMINAL_APPROVAL_TIMEOUT_MS,
+    );
+    timeout.unref();
+    pendingTerminalApprovals.set(approvalRequestEventId, {
+      sessionId: input.sessionId,
+      exactReason: request.exactReason,
+      exactToolInput: request.exactToolInput,
+      toolCallEventId: request.toolCallEventId,
+      decide: finish,
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) void finish("cancelled");
+  });
+}
+
+async function authorizeTerminal(
+  input: {
+    accessMode: "ask" | "full";
+    agentRunId: string;
+    journal: RuntimeSessionJournal;
+    sessionId: string;
+  },
+  request: TerminalAuthorizationRequest,
+  signal: AbortSignal,
+): Promise<string> {
+  const toolCallEventId = randomUUID();
+  const exactToolInput: JsonValue = {
+    command: request.command,
+    args: request.args,
+    cwd: request.cwd,
+    environment: request.environment,
+    outsideProjectRoots: request.outsideProjectRoots,
+    pendingLocally: true,
+  };
+  await input.journal.append({
+    eventId: toolCallEventId,
+    agentRunId: input.agentRunId,
+    eventType: "tool_call",
+    triggeringMessageEventId: null,
+    capability: "shell",
+    operation: "execute",
+    inputSchemaId: "radius.shell.execute",
+    inputSchemaVersion: 1,
+    input: {
+      command: "Command details remain on the originating Mac",
+      args: [],
+      cwd: request.outsideProjectRoots
+        ? "Outside project folders"
+        : "Project folders",
+      environment: request.environment.map((entry) => ({ name: entry.name })),
+      outsideProjectRoots: request.outsideProjectRoots,
+    },
+  });
+
+  const needsApproval =
+    input.accessMode === "ask" || request.outsideProjectRoots;
+  if (!needsApproval) return toolCallEventId;
+
+  const decision = await awaitToolApproval(
+    input,
+    {
+      detail: request.outsideProjectRoots
+        ? "Waiting for folder access"
+        : "Waiting for command approval",
+      exactReason: request.outsideProjectRoots
+        ? `Allow this command to read and write ${request.cwd}`
+        : `Allow this command to run in ${request.cwd}`,
+      exactToolInput,
+      reason: request.outsideProjectRoots
+        ? "Allow this command to use an outside project folder"
+        : "Allow this command to run in the project folders",
+      toolCallEventId,
+    },
+    signal,
+  );
+
+  if (decision !== "approved") {
+    await input.journal.append({
+      eventId: randomUUID(),
+      agentRunId: input.agentRunId,
+      eventType: "tool_result",
+      toolCallEventId,
+      outcome: "cancelled",
+      outputSchemaId: "radius.shell.result",
+      outputSchemaVersion: 1,
+      output: { decision },
+    });
+    throw new Error(`Terminal command was ${decision}`);
+  }
+  return toolCallEventId;
+}
+
+async function appendTerminalResult(
+  journal: RuntimeSessionJournal,
+  agentRunId: string,
+  result: TerminalExecutionResult,
+): Promise<void> {
+  await journal.append({
+    eventId: randomUUID(),
+    agentRunId,
+    eventType: "tool_result",
+    toolCallEventId: result.correlationId,
+    outcome:
+      result.exitCode === 0
+        ? "succeeded"
+        : result.signal
+          ? "cancelled"
+          : "failed",
+    outputSchemaId: "radius.shell.result",
+    outputSchemaVersion: 1,
+    output: {
+      durationMs: result.durationMs,
+      exitCode: result.exitCode,
+      outputTruncated: result.outputTruncated,
+      signal: result.signal,
+    },
+  });
+}
+
+async function authorizeFileAccess(
+  input: ToolApprovalContext & { accessMode: "ask" | "full" },
+  request: FileAuthorizationRequest,
+  signal: AbortSignal,
+): Promise<string> {
+  const toolCallEventId = randomUUID();
+  const exactToolInput: JsonValue = {
+    path: request.path,
+    outsideProjectRoots: request.outsideProjectRoots,
+    pendingLocally: true,
+  };
+  await input.journal.append({
+    eventId: toolCallEventId,
+    agentRunId: input.agentRunId,
+    eventType: "tool_call",
+    triggeringMessageEventId: null,
+    capability: "workspace.files",
+    operation: request.operation,
+    inputSchemaId: `radius.workspace.files.${request.operation}`,
+    inputSchemaVersion: 1,
+    input: {
+      path: request.outsideProjectRoots
+        ? "Outside project file"
+        : "Project file",
+      outsideProjectRoots: request.outsideProjectRoots,
+    },
+  });
+  const needsApproval =
+    request.outsideProjectRoots ||
+    (input.accessMode === "ask" && request.operation === "write");
+  if (!needsApproval) return toolCallEventId;
+
+  const decision = await awaitToolApproval(
+    input,
+    {
+      detail:
+        request.operation === "read"
+          ? "Waiting for file access"
+          : "Waiting for file-change approval",
+      exactReason: `Allow Radius to ${request.operation} ${request.path}`,
+      exactToolInput,
+      reason: request.outsideProjectRoots
+        ? `Allow Radius to ${request.operation} an outside project file`
+        : `Allow Radius to ${request.operation} a project file`,
+      toolCallEventId,
+    },
+    signal,
+  );
+  if (decision !== "approved") {
+    await input.journal.append({
+      eventId: randomUUID(),
+      agentRunId: input.agentRunId,
+      eventType: "tool_result",
+      toolCallEventId,
+      outcome: "cancelled",
+      outputSchemaId: "radius.workspace.files.result",
+      outputSchemaVersion: 1,
+      output: { decision },
+    });
+    throw new Error(`File access was ${decision}`);
+  }
+  return toolCallEventId;
+}
+
+async function appendFileAccessResult(
+  journal: RuntimeSessionJournal,
+  agentRunId: string,
+  result: FileAccessResult,
+): Promise<void> {
+  await journal.append({
+    eventId: randomUUID(),
+    agentRunId,
+    eventType: "tool_result",
+    toolCallEventId: result.correlationId,
+    outcome: result.succeeded ? "succeeded" : "failed",
+    outputSchemaId: "radius.workspace.files.result",
+    outputSchemaVersion: 1,
+    output: {
+      operation: result.operation,
+      path: "Local path retained on the originating Mac",
+    },
+  });
 }
 
 async function runAgentSession(input: {
   accessMode: "ask" | "full";
   context: StorageContext;
   modelId: string | null;
-  release: AgentReleaseDescriptor;
+  target: AgentTarget;
   prompt: string;
+  projectRoots: string[];
   sessionId: string;
   thinkingEffortId: string | null;
   userMessageEventId: string;
   journal: RuntimeSessionJournal;
 }): Promise<void> {
   const agentRunId = randomUUID();
+  const assistantMessageEventId = randomUUID();
+  const assistantMessageOccurredAt = new Date().toISOString();
+  const streamedMessage = <Status extends StreamedMessageEvent["status"]>(
+    status: Status,
+    text: string,
+  ): Extract<StreamedMessageEvent, { status: Status }> =>
+    ({
+      eventId: assistantMessageEventId,
+      sessionRevision: Number.MAX_SAFE_INTEGER,
+      occurredAt: assistantMessageOccurredAt,
+      agentRunId,
+      eventType: "message",
+      role: "assistant",
+      messageKind: "final",
+      status,
+      text,
+    }) as Extract<StreamedMessageEvent, { status: Status }>;
   const updateState: RuntimeUpdateState = {
+    hostToolKinds: new Set(),
     plan: createAgentPlanJournalState(),
     toolCallEventIds: new Map(),
   };
+  const release = input.target.kind === "release" ? input.target.release : null;
+  const developmentConnection =
+    input.target.kind === "development" ? input.target.connection : null;
+  const displayName =
+    release?.displayName ?? developmentConnection!.displayName;
+  const providerKey = release?.providerId ?? "radius-development";
+  const capabilities =
+    release?.capabilities ?? developmentConnection!.capabilities;
   let responseText = "";
-  let runtime: MicrovmAcpRuntime | null = null;
+  let runtime: RunningAgentRuntime | null = null;
   let fxProfile: FxRuntimeProfileLease | null = null;
   let browserTools: BrowserToolServer | null = null;
+  let fileSystemManager: HostFileSystemManager | null = null;
+  let terminalManager: MacOsTerminalManager | null = null;
 
   try {
     await input.journal.append({
       eventId: randomUUID(),
       agentRunId,
       eventType: "agent_run",
-      providerKey: input.release.providerId,
+      providerKey,
       providerRunId: null,
       triggeringMessageEventId: input.userMessageEventId,
     });
@@ -353,73 +906,169 @@ async function runAgentSession(input: {
       mode: "inline",
       initialState: null,
       summaryMessageEventId: null,
-      label: input.release.displayName,
+      label: displayName,
     });
     await input.journal.append({
       eventId: randomUUID(),
       agentRunId,
       eventType: "agent_run_state_update",
       state: "working",
-      detail: isFxRelease(input.release)
-        ? "Preparing the local fx runtime"
-        : "Preparing the local agent runtime",
+      detail:
+        release && isFxRelease(release)
+          ? "Preparing the local fx runtime"
+          : developmentConnection
+            ? "Connecting to the development agent"
+            : "Preparing the local agent runtime",
     });
 
-    if (isFxRelease(input.release)) {
+    if (release && isFxRelease(release)) {
       fxProfile = await prepareFxRuntimeProfile(
         input.context,
         input.thinkingEffortId,
       );
     }
-    if (
-      input.release.capabilities.some((capability) =>
-        capability.startsWith("browser."),
-      )
-    ) {
+    if (capabilities.some((capability) => capability.startsWith("browser."))) {
       browserTools = await startBrowserToolServer(browserBridge, {
         authorize: (operation) =>
           input.accessMode === "full" &&
-          browserOperationRequested(input.release, operation),
+          browserOperationRequested(capabilities, operation),
       });
     }
-    runtime = await MicrovmAcpRuntime.start({
-      release: input.release,
-      modelId: input.modelId,
-      paths: resolveMicrovmPaths(input.release, fxProfile?.path),
-      mcpServers: browserTools
-        ? [
+    if (
+      capabilities.includes("shell.execute") &&
+      input.projectRoots.length > 0
+    ) {
+      terminalManager = new MacOsTerminalManager({
+        projectRoots: input.projectRoots,
+        authorize: (request, signal) =>
+          authorizeTerminal(
             {
-              type: "http",
-              name: "radius-browser",
-              url: browserTools.url,
-              headers: browserTools.headers,
+              accessMode: input.accessMode,
+              agentRunId,
+              journal: input.journal,
+              sessionId: input.sessionId,
             },
-          ]
-        : [],
-      handlers: {
-        onPermissionRequest: async (request) =>
-          permissionDecision(input.accessMode, request),
-        onUpdate: async ({ update }) => {
-          if (
-            update.sessionUpdate === "agent_message_chunk" &&
-            update.content.type === "text"
-          ) {
-            responseText += update.content.text;
+            request,
+            signal,
+          ),
+        onResult: (result) =>
+          appendTerminalResult(input.journal, agentRunId, result),
+      });
+      updateState.hostToolKinds.add("execute");
+    }
+    const canReadFiles = capabilities.includes("workspace.files.read");
+    const canWriteFiles = capabilities.includes("workspace.files.write");
+    if (input.projectRoots.length > 0 && (canReadFiles || canWriteFiles)) {
+      fileSystemManager = new HostFileSystemManager({
+        projectRoots: input.projectRoots,
+        authorize: (request, signal) =>
+          authorizeFileAccess(
+            {
+              accessMode: input.accessMode,
+              agentRunId,
+              journal: input.journal,
+              sessionId: input.sessionId,
+            },
+            request,
+            signal,
+          ),
+        onResult: (result) =>
+          appendFileAccessResult(input.journal, agentRunId, result),
+      });
+      if (canReadFiles) updateState.hostToolKinds.add("read");
+      if (canWriteFiles) updateState.hostToolKinds.add("edit");
+    }
+    const mcpServers = browserTools
+      ? [
+          {
+            type: "http" as const,
+            name: "radius-browser",
+            url: browserTools.url,
+            headers: browserTools.headers,
+          },
+        ]
+      : [];
+    const handlers: AcpRuntimeHandlers = {
+      fileSystem: fileSystemManager
+        ? {
+            readTextFile: canReadFiles
+              ? (request, signal) =>
+                  fileSystemManager!.readTextFile(request, signal)
+              : undefined,
+            writeTextFile: canWriteFiles
+              ? (request, signal) =>
+                  fileSystemManager!.writeTextFile(request, signal)
+              : undefined,
           }
-          await appendRuntimeUpdate(
-            input.journal,
-            agentRunId,
-            updateState,
-            update,
+        : undefined,
+      onPermissionRequest: async (request: RequestPermissionRequest) =>
+        permissionDecision(input.accessMode, request),
+      terminal: terminalManager ?? undefined,
+      onUpdate: async ({ update }: { update: SessionUpdate }) => {
+        if (
+          update.sessionUpdate === "agent_message_chunk" &&
+          update.content.type === "text"
+        ) {
+          const textOffset = responseText.length;
+          responseText += update.content.text;
+          publishStreamingSessionMessage(
+            input.sessionId,
+            streamedMessage("streaming", responseText),
+            update.content.text,
+            textOffset,
           );
-        },
-      },
-      onStderr: (chunk) => {
-        if (process.env.RADIUS_RUNTIME_DEBUG === "1") {
-          console.error("[runtime]", chunk.trimEnd());
         }
+        await appendRuntimeUpdate(
+          input.journal,
+          agentRunId,
+          updateState,
+          update,
+        );
       },
-    });
+    };
+    let runtimeSessionId: string;
+    if (developmentConnection) {
+      const session = await AcpRuntimeSession.connect(
+        acpStreamFromWebSocket(
+          developmentConnection.endpoint,
+          developmentConnection.authorization,
+        ),
+        {
+          cwd: input.projectRoots[0] ?? developmentConnection.cwd,
+          modelId: input.modelId,
+          mcpServers,
+          handlers,
+          clientName: "radius-desktop-development",
+        },
+      );
+      runtimeSessionId = session.sessionId;
+      runtime = {
+        prompt: (text) => session.prompt(text),
+        cancel: () => session.cancel(),
+        stop: async () => session.close(),
+      };
+    } else {
+      const microvm = await MicrovmAcpRuntime.start({
+        release: release!,
+        modelId: input.modelId,
+        paths: resolveMicrovmPaths(release!, fxProfile?.path),
+        cwd: input.projectRoots[0] ?? release!.process.statePath,
+        mcpServers,
+        handlers,
+        onStderr: (chunk) => {
+          if (process.env.RADIUS_RUNTIME_DEBUG === "1") {
+            console.error("[runtime]", chunk.trimEnd());
+          }
+        },
+      });
+      runtimeSessionId = microvm.session.sessionId;
+      runtime = microvm;
+    }
+    if (terminalManager) {
+      terminalManager.bindSession(runtimeSessionId);
+      runningTerminalManagers.set(input.sessionId, terminalManager);
+    }
+    fileSystemManager?.bindSession(runtimeSessionId);
     runningSessions.set(input.sessionId, runtime);
     runtimeErrorCode = null;
     await input.journal.append({
@@ -427,13 +1076,13 @@ async function runAgentSession(input: {
       agentRunId,
       eventType: "agent_run_state_update",
       state: "working",
-      detail: `Waiting for ${input.release.displayName}`,
+      detail: `Waiting for ${displayName}`,
     });
     const result = await runtime.prompt(input.prompt);
 
     if (responseText.trim()) {
       await input.journal.append({
-        eventId: randomUUID(),
+        eventId: assistantMessageEventId,
         agentRunId,
         eventType: "message",
         role: "assistant",
@@ -451,6 +1100,16 @@ async function runAgentSession(input: {
           },
         ],
       });
+      broadcastSessionTranscriptStream({
+        sessionId: input.sessionId,
+        eventId: assistantMessageEventId,
+        event: streamedMessage(
+          result.stopReason === "cancelled" ? "cancelled" : "completed",
+          responseText.trim(),
+        ),
+        mode: "replace",
+      });
+      streamingSessionMessages.delete(input.sessionId);
     }
     await input.journal.append({
       eventId: randomUUID(),
@@ -481,7 +1140,12 @@ async function runAgentSession(input: {
       detail: message.slice(0, 500),
     });
   } finally {
+    clearStreamingSessionMessage(input.sessionId);
+    clearSessionWorking(input.sessionId);
     runningSessions.delete(input.sessionId);
+    runningTerminalManagers.delete(input.sessionId);
+    await terminalManager?.close();
+    await cancelPendingTerminalApprovals(input.sessionId);
     if (runtime) await runtime.stop();
     await browserTools?.close();
     await fxProfile?.finalize();
@@ -489,10 +1153,10 @@ async function runAgentSession(input: {
 }
 
 function browserOperationRequested(
-  release: AgentReleaseDescriptor,
+  capabilities: string[],
   operation: BrowserBridgeOperation,
 ): boolean {
-  const requested = new Set(release.capabilities);
+  const requested = new Set(capabilities);
   if (operation === "browser.status") {
     return [...requested].some((capability) =>
       capability.startsWith("browser."),
@@ -542,6 +1206,7 @@ async function appendRuntimeUpdate(
     return;
   }
   if (update.sessionUpdate === "tool_call") {
+    if (update.kind && state.hostToolKinds.has(update.kind)) return;
     const eventId = randomUUID();
     state.toolCallEventIds.set(update.toolCallId, eventId);
     await journal.append({
@@ -658,6 +1323,16 @@ async function requireAgentRelease(
   return release;
 }
 
+async function requireAgentTarget(agentId: string): Promise<AgentTarget> {
+  const developmentConnection = (await listDevelopmentAgentConnections()).find(
+    (candidate) => candidate.agentId === agentId,
+  );
+  if (developmentConnection) {
+    return { kind: "development", connection: developmentConnection };
+  }
+  return { kind: "release", release: await requireAgentRelease(agentId) };
+}
+
 async function ensureAgentInstallation(
   context: StorageContext,
   release: AgentReleaseDescriptor,
@@ -706,6 +1381,23 @@ function desktopAgentSummary(
           label: null,
           detail: "No sign-in required",
         },
+  };
+}
+
+function developmentAgentSummary(
+  connection: DevelopmentAgentConnection,
+): DesktopAgentSummary {
+  return {
+    id: connection.agentId,
+    label: connection.displayName,
+    detail: "Development connection",
+    models: [],
+    defaultModelId: null,
+    authentication: {
+      state: "not_required",
+      label: null,
+      detail: "Connected through radius dev",
+    },
   };
 }
 

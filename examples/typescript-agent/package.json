@@ -7,13 +7,16 @@
   "scripts": {
     "validate": "radius validate",
     "dev": "radius dev",
-    "deploy:dry-run": "radius deploy --dry-run"
+    "agent:dev": "tsx watch radius/agent.ts --radius-dev",
+    "build": "radius build",
+    "deploy": "radius deploy"
   },
   "dependencies": {
     "@curve-ai/sdk": "0.0.1"
   },
   "devDependencies": {
     "@curve-ai/build": "0.0.1",
-    "@curve-ai/cli": "0.0.1"
+    "@curve-ai/cli": "0.0.1",
+    "tsx": "4.23.12"
   }
 }

@@ -87,8 +87,21 @@ export interface CreateSessionInput {
 export interface CreateProjectInput {
   originClientInstanceId: string;
   name: string;
+  rootPaths?: readonly string[];
+  now?: number;
+}
+
+export interface AddProjectRootInput {
+  projectId: string;
+  clientInstanceId: string;
   rootPath: string;
   now?: number;
+}
+
+export interface RemoveProjectRootInput {
+  projectId: string;
+  clientInstanceId: string;
+  rootId: string;
 }
 
 export interface UpdateProjectNameInput {
@@ -98,8 +111,20 @@ export interface UpdateProjectNameInput {
   now?: number;
 }
 
+export interface UpdateSessionTitleInput {
+  sessionId: string;
+  originClientInstanceId: string;
+  title: string;
+  now?: number;
+}
+
 export interface ProjectSummaryRecord extends ProjectRecord {
-  rootPath: string | null;
+  roots: ProjectRootRecord[];
+}
+
+export interface ProjectRootRecord {
+  id: string;
+  rootPath: string;
 }
 
 export interface ProjectSessionRecord {
@@ -123,6 +148,10 @@ export interface RecentSessionRecord {
   pinnedAt: string | null;
 }
 
+export interface SessionProjectContext {
+  projectId: string | null;
+}
+
 export type SessionTranscriptEventRecord =
   | {
       eventId: string;
@@ -132,7 +161,11 @@ export type SessionTranscriptEventRecord =
       eventType: "message";
       role: "user" | "assistant" | "system";
       messageKind:
-        "prompt" | "progress" | "final" | "run_summary" | "system_notice";
+        | "prompt"
+        | "progress"
+        | "final"
+        | "run_summary"
+        | "system_notice";
       status: "completed" | "cancelled" | "failed";
       text: string;
     }
@@ -212,6 +245,9 @@ export type SessionTranscriptEventRecord =
       eventType: "tool_call";
       capability: string;
       operation: string;
+      inputSchemaId: string;
+      inputSchemaVersion: number;
+      input: JsonValue;
     }
   | {
       eventId: string;
@@ -221,6 +257,30 @@ export type SessionTranscriptEventRecord =
       eventType: "tool_result";
       toolCallEventId: string;
       outcome: "succeeded" | "failed" | "cancelled";
+      outputSchemaId: string;
+      outputSchemaVersion: number;
+      output: JsonValue;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "approval_request";
+      toolCallEventId: string;
+      reason: string;
+      expiresAt: string | null;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
+      eventType: "approval_decision";
+      approvalRequestEventId: string;
+      decision: "approved" | "denied" | "cancelled" | "expired";
+      actorType: "user" | "organization_policy" | "system";
+      note: string | null;
     }
   | {
       eventId: string;
@@ -1004,8 +1064,17 @@ export async function createProject(
     archivedAt: null,
     deletedAt: null,
   });
-  const rootPath = input.rootPath.trim();
-  if (!rootPath) throw new Error("Project root folder is required");
+  const rootPaths = (input.rootPaths ?? []).map((rootPath) => rootPath.trim());
+  if (rootPaths.some((rootPath) => !rootPath)) {
+    throw new Error("Project source folders cannot be empty");
+  }
+  if (new Set(rootPaths).size !== rootPaths.length) {
+    throw new Error("Project source folders must be unique");
+  }
+  const roots = rootPaths.map((rootPath) => ({
+    id: randomUUID(),
+    rootPath,
+  }));
 
   const { envelope, payloadJson } = prepareLocalChange({
     originClientInstanceId: project.originClientInstanceId,
@@ -1037,17 +1106,22 @@ export async function createProject(
       createdAtMs: now,
       updatedAtMs: now,
     });
-    await tx.insert(projectRoots).values({
-      projectId: project.id,
-      clientInstanceId: project.originClientInstanceId,
-      rootPath,
-      createdAtMs: now,
-      updatedAtMs: now,
-    });
+    if (roots.length > 0) {
+      await tx.insert(projectRoots).values(
+        roots.map((root) => ({
+          id: root.id,
+          projectId: project.id,
+          clientInstanceId: project.originClientInstanceId,
+          rootPath: root.rootPath,
+          createdAtMs: now,
+          updatedAtMs: now,
+        })),
+      );
+    }
     await insertLocalChange(tx, envelope, payloadJson);
   });
 
-  return { ...project, rootPath };
+  return { ...project, roots };
 }
 
 export async function updateProjectName(
@@ -1115,18 +1189,14 @@ export async function updateProjectName(
   });
 }
 
-export async function setProjectRoot(
+export async function addProjectRoot(
   database: RadiusDatabase,
-  input: {
-    projectId: string;
-    clientInstanceId: string;
-    rootPath: string;
-    now?: number;
-  },
-): Promise<void> {
+  input: AddProjectRootInput,
+): Promise<ProjectRootRecord> {
   const rootPath = input.rootPath.trim();
-  if (!rootPath) throw new Error("Project root folder is required");
+  if (!rootPath) throw new Error("Project source folder is required");
   const now = input.now ?? Date.now();
+  const root: ProjectRootRecord = { id: randomUUID(), rootPath };
 
   await database.db.transaction(async (tx) => {
     const [localClient] = await tx
@@ -1151,40 +1221,75 @@ export async function setProjectRoot(
       .limit(1);
     if (!project) throw new Error("Project does not exist");
 
-    await tx
-      .insert(projectRoots)
-      .values({
-        projectId: input.projectId,
-        clientInstanceId: input.clientInstanceId,
-        rootPath,
-        createdAtMs: now,
-        updatedAtMs: now,
-      })
-      .onConflictDoUpdate({
-        target: [projectRoots.projectId, projectRoots.clientInstanceId],
-        set: { rootPath, updatedAtMs: now },
-      });
+    await tx.insert(projectRoots).values({
+      id: root.id,
+      projectId: input.projectId,
+      clientInstanceId: input.clientInstanceId,
+      rootPath,
+      createdAtMs: now,
+      updatedAtMs: now,
+    });
   });
+
+  return root;
+}
+
+export async function removeProjectRoot(
+  database: RadiusDatabase,
+  input: RemoveProjectRootInput,
+): Promise<void> {
+  const removed = await database.db
+    .delete(projectRoots)
+    .where(
+      and(
+        eq(projectRoots.id, input.rootId),
+        eq(projectRoots.projectId, input.projectId),
+        eq(projectRoots.clientInstanceId, input.clientInstanceId),
+      ),
+    )
+    .returning({ id: projectRoots.id });
+  if (removed.length !== 1) {
+    throw new Error("Project source folder does not exist on this client");
+  }
 }
 
 export async function listProjects(
   database: RadiusDatabase,
   clientInstanceId: string,
 ): Promise<ProjectSummaryRecord[]> {
-  const rows = await database.db
-    .select({ project: projects, rootPath: projectRoots.rootPath })
+  const projectRows = await database.db
+    .select()
     .from(projects)
-    .leftJoin(
-      projectRoots,
-      and(
-        eq(projectRoots.projectId, projects.id),
-        eq(projectRoots.clientInstanceId, clientInstanceId),
-      ),
-    )
     .where(and(isNull(projects.archivedAtMs), isNull(projects.deletedAtMs)))
     .orderBy(desc(projects.updatedAtMs), asc(projects.name));
+  const rootRows =
+    projectRows.length === 0
+      ? []
+      : await database.db
+          .select({
+            id: projectRoots.id,
+            projectId: projectRoots.projectId,
+            rootPath: projectRoots.rootPath,
+          })
+          .from(projectRoots)
+          .where(
+            and(
+              eq(projectRoots.clientInstanceId, clientInstanceId),
+              inArray(
+                projectRoots.projectId,
+                projectRows.map((project) => project.id),
+              ),
+            ),
+          )
+          .orderBy(asc(projectRoots.createdAtMs), asc(projectRoots.rootPath));
+  const rootsByProject = new Map<string, ProjectRootRecord[]>();
+  for (const root of rootRows) {
+    const roots = rootsByProject.get(root.projectId) ?? [];
+    roots.push({ id: root.id, rootPath: root.rootPath });
+    rootsByProject.set(root.projectId, roots);
+  }
 
-  return rows.map(({ project, rootPath }) => ({
+  return projectRows.map((project) => ({
     id: project.id,
     originClientInstanceId: project.originClientInstanceId,
     name: project.name,
@@ -1193,7 +1298,7 @@ export async function listProjects(
     updatedAt: toIso(project.updatedAtMs),
     archivedAt: project.archivedAtMs ? toIso(project.archivedAtMs) : null,
     deletedAt: project.deletedAtMs ? toIso(project.deletedAtMs) : null,
-    rootPath,
+    roots: rootsByProject.get(project.id) ?? [],
   }));
 }
 
@@ -1339,6 +1444,18 @@ export async function listRecentSessions(
   }));
 }
 
+export async function getSessionRevision(
+  database: RadiusDatabase,
+  sessionId: string,
+): Promise<number | null> {
+  const [session] = await database.db
+    .select({ revision: sessions.revision })
+    .from(sessions)
+    .where(and(eq(sessions.id, sessionId), isNull(sessions.deletedAtMs)))
+    .limit(1);
+  return session?.revision ?? null;
+}
+
 export async function listSessionTranscript(
   database: RadiusDatabase,
   sessionId: string,
@@ -1371,8 +1488,21 @@ export async function listSessionTranscript(
       taskStepDetail: taskStepUpdates.detail,
       toolCapability: toolCalls.capability,
       toolOperation: toolCalls.operation,
+      toolInputSchemaId: toolCalls.inputSchemaId,
+      toolInputSchemaVersion: toolCalls.inputSchemaVersion,
+      toolInputJson: toolCalls.inputJson,
       toolCallEventId: toolResults.toolCallEventId,
       toolOutcome: toolResults.outcome,
+      toolOutputSchemaId: toolResults.outputSchemaId,
+      toolOutputSchemaVersion: toolResults.outputSchemaVersion,
+      toolOutputJson: toolResults.outputJson,
+      approvalToolCallEventId: approvalRequests.toolCallEventId,
+      approvalReason: approvalRequests.reason,
+      approvalExpiresAtMs: approvalRequests.expiresAtMs,
+      approvalRequestEventId: approvalDecisions.approvalRequestEventId,
+      approvalDecision: approvalDecisions.decision,
+      approvalActorType: approvalDecisions.actorType,
+      approvalNote: approvalDecisions.note,
       errorCode: errors.code,
       errorMessage: errors.message,
       errorRetryable: errors.retryable,
@@ -1398,6 +1528,8 @@ export async function listSessionTranscript(
     .leftJoin(taskStepUpdates, eq(taskStepUpdates.eventId, sessionEvents.id))
     .leftJoin(toolCalls, eq(toolCalls.eventId, sessionEvents.id))
     .leftJoin(toolResults, eq(toolResults.eventId, sessionEvents.id))
+    .leftJoin(approvalRequests, eq(approvalRequests.eventId, sessionEvents.id))
+    .leftJoin(approvalDecisions, eq(approvalDecisions.eventId, sessionEvents.id))
     .leftJoin(errors, eq(errors.eventId, sessionEvents.id))
     .where(eq(sessionEvents.sessionId, sessionId))
     .orderBy(asc(sessionEvents.sessionRevision));
@@ -1550,7 +1682,13 @@ export async function listSessionTranscript(
           },
         ];
       case "tool_call":
-        if (!row.toolCapability || !row.toolOperation)
+        if (
+          !row.toolCapability ||
+          !row.toolOperation ||
+          !row.toolInputSchemaId ||
+          row.toolInputSchemaVersion === null ||
+          !row.toolInputJson
+        )
           throw new Error(`Tool call event ${row.eventId} is incomplete`);
         return [
           {
@@ -1558,10 +1696,19 @@ export async function listSessionTranscript(
             eventType: row.eventType,
             capability: row.toolCapability,
             operation: row.toolOperation,
+            inputSchemaId: row.toolInputSchemaId,
+            inputSchemaVersion: row.toolInputSchemaVersion,
+            input: JSON.parse(row.toolInputJson) as JsonValue,
           },
         ];
       case "tool_result":
-        if (!row.toolCallEventId || !row.toolOutcome)
+        if (
+          !row.toolCallEventId ||
+          !row.toolOutcome ||
+          !row.toolOutputSchemaId ||
+          row.toolOutputSchemaVersion === null ||
+          !row.toolOutputJson
+        )
           throw new Error(`Tool result event ${row.eventId} is incomplete`);
         return [
           {
@@ -1569,6 +1716,42 @@ export async function listSessionTranscript(
             eventType: row.eventType,
             toolCallEventId: row.toolCallEventId,
             outcome: row.toolOutcome,
+            outputSchemaId: row.toolOutputSchemaId,
+            outputSchemaVersion: row.toolOutputSchemaVersion,
+            output: JSON.parse(row.toolOutputJson) as JsonValue,
+          },
+        ];
+      case "approval_request":
+        if (!row.approvalToolCallEventId || !row.approvalReason) {
+          throw new Error(`Approval request event ${row.eventId} is incomplete`);
+        }
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            toolCallEventId: row.approvalToolCallEventId,
+            reason: row.approvalReason,
+            expiresAt: row.approvalExpiresAtMs
+              ? toIso(row.approvalExpiresAtMs)
+              : null,
+          },
+        ];
+      case "approval_decision":
+        if (
+          !row.approvalRequestEventId ||
+          !row.approvalDecision ||
+          !row.approvalActorType
+        ) {
+          throw new Error(`Approval decision event ${row.eventId} is incomplete`);
+        }
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            approvalRequestEventId: row.approvalRequestEventId,
+            decision: row.approvalDecision,
+            actorType: row.approvalActorType,
+            note: row.approvalNote,
           },
         ];
       case "error":
@@ -1587,6 +1770,18 @@ export async function listSessionTranscript(
         return [];
     }
   });
+}
+
+export async function getSessionProjectContext(
+  database: RadiusDatabase,
+  sessionId: string,
+): Promise<SessionProjectContext | null> {
+  const [session] = await database.db
+    .select({ projectId: sessions.projectId })
+    .from(sessions)
+    .where(and(eq(sessions.id, sessionId), isNull(sessions.deletedAtMs)))
+    .limit(1);
+  return session ?? null;
 }
 
 export async function setSessionPinned(
@@ -1648,6 +1843,75 @@ export async function setSessionPinned(
         set: { pinnedAtMs: now },
       });
     return toIso(now);
+  });
+}
+
+export async function updateSessionTitle(
+  database: RadiusDatabase,
+  input: UpdateSessionTitleInput,
+): Promise<SessionRecord> {
+  const now = input.now ?? Date.now();
+  const title = input.title.trim();
+  if (!title) throw new Error("Session title is required");
+
+  return database.db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, input.sessionId),
+          eq(sessions.originClientInstanceId, input.originClientInstanceId),
+          isNull(sessions.archivedAtMs),
+          isNull(sessions.deletedAtMs),
+        ),
+      )
+      .limit(1);
+    if (!current) {
+      throw new Error("Only the local origin can rename an active session");
+    }
+
+    const session = SessionRecordSchema.parse({
+      id: current.id,
+      originClientInstanceId: current.originClientInstanceId,
+      projectId: current.projectId,
+      title,
+      status: current.status,
+      revision: current.revision + 1,
+      createdAt: toIso(current.createdAtMs),
+      updatedAt: toIso(now),
+      archivedAt: null,
+      deletedAt: null,
+    });
+    const { envelope, payloadJson } = prepareLocalChange({
+      originClientInstanceId: session.originClientInstanceId,
+      sessionId: session.id,
+      sessionRevision: session.revision,
+      createdAt: session.updatedAt,
+      kind: "session.upsert",
+      payload: session,
+    });
+
+    const updated = await tx
+      .update(sessions)
+      .set({
+        title: session.title,
+        revision: session.revision,
+        updatedAtMs: now,
+      })
+      .where(
+        and(
+          eq(sessions.id, current.id),
+          eq(sessions.revision, current.revision),
+        ),
+      )
+      .returning({ id: sessions.id });
+    if (updated.length !== 1) {
+      throw new Error("Session revision changed concurrently");
+    }
+
+    await insertLocalChange(tx, envelope, payloadJson);
+    return session;
   });
 }
 
@@ -1764,21 +2028,12 @@ export async function createSession(
       const [project] = await tx
         .select({ id: projects.id })
         .from(projects)
-        .innerJoin(
-          projectRoots,
-          and(
-            eq(projectRoots.projectId, projects.id),
-            eq(projectRoots.clientInstanceId, session.originClientInstanceId),
-          ),
-        )
         .where(
           and(eq(projects.id, session.projectId), isNull(projects.deletedAtMs)),
         )
         .limit(1);
       if (!project) {
-        throw new Error(
-          "Session project must exist and have a local root folder",
-        );
+        throw new Error("Session project must exist");
       }
     }
     await tx.insert(sessions).values({

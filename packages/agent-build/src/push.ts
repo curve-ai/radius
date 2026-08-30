@@ -22,7 +22,7 @@ export type OciCommandRunner = (options: {
 }) => Promise<OciCommandResult>;
 
 export async function pushAgentOciImage(options: {
-  build: { contextPath: string };
+  build: { imageReference: string; layoutPath: string };
   imageReference: string;
   credentials: RegistryUploadCredentials;
   dockerExecutable?: string;
@@ -31,13 +31,25 @@ export async function pushAgentOciImage(options: {
   validateImageReference(options.imageReference);
   const runner = options.commandRunner ?? runOciCommand;
   const docker = options.dockerExecutable ?? "docker";
-  const configParent = dirname(options.build.contextPath);
+  const configParent = dirname(options.build.layoutPath);
   await mkdir(configParent, { recursive: true });
   const dockerConfig = await mkdtemp(join(configParent, ".docker-config-"));
+  const imageArchive = join(dockerConfig, "image.oci.tar");
   await exposeDockerBuildxPlugin(dockerConfig);
   const env = { ...process.env, DOCKER_CONFIG: dockerConfig };
 
   try {
+    await runner({
+      command: "tar",
+      args: ["-cf", imageArchive, "-C", options.build.layoutPath, "."],
+      cwd: options.build.layoutPath,
+    });
+    await runner({
+      command: docker,
+      args: ["image", "load", "--input", imageArchive],
+      cwd: options.build.layoutPath,
+      env,
+    });
     await runner({
       command: docker,
       args: [
@@ -47,41 +59,54 @@ export async function pushAgentOciImage(options: {
         options.credentials.username,
         "--password-stdin",
       ],
-      cwd: options.build.contextPath,
+      cwd: options.build.layoutPath,
       env,
       stdin: `${options.credentials.password}\n`,
     });
     await runner({
       command: docker,
       args: [
-        "buildx",
-        "build",
-        "--platform",
-        "linux/arm64",
-        "--provenance=false",
-        "--sbom=false",
-        "--build-arg",
-        "SOURCE_DATE_EPOCH=0",
-        "--tag",
+        "image",
+        "tag",
+        options.build.imageReference,
         options.imageReference,
-        "--push",
-        "--file",
-        join(options.build.contextPath, "Containerfile"),
-        options.build.contextPath,
       ],
-      cwd: options.build.contextPath,
+      cwd: options.build.layoutPath,
+      env,
+    });
+    await runner({
+      command: docker,
+      args: ["image", "push", options.imageReference],
+      cwd: options.build.layoutPath,
       env,
     });
     const inspected = await runner({
       command: docker,
       args: ["buildx", "imagetools", "inspect", options.imageReference],
-      cwd: options.build.contextPath,
+      cwd: options.build.layoutPath,
       env,
     });
-    const digest = inspected.stdout.match(/^Digest:\s+(sha256:[a-f0-9]{64})$/m)?.[1];
-    if (!digest) throw new Error("Registry did not report a digest for the pushed image");
+    const digest = inspected.stdout.match(
+      /^Digest:\s+(sha256:[a-f0-9]{64})$/m,
+    )?.[1];
+    if (!digest)
+      throw new Error("Registry did not report a digest for the pushed image");
     return digest as `sha256:${string}`;
   } finally {
+    await Promise.allSettled([
+      runner({
+        command: docker,
+        args: ["image", "rm", "--force", options.imageReference],
+        cwd: options.build.layoutPath,
+        env,
+      }),
+      runner({
+        command: docker,
+        args: ["image", "rm", "--force", options.build.imageReference],
+        cwd: options.build.layoutPath,
+        env,
+      }),
+    ]);
     await rm(dockerConfig, { recursive: true, force: true });
   }
 }
@@ -90,7 +115,8 @@ export const pushTypeScriptOciImage = pushAgentOciImage;
 
 async function exposeDockerBuildxPlugin(dockerConfig: string): Promise<void> {
   if (process.platform !== "darwin") return;
-  const plugin = "/Applications/Docker.app/Contents/Resources/cli-plugins/docker-buildx";
+  const plugin =
+    "/Applications/Docker.app/Contents/Resources/cli-plugins/docker-buildx";
   try {
     await access(plugin);
   } catch {
@@ -128,11 +154,12 @@ export async function runOciCommand(options: {
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve({ stdout, stderr });
-      else reject(
-        new Error(
-          `${options.command} failed with ${code}: ${stderr.trim().slice(-2_000)}`,
-        ),
-      );
+      else
+        reject(
+          new Error(
+            `${options.command} failed with ${code}: ${stderr.trim().slice(-2_000)}`,
+          ),
+        );
     });
     child.stdin.end(options.stdin ?? "");
   });

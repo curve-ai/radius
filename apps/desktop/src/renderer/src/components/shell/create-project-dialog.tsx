@@ -1,4 +1,3 @@
-import { Folder, FolderPlus } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "@renderer/components/ui/button";
@@ -11,20 +10,17 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { InlineFeedbackTransition } from "@renderer/components/ui/inline-feedback-transition";
-import {
-  AnimatePresence,
-  motion,
-  useReducedMotion,
-} from "@renderer/components/ui/motion";
 import type { ProjectSidebarRecord } from "./project-context-value";
 import { ProjectNameField } from "./project-name-field";
 import { projectErrorMessage } from "./project-errors";
+import {
+  ProjectSourceFoldersField,
+  type ProjectSourceFolderItem,
+} from "./project-source-folders-field";
 
 type FolderSelection = NonNullable<
   Awaited<ReturnType<Window["radius"]["chooseProjectFolder"]>>
 >;
-
-const FOLDER_STATE_EASE = [0.23, 1, 0.32, 1] as const;
 
 export function CreateProjectDialog({
   open,
@@ -35,23 +31,22 @@ export function CreateProjectDialog({
   onOpenChange: (open: boolean) => void;
   onCreated: (project: ProjectSidebarRecord) => Promise<void>;
 }): ReactNode {
-  const reduceMotion = useReducedMotion();
   const [name, setName] = useState("");
-  const [selection, setSelection] = useState<FolderSelection | null>(null);
+  const [selections, setSelections] = useState<FolderSelection[]>([]);
   const [choosing, setChoosing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reset = (): void => {
     setName("");
-    setSelection(null);
+    setSelections([]);
     setChoosing(false);
     setCreating(false);
     setError(null);
   };
 
   const close = (): void => {
-    if (selection) {
+    for (const selection of selections) {
       void window.radius.discardProjectFolderSelection(selection.selectionId);
     }
     reset();
@@ -70,14 +65,19 @@ export function CreateProjectDialog({
     try {
       const nextSelection = await window.radius.chooseProjectFolder();
       if (!nextSelection) return;
-      const shouldUseFolderName =
-        !name.trim() || name === selection?.defaultName;
-      if (selection) {
+      if (
+        selections.some(
+          (selection) => selection.rootPath === nextSelection.rootPath,
+        )
+      ) {
         await window.radius.discardProjectFolderSelection(
-          selection.selectionId,
+          nextSelection.selectionId,
         );
+        setError("That folder is already selected");
+        return;
       }
-      setSelection(nextSelection);
+      const shouldUseFolderName = !name.trim() && selections.length === 0;
+      setSelections((current) => [...current, nextSelection]);
       if (shouldUseFolderName) setName(nextSelection.defaultName);
     } catch (cause) {
       setError(projectErrorMessage(cause, "Folder could not be selected"));
@@ -86,19 +86,33 @@ export function CreateProjectDialog({
     }
   };
 
+  const removeFolder = (folder: ProjectSourceFolderItem): void => {
+    const selection = selections.find(
+      (candidate) => candidate.selectionId === folder.id,
+    );
+    if (!selection) return;
+    void window.radius.discardProjectFolderSelection(selection.selectionId);
+    setSelections((current) =>
+      current.filter(
+        (candidate) => candidate.selectionId !== selection.selectionId,
+      ),
+    );
+    setError(null);
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const projectName = name.trim();
-    if (!selection || !projectName || creating) return;
+    if (!projectName || creating) return;
 
     setCreating(true);
     setError(null);
     try {
       const project = await window.radius.createProject({
-        selectionId: selection.selectionId,
         name: projectName,
+        selectionIds: selections.map((selection) => selection.selectionId),
       });
-      setSelection(null);
+      setSelections([]);
       await onCreated(project);
       reset();
       onOpenChange(false);
@@ -109,7 +123,7 @@ export function CreateProjectDialog({
     }
   };
 
-  const canCreate = Boolean(selection && name.trim()) && !creating;
+  const canCreate = Boolean(name.trim()) && !creating;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -127,8 +141,8 @@ export function CreateProjectDialog({
               id="create-project-description"
               className="sr-only"
             >
-              Name the project and choose the one folder Radius may read and
-              edit.
+              Name the project and optionally add source folders for local file
+              access.
             </DialogDescription>
           </DialogHeader>
 
@@ -141,111 +155,17 @@ export function CreateProjectDialog({
               onChange={(event) => setName(event.target.value)}
             />
 
-            <div className="space-y-2">
-              <div>
-                <p className="text-sm text-foreground">Project folder</p>
-                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                  This folder is the access boundary for every chat in this
-                  project.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={choosing || creating}
-                className="flex min-h-36 w-full items-center justify-center rounded-md border border-border bg-foreground/[0.015] px-6 py-5 text-center outline-none transition-[background-color,border-color,box-shadow] hover:bg-foreground/[0.035] focus-visible:border-foreground/30 focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
-                onClick={() => void chooseFolder()}
-              >
-                <AnimatePresence initial={false} mode="wait">
-                  {selection ? (
-                    <motion.span
-                      key="selected-folder"
-                      initial={{
-                        opacity: 0,
-                        transform:
-                          reduceMotion === true
-                            ? "translateY(0px)"
-                            : "translateY(2px)",
-                      }}
-                      animate={{ opacity: 1, transform: "translateY(0px)" }}
-                      exit={{
-                        opacity: 0,
-                        transform:
-                          reduceMotion === true
-                            ? "translateY(0px)"
-                            : "translateY(2px)",
-                        transition: {
-                          duration: 0.1,
-                          ease: FOLDER_STATE_EASE,
-                        },
-                      }}
-                      transition={{
-                        duration: reduceMotion === true ? 0.1 : 0.16,
-                        ease: FOLDER_STATE_EASE,
-                      }}
-                      className="flex w-full min-w-0 items-center gap-3 text-left"
-                    >
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
-                        <Folder className="size-5" aria-hidden />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm text-foreground">
-                          {selection.defaultName}
-                        </span>
-                        <span className="mt-1 block truncate text-xs text-muted-foreground">
-                          {selection.rootPath}
-                        </span>
-                        <span className="mt-2 block text-xs text-muted-foreground">
-                          Radius can read and edit everything inside. Click to
-                          change.
-                        </span>
-                      </span>
-                    </motion.span>
-                  ) : (
-                    <motion.span
-                      key="choose-folder"
-                      initial={{
-                        opacity: 0,
-                        transform:
-                          reduceMotion === true
-                            ? "translateY(0px)"
-                            : "translateY(2px)",
-                      }}
-                      animate={{ opacity: 1, transform: "translateY(0px)" }}
-                      exit={{
-                        opacity: 0,
-                        transform:
-                          reduceMotion === true
-                            ? "translateY(0px)"
-                            : "translateY(2px)",
-                        transition: {
-                          duration: 0.1,
-                          ease: FOLDER_STATE_EASE,
-                        },
-                      }}
-                      transition={{
-                        duration: reduceMotion === true ? 0.1 : 0.16,
-                        ease: FOLDER_STATE_EASE,
-                      }}
-                      className="flex flex-col items-center"
-                    >
-                      <FolderPlus
-                        className="mb-3 size-6 text-muted-foreground"
-                        strokeWidth={1.5}
-                        aria-hidden
-                      />
-                      <span className="text-sm text-foreground">
-                        {choosing
-                          ? "Opening folder picker…"
-                          : "Choose project folder"}
-                      </span>
-                      <span className="mt-1 text-xs leading-5 text-muted-foreground">
-                        Radius can read and edit everything inside this folder.
-                      </span>
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-            </div>
+            <ProjectSourceFoldersField
+              adding={choosing}
+              disabled={choosing || creating}
+              folders={selections.map((selection) => ({
+                id: selection.selectionId,
+                name: selection.defaultName,
+                rootPath: selection.rootPath,
+              }))}
+              onAdd={() => void chooseFolder()}
+              onRemove={removeFolder}
+            />
 
             <InlineFeedbackTransition>
               {error ? (

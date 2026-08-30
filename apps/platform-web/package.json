@@ -8,9 +8,9 @@
     "bun": "1.x"
   },
   "scripts": {
-    "dev": "next dev --port 3200 --turbopack",
+    "dev": "next dev --port ${PORT:-3200} --turbopack",
     "build": "next build",
-    "start": "next start --port 3200",
+    "start": "next start --port ${PORT:-3200}",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

@@ -1,4 +1,5 @@
 export { findAgentConfig, loadAgentConfig } from "./config.js";
+export { buildAgent, loadBuildReceipt, type BuildOptions } from "./build.js";
 export { deployAgent, type DeployOptions } from "./deploy.js";
 export { runDevelopmentAgent, type DevOptions } from "./dev.js";
 export { initializeAgentProject, type InitOptions } from "./init.js";
@@ -22,7 +23,12 @@ export {
   defaultProfilePath,
   type RadiusTargetProfile,
 } from "./profiles.js";
-export { startSandboxAgent, type SandboxOptions } from "./sandbox.js";
+export {
+  startBuiltSandboxAgent,
+  startSandboxAgent,
+  type BuiltSandboxOptions,
+  type SandboxOptions,
+} from "./sandbox.js";
 export {
   NativeRadiusCredentialStore,
   credentialAccount,

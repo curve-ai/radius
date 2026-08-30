@@ -62,7 +62,7 @@
 
 ## Available validation
 
-- Run these only when Alexey explicitly requests validation, using the requested
+- Run these only when validation is explicitly requested, using the requested
   scope. They are not an automatic completion checklist.
 - `bun run typecheck`
 - `bun run lint`
