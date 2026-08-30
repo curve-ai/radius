@@ -7,4 +7,10 @@ const agent = defineAgent({
   },
 });
 
-agent.serveStdio();
+if (process.argv.includes("--radius-dev")) {
+  const { serveDevelopmentAgent } = await import("@curve-ai/sdk/development");
+  const server = await serveDevelopmentAgent(agent);
+  console.log(`Radius ACP development endpoint: ${server.endpoint}`);
+} else {
+  agent.serveStdio();
+}

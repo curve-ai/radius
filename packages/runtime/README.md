@@ -66,8 +66,10 @@ are not the packaged product path.
 - Each prompt starts a disposable microVM and ACP session.
 - Follow-up context is replayed from canonical stored messages by the desktop.
 - Ask-for-approval is fail-closed until the approval surface exists.
-- Full access may choose only an ACP `allow_once` option for a requested
+- Project access may choose only an ACP `allow_once` option for a requested
   operation.
-- File attachments and host-brokered tools are not connected yet.
+- ACP terminal and text-file client adapters are implemented. The desktop may
+  advertise them when the active release, project roots, and host policy allow;
+  ordinary file attachments remain unconnected.
 - Release signature verification, staged activation, rollback, and revocation
   remain release-manager work.

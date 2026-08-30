@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   nativeTheme,
@@ -9,32 +10,45 @@ import {
 import path from "node:path";
 
 import { DESKTOP_UPDATE_CHANNELS } from "../update-types";
+import { AGENTS_CHANGED_CHANNEL } from "../radius-api";
 import { initializeBundledAgents } from "./bundled-agents";
+import {
+  initializeDevelopmentAgentConnections,
+  stopDevelopmentAgentConnections,
+} from "./development-agents";
 import {
   cancelAgentSession,
   connectAgentAuthentication,
   disconnectAgentAuthentication,
   getDesktopRuntimeStatus,
   listDesktopAgents,
+  resolveTerminalApproval,
   startAgentPrompt,
   stopAgentRuntime,
 } from "./agent-runtime";
 import { closeStorage, initializeStorage } from "./storage";
 import { reportPlatformClientInstallation } from "./platform-reporting";
 import {
+  addProjectFolderForRenderer,
   chooseProjectFolderForRenderer,
-  createProjectFromSelection,
+  createProjectFromRenderer,
   discardProjectFolderSelection,
   listProjectSidebar,
   listRecentSidebar,
   listSessionTranscriptForRenderer,
+  removeProjectFolderForRenderer,
   renameProjectFromRenderer,
+  renameSessionFromRenderer,
   revealProjectInFinder,
-  relinkProjectFolder,
   setSessionPinnedFromRenderer,
   setSessionArchivedFromRenderer,
 } from "./projects";
 import { initializeScheduler, stopScheduler } from "./scheduler";
+import { showNativeControlMenuForRenderer } from "./native-control-menu";
+import {
+  resolveMarkdownLinkPreview,
+  resolveMarkdownMedia,
+} from "./markdown-resource";
 import {
   connectCloud,
   getSyncStatus,
@@ -157,6 +171,16 @@ app.whenReady().then(async () => {
       console.error("[agents] Radius could not prepare bundled agents", error);
     });
     ipcMain.handle("radius:storage-status", () => ({ ready: true as const }));
+    ipcMain.handle(
+      "radius:show-native-control-menu",
+      showNativeControlMenuForRenderer,
+    );
+    ipcMain.handle("radius:write-clipboard-text", (_event, text) => {
+      if (typeof text !== "string") {
+        throw new TypeError("CLIPBOARD_TEXT_INVALID");
+      }
+      clipboard.writeText(text);
+    });
     ipcMain.handle("radius:set-native-theme", (_event, preference) => {
       if (
         preference !== "system" &&
@@ -178,13 +202,18 @@ app.whenReady().then(async () => {
       "radius:choose-project-folder",
       chooseProjectFolderForRenderer,
     );
-    ipcMain.handle("radius:create-project", createProjectFromSelection);
+    ipcMain.handle("radius:create-project", createProjectFromRenderer);
     ipcMain.handle(
       "radius:discard-project-folder-selection",
       discardProjectFolderSelection,
     );
-    ipcMain.handle("radius:relink-project", relinkProjectFolder);
+    ipcMain.handle("radius:add-project-folder", addProjectFolderForRenderer);
+    ipcMain.handle(
+      "radius:remove-project-folder",
+      removeProjectFolderForRenderer,
+    );
     ipcMain.handle("radius:rename-project", renameProjectFromRenderer);
+    ipcMain.handle("radius:rename-session", renameSessionFromRenderer);
     ipcMain.handle("radius:reveal-project", revealProjectInFinder);
     ipcMain.handle("radius:set-session-pinned", setSessionPinnedFromRenderer);
     ipcMain.handle(
@@ -227,6 +256,15 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:start-agent-prompt", (_event, input) =>
       startAgentPrompt(input),
     );
+    ipcMain.handle("radius:resolve-terminal-approval", (_event, input) =>
+      resolveTerminalApproval(input),
+    );
+    ipcMain.handle("radius:resolve-markdown-media", (_event, url) =>
+      resolveMarkdownMedia(url),
+    );
+    ipcMain.handle("radius:resolve-markdown-link-preview", (_event, url) =>
+      resolveMarkdownLinkPreview(url),
+    );
     ipcMain.handle("radius:cancel-agent-session", (_event, sessionId) =>
       cancelAgentSession(typeof sessionId === "string" ? sessionId : ""),
     );
@@ -242,6 +280,11 @@ app.whenReady().then(async () => {
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.check, checkDesktopUpdate);
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.perform, performDesktopUpdate);
     createWindow();
+    await initializeDevelopmentAgentConnections(() => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(AGENTS_CHANGED_CHANNEL);
+      }
+    });
     void initializeBrowserBridge().catch((error) => {
       console.error(
         "[browser] Radius could not initialize the Chrome bridge",
@@ -278,6 +321,7 @@ app.on("before-quit", (event) => {
   shutdownStarted = true;
   stopDesktopUpdater();
   stopAgentRuntime();
+  stopDevelopmentAgentConnections();
   void Promise.allSettled([
     stopBrowserBridge(),
     stopScheduler(),

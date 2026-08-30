@@ -13,6 +13,7 @@ import {
   FinalizeAgentDeploymentRequestSchema,
   PlatformErrorResponseSchema,
   PrepareAgentDeploymentRequestSchema,
+  ProvisionOrganizationRequestSchema,
   RegisterClientInstallationRequestSchema,
   ReportAgentInstallationRequestSchema,
   RADIUS_PLATFORM_API_VERSION,
@@ -29,6 +30,8 @@ import {
   type PlatformIdentityResponse,
   type PrepareAgentDeploymentRequest,
   type PrepareAgentDeploymentResponse,
+  type ProvisionOrganizationRequest,
+  type ProvisionOrganizationResponse,
   type RegisterClientInstallationRequest,
   type RegisterClientInstallationResponse,
   type ReportAgentInstallationRequest,
@@ -144,9 +147,10 @@ export interface PlatformBrowserAuthServices {
   oidc?: {
     transactionCookieName: string;
     clearTransactionCookie(): string;
-    loginErrorUrl(): URL;
+    loginErrorUrl(requestUrl: URL): URL;
     begin(
-      returnTo?: string,
+      returnTo: string | undefined,
+      requestUrl: URL,
     ): Promise<{ authorizationUrl: URL; setCookie: string }>;
     complete(
       callbackUrl: URL,
@@ -159,8 +163,16 @@ export interface PlatformBrowserAuthServices {
     }>;
   };
   authenticate(sessionToken: string): Promise<PlatformIdentityResponse | null>;
+  organizationForRequest?(requestUrl: URL): Promise<string>;
   revoke(sessionToken: string): Promise<boolean>;
   clearSessionCookie(): string;
+}
+
+export interface PlatformProvisioningServices {
+  authenticate(accessToken: string): Promise<boolean>;
+  provisionOrganization(
+    request: ProvisionOrganizationRequest,
+  ): Promise<ProvisionOrganizationResponse>;
 }
 
 interface PlatformVariables {
@@ -171,7 +183,11 @@ const MAX_JSON_BYTES = 1_048_576;
 
 export function createPlatformApp(
   services: RadiusPlatformServices,
-  options: { browserAuth?: PlatformBrowserAuthServices } = {},
+  options: {
+    browserAuth?: PlatformBrowserAuthServices;
+    provisioning?: PlatformProvisioningServices;
+    deploymentMode?: "managed" | "self_hosted";
+  } = {},
 ) {
   const app = new Hono<{ Variables: PlatformVariables }>();
 
@@ -182,19 +198,46 @@ export function createPlatformApp(
     context.json({
       apiVersion: RADIUS_PLATFORM_API_VERSION,
       platformVersion: "0.0.1",
-      deploymentModes: ["self_hosted"] as const,
+      deploymentModes: [options.deploymentMode ?? "self_hosted"] as const,
       supportedAgentConfigVersions: [1] as const,
       supportedAgentManifestVersions: [1] as const,
       registryUpload: true as const,
     }),
   );
 
+  app.post("/api/platform/v1/internal/organizations", async (context) => {
+    if (!options.provisioning) {
+      throw new PlatformApiError(
+        503,
+        "PROVISIONING_NOT_CONFIGURED",
+        "Organization provisioning is not configured",
+      );
+    }
+    const token = readBearerToken(context.req.header("authorization"));
+    if (!token || !(await options.provisioning.authenticate(token))) {
+      throw new PlatformApiError(
+        401,
+        "UNAUTHORIZED",
+        "Provisioning authentication required",
+      );
+    }
+    const request = ProvisionOrganizationRequestSchema.parse(
+      await boundedJson(context.req.raw),
+    );
+    const result = await options.provisioning.provisionOrganization(request);
+    return context.json(result);
+  });
+
   if (options.browserAuth) {
     const browserAuth = options.browserAuth;
     const oidc = browserAuth.oidc;
     if (oidc) {
       app.get("/api/platform/v1/auth/oidc/login", async (context) => {
-        const started = await oidc.begin(context.req.query("return_to"));
+        const requestUrl = new URL(context.req.url);
+        const started = await oidc.begin(
+          context.req.query("return_to"),
+          requestUrl,
+        );
         context.header("Set-Cookie", started.setCookie);
         return context.redirect(started.authorizationUrl.href, 302);
       });
@@ -204,7 +247,10 @@ export function createPlatformApp(
           oidc.transactionCookieName,
         );
         if (!transaction) {
-          return context.redirect(oidc.loginErrorUrl().href, 303);
+          return context.redirect(
+            oidc.loginErrorUrl(new URL(context.req.url)).href,
+            303,
+          );
         }
         try {
           const completed = await oidc.complete(
@@ -221,7 +267,10 @@ export function createPlatformApp(
           context.header("Set-Cookie", browserAuth.clearSessionCookie(), {
             append: true,
           });
-          return context.redirect(oidc.loginErrorUrl().href, 303);
+          return context.redirect(
+            oidc.loginErrorUrl(new URL(context.req.url)).href,
+            303,
+          );
         }
       });
     } else {
@@ -254,7 +303,13 @@ export function createPlatformApp(
           "Browser session is invalid",
         );
       }
-      return context.json(identity);
+      return context.json(
+        await requireRequestOrganization(
+          browserAuth,
+          new URL(context.req.url),
+          identity,
+        ),
+      );
     });
     app.post("/api/platform/v1/auth/logout", async (context) => {
       const token = readCookie(
@@ -276,8 +331,7 @@ export function createPlatformApp(
   }
 
   app.use("/api/platform/v1/*", async (context, next) => {
-    const authorization = context.req.header("authorization");
-    const token = authorization?.match(/^Bearer ([^\s]+)$/)?.[1];
+    const token = readBearerToken(context.req.header("authorization"));
     const sessionToken = options.browserAuth
       ? readCookie(
           context.req.header("cookie"),
@@ -302,7 +356,18 @@ export function createPlatformApp(
         "UNAUTHORIZED",
         "Invalid authentication",
       );
-    context.set("identity", identity);
+    const scopedIdentity =
+      options.browserAuth?.organizationForRequest
+        ? {
+            ...identity,
+            response: await requireRequestOrganization(
+              options.browserAuth,
+              new URL(context.req.url),
+              identity.response,
+            ),
+          }
+        : identity;
+    context.set("identity", scopedIdentity);
     await next();
   });
 
@@ -596,6 +661,30 @@ export function createPlatformApp(
   });
 
   return app;
+}
+
+async function requireRequestOrganization(
+  browserAuth: PlatformBrowserAuthServices,
+  requestUrl: URL,
+  identity: PlatformIdentityResponse,
+): Promise<PlatformIdentityResponse> {
+  if (!browserAuth.organizationForRequest) return identity;
+  const organization = await browserAuth.organizationForRequest(requestUrl);
+  const membership = identity.organizations.find(
+    (candidate) => candidate.slug === organization,
+  );
+  if (!membership) {
+    throw new PlatformApiError(
+      403,
+      "ORGANIZATION_HOST_MISMATCH",
+      "Authenticated identity does not belong to this organization",
+    );
+  }
+  return { ...identity, organizations: [membership] };
+}
+
+function readBearerToken(authorization: string | undefined): string | null {
+  return authorization?.match(/^Bearer ([^\s]+)$/)?.[1] ?? null;
 }
 
 export class PlatformApiError extends Error {

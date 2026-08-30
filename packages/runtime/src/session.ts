@@ -5,13 +5,27 @@ import {
   type ActiveSession,
   type AgentApp,
   type ClientConnection,
+  type CreateTerminalRequest,
+  type CreateTerminalResponse,
+  type KillTerminalRequest,
+  type KillTerminalResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
+  type ReleaseTerminalRequest,
+  type ReleaseTerminalResponse,
+  type ReadTextFileRequest,
+  type ReadTextFileResponse,
   type McpServer,
   type SessionNotification,
   type SessionConfigOption,
   type StopReason,
   type Stream,
+  type TerminalOutputRequest,
+  type TerminalOutputResponse,
+  type WaitForTerminalExitRequest,
+  type WaitForTerminalExitResponse,
+  type WriteTextFileRequest,
+  type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
 
 export type AcpPermissionDecision =
@@ -26,9 +40,45 @@ export type AcpUpdateHandler = (
   notification: SessionNotification,
 ) => void | Promise<void>;
 
+export interface AcpTerminalHandlers {
+  create(
+    request: CreateTerminalRequest,
+    signal: AbortSignal,
+  ): Promise<CreateTerminalResponse>;
+  output(
+    request: TerminalOutputRequest,
+    signal: AbortSignal,
+  ): Promise<TerminalOutputResponse>;
+  release(
+    request: ReleaseTerminalRequest,
+    signal: AbortSignal,
+  ): Promise<ReleaseTerminalResponse | void>;
+  waitForExit(
+    request: WaitForTerminalExitRequest,
+    signal: AbortSignal,
+  ): Promise<WaitForTerminalExitResponse>;
+  kill(
+    request: KillTerminalRequest,
+    signal: AbortSignal,
+  ): Promise<KillTerminalResponse | void>;
+}
+
+export interface AcpFileSystemHandlers {
+  readTextFile?(
+    request: ReadTextFileRequest,
+    signal: AbortSignal,
+  ): Promise<ReadTextFileResponse>;
+  writeTextFile?(
+    request: WriteTextFileRequest,
+    signal: AbortSignal,
+  ): Promise<WriteTextFileResponse | void>;
+}
+
 export interface AcpRuntimeHandlers {
   onPermissionRequest: AcpPermissionHandler;
+  fileSystem?: AcpFileSystemHandlers;
   onUpdate?: AcpUpdateHandler;
+  terminal?: AcpTerminalHandlers;
 }
 
 export interface AcpRuntimeSessionOptions {
@@ -69,17 +119,63 @@ export class AcpRuntimeSession {
         );
         return { outcome: decision } satisfies RequestPermissionResponse;
       })
-      .onRequest(methods.client.fs.readTextFile, async () => {
-        throw new Error("Radius did not advertise direct ACP file reads");
+      .onRequest(methods.client.fs.readTextFile, async (context) => {
+        const fileSystem = options.handlers.fileSystem;
+        if (!fileSystem?.readTextFile) {
+          throw new Error("Radius did not advertise ACP file reads");
+        }
+        return fileSystem.readTextFile(context.params, context.signal);
       })
-      .onRequest(methods.client.fs.writeTextFile, async () => {
-        throw new Error("Radius did not advertise direct ACP file writes");
+      .onRequest(methods.client.fs.writeTextFile, async (context) => {
+        const fileSystem = options.handlers.fileSystem;
+        if (!fileSystem?.writeTextFile) {
+          throw new Error("Radius did not advertise ACP file writes");
+        }
+        return (
+          (await fileSystem.writeTextFile(context.params, context.signal)) ?? {}
+        );
+      })
+      .onRequest(methods.client.terminal.create, async (context) => {
+        const terminal = options.handlers.terminal;
+        if (!terminal)
+          throw new Error("Radius did not advertise ACP terminals");
+        return terminal.create(context.params, context.signal);
+      })
+      .onRequest(methods.client.terminal.output, async (context) => {
+        const terminal = options.handlers.terminal;
+        if (!terminal)
+          throw new Error("Radius did not advertise ACP terminals");
+        return terminal.output(context.params, context.signal);
+      })
+      .onRequest(methods.client.terminal.waitForExit, async (context) => {
+        const terminal = options.handlers.terminal;
+        if (!terminal)
+          throw new Error("Radius did not advertise ACP terminals");
+        return terminal.waitForExit(context.params, context.signal);
+      })
+      .onRequest(methods.client.terminal.kill, async (context) => {
+        const terminal = options.handlers.terminal;
+        if (!terminal)
+          throw new Error("Radius did not advertise ACP terminals");
+        return (await terminal.kill(context.params, context.signal)) ?? {};
+      })
+      .onRequest(methods.client.terminal.release, async (context) => {
+        const terminal = options.handlers.terminal;
+        if (!terminal)
+          throw new Error("Radius did not advertise ACP terminals");
+        return (await terminal.release(context.params, context.signal)) ?? {};
       });
 
     const connection = app.connect(target as Stream & AgentApp);
     await connection.agent.request(methods.agent.initialize, {
       protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {},
+      clientCapabilities: {
+        fs: {
+          readTextFile: Boolean(options.handlers.fileSystem?.readTextFile),
+          writeTextFile: Boolean(options.handlers.fileSystem?.writeTextFile),
+        },
+        terminal: Boolean(options.handlers.terminal),
+      },
     });
     const session = await connection.agent
       .buildSession({

@@ -57,6 +57,13 @@
       "when": 1787608241362,
       "tag": "0007_agent_authentication",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788030398937,
+      "tag": "0008_project_source_folders",
+      "breakpoints": true
     }
   ]
 }

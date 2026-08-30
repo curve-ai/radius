@@ -1,6 +1,6 @@
 import {
   ConnectorCatalogEntrySchema,
-  ConnectorCatalogCategorySchema,
+  ConnectorCatalogTaxonomyCategoryIdSchema,
   ConnectorCatalogListResponseSchema,
   ConnectorLogoResolutionSchema,
   type ConnectorCatalogEntry,
@@ -18,7 +18,41 @@ import { getConnectorCatalogAccessToken } from "./sync";
 const CATALOG_TIMEOUT_MS = 20_000;
 const LOGO_TIMEOUT_MS = 8_000;
 const MAX_LOGO_BYTES = 1024 * 1024;
-const logoCache = new Map<string, string | null>();
+const MAX_LOGO_CACHE_ENTRIES = 128;
+const MAX_LOGO_CACHE_BYTES = 16 * 1024 * 1024;
+const MAX_CONCURRENT_LOGO_REQUESTS = 8;
+const logoCache = new Map<
+  string,
+  { byteSize: number; dataUrl: string | null }
+>();
+const logoRequests = new Map<string, Promise<string | null>>();
+let logoCacheBytes = 0;
+
+function cachedLogo(value: string): string | null | undefined {
+  if (!logoCache.has(value)) return undefined;
+  const cached = logoCache.get(value);
+  if (!cached) return undefined;
+  logoCache.delete(value);
+  logoCache.set(value, cached);
+  return cached.dataUrl;
+}
+
+function cacheLogo(value: string, result: string | null): void {
+  const existing = logoCache.get(value);
+  if (existing) logoCacheBytes -= existing.byteSize;
+  const byteSize = result ? Buffer.byteLength(result) : 0;
+  logoCache.set(value, { byteSize, dataUrl: result });
+  logoCacheBytes += byteSize;
+  while (
+    logoCache.size > MAX_LOGO_CACHE_ENTRIES ||
+    logoCacheBytes > MAX_LOGO_CACHE_BYTES
+  ) {
+    const oldest = logoCache.keys().next().value;
+    if (oldest === undefined) break;
+    logoCacheBytes -= logoCache.get(oldest)?.byteSize ?? 0;
+    logoCache.delete(oldest);
+  }
+}
 
 function catalogBaseUrl(): URL {
   const configured =
@@ -44,44 +78,83 @@ async function catalogFetch(pathname: string): Promise<Response> {
 
 async function logoDataUrl(value: string | null): Promise<string | null> {
   if (!value) return null;
-  const cached = logoCache.get(value);
+  const cached = cachedLogo(value);
   if (cached !== undefined) return cached;
+  const pending = logoRequests.get(value);
+  if (pending) return pending;
+
+  const request = (async (): Promise<string | null> => {
+    try {
+      const url = new URL(value);
+      const loopback =
+        url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]";
+      if (
+        url.protocol !== "https:" &&
+        !(loopback && url.protocol === "http:")
+      ) {
+        throw new Error("CONNECTOR_LOGO_URL_INVALID");
+      }
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(LOGO_TIMEOUT_MS),
+        headers: { accept: "image/png,image/jpeg,image/webp" },
+      });
+      if (!response.ok) throw new Error(`CONNECTOR_LOGO_${response.status}`);
+      const contentType = response.headers.get("content-type")?.split(";")[0];
+      if (
+        !contentType ||
+        !["image/png", "image/jpeg", "image/webp"].includes(contentType)
+      ) {
+        throw new Error("CONNECTOR_LOGO_TYPE_INVALID");
+      }
+      const declaredLength = Number(
+        response.headers.get("content-length") || "0",
+      );
+      if (declaredLength > MAX_LOGO_BYTES) {
+        throw new Error("CONNECTOR_LOGO_TOO_LARGE");
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length === 0 || bytes.length > MAX_LOGO_BYTES) {
+        throw new Error("CONNECTOR_LOGO_SIZE_INVALID");
+      }
+      return `data:${contentType};base64,${bytes.toString("base64")}`;
+    } catch {
+      return null;
+    }
+  })();
+  logoRequests.set(value, request);
   try {
-    const url = new URL(value);
-    const loopback =
-      url.hostname === "localhost" ||
-      url.hostname === "127.0.0.1" ||
-      url.hostname === "[::1]";
-    if (url.protocol !== "https:" && !(loopback && url.protocol === "http:"))
-      throw new Error("CONNECTOR_LOGO_URL_INVALID");
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(LOGO_TIMEOUT_MS),
-      headers: { accept: "image/png,image/jpeg,image/webp" },
-    });
-    if (!response.ok) throw new Error(`CONNECTOR_LOGO_${response.status}`);
-    const contentType = response.headers.get("content-type")?.split(";")[0];
-    if (
-      !contentType ||
-      !["image/png", "image/jpeg", "image/webp"].includes(contentType)
-    ) {
-      throw new Error("CONNECTOR_LOGO_TYPE_INVALID");
-    }
-    const declaredLength = Number(
-      response.headers.get("content-length") || "0",
-    );
-    if (declaredLength > MAX_LOGO_BYTES)
-      throw new Error("CONNECTOR_LOGO_TOO_LARGE");
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > MAX_LOGO_BYTES) {
-      throw new Error("CONNECTOR_LOGO_SIZE_INVALID");
-    }
-    const result = `data:${contentType};base64,${bytes.toString("base64")}`;
-    logoCache.set(value, result);
+    const result = await request;
+    cacheLogo(value, result);
     return result;
-  } catch {
-    logoCache.set(value, null);
-    return null;
+  } finally {
+    logoRequests.delete(value);
   }
+}
+
+async function resolveCatalogLogos(
+  entries: ConnectorCatalogEntry[],
+): Promise<ConnectorCatalogEntry[]> {
+  const resolved = new Array<ConnectorCatalogEntry>(entries.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(MAX_CONCURRENT_LOGO_REQUESTS, entries.length) },
+    async () => {
+      while (nextIndex < entries.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const entry = entries[index];
+        if (!entry) continue;
+        resolved[index] = {
+          ...entry,
+          logoUrl: await logoDataUrl(entry.logoUrl),
+        };
+      }
+    },
+  );
+  await Promise.all(workers);
+  return resolved;
 }
 
 export async function listConnectorCatalogForRenderer(
@@ -102,7 +175,7 @@ export async function listConnectorCatalogForRenderer(
   const category =
     request.category === undefined
       ? null
-      : ConnectorCatalogCategorySchema.safeParse(request.category);
+      : ConnectorCatalogTaxonomyCategoryIdSchema.safeParse(request.category);
   if (category && !category.success) {
     throw new Error("CONNECTOR_CATALOG_CATEGORY_INVALID");
   }
@@ -125,12 +198,7 @@ export async function listConnectorCatalogForRenderer(
   );
   return {
     ...parsed,
-    connectors: await Promise.all(
-      parsed.connectors.map(async (entry) => ({
-        ...entry,
-        logoUrl: await logoDataUrl(entry.logoUrl),
-      })),
-    ),
+    connectors: await resolveCatalogLogos(parsed.connectors),
   };
 }
 

@@ -23,6 +23,13 @@ An agent package does not receive connector credentials, the container-engine so
 
 ## Shell execution
 
+Local shell execution uses ACP's native client terminal methods rather than
+MCP. Radius advertises `terminal` only when the active release requested
+`shell.execute`, a project has at least one local source folder, and the macOS
+executor is available. `terminal/create`, `terminal/output`,
+`terminal/wait_for_exit`, `terminal/kill`, and `terminal/release` remain
+host-owned operations over the existing ACP connection.
+
 1. The agent proposes a command, working directory, purpose, and expected outputs.
 2. Radius evaluates the request against the package manifest and current policy.
 3. The workspace displays the exact action when approval is required.
@@ -32,9 +39,21 @@ An agent package does not receive connector credentials, the container-engine so
 
 The default production mode must restrict commands to an approved workspace and network policy. A clearly labelled developer mode may broaden access, but it must not silently bypass approvals.
 
+On macOS, Radius runs terminal processes as the logged-in user beneath a
+generated Seatbelt policy. Project source folders are the default readable and
+writable roots. A command whose working directory is outside those roots can
+run only after one-command approval; the approved directory is added only to
+that command's frozen policy. Direct network access remains disabled.
+
+ACP text-file methods follow the same rule. Reads inside project source folders
+are available to releases requesting `workspace.files.read`; writes require
+`workspace.files.write`. Exact paths outside the project pause for approval and
+do not become durable project grants.
+
 ## MCP integration
 
-MCP is one provider behind the tool broker rather than a parallel permission system. The host:
+MCP is one provider behind the tool broker rather than a parallel permission
+system or the transport for Radius's local shell. The host:
 
 - Configures and identifies trusted MCP servers.
 - Namespaces tools by connector and server.

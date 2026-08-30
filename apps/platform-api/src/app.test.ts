@@ -8,6 +8,7 @@ const accountId = "11111111-1111-4111-8111-111111111111";
 const uploadId = "22222222-2222-4222-8222-222222222222";
 const agentDeploymentId = "33333333-3333-4333-8333-333333333333";
 const clientInstallationId = "77777777-7777-4777-8777-777777777777";
+const organizationId = "12121212-1212-4212-8212-121212121212";
 
 function services(): RadiusPlatformServices {
   return {
@@ -162,6 +163,65 @@ test("serves public compatibility without authentication", async () => {
   assert.equal((await response.json()).registryUpload, true);
 });
 
+test("provisions an organization only through the internal provisioning boundary", async () => {
+  const app = createPlatformApp(services(), {
+    provisioning: {
+      authenticate: async (token) => token === "provisioning-secret",
+      provisionOrganization: async (request) => ({
+        apiVersion: 1,
+        organizationId: request.organization.id,
+        accountId: request.owner.accountId,
+        accountIdentityId: "13131313-1313-4313-8313-131313131313",
+        membershipId: "14141414-1414-4414-8414-141414141414",
+      }),
+    },
+  });
+  const body = JSON.stringify({
+    apiVersion: 1,
+    organization: {
+      id: organizationId,
+      slug: "acme",
+      displayName: "Acme",
+    },
+    owner: {
+      accountId,
+      displayName: "Platform Owner",
+      identity: {
+        issuer: "https://auth.curvehq.sh",
+        subject: "better-auth-user-1",
+        email: "owner@acme.example",
+        emailVerified: true,
+      },
+    },
+  });
+  const unauthorized = await app.request(
+    "/api/platform/v1/internal/organizations",
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer no",
+        "content-type": "application/json",
+      },
+      body,
+    },
+  );
+  assert.equal(unauthorized.status, 401);
+
+  const response = await app.request(
+    "/api/platform/v1/internal/organizations",
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer provisioning-secret",
+        "content-type": "application/json",
+      },
+      body,
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).organizationId, organizationId);
+});
+
 test("requires bearer authentication for identity", async () => {
   const response = await createPlatformApp(services()).request(
     "/api/platform/v1/identity",
@@ -236,6 +296,57 @@ test("keeps OIDC redirects and browser sessions outside bearer middleware", asyn
   });
   assert.equal(session.status, 200);
   assert.equal((await session.json()).accountId, accountId);
+});
+
+test("fails closed when a browser session does not match the organization host", async () => {
+  const browserIdentity = {
+    apiVersion: 1 as const,
+    accountId,
+    organizations: [
+      {
+        id: organizationId,
+        slug: "acme",
+        displayName: "Acme",
+        role: "owner" as const,
+      },
+    ],
+  };
+  const platformServices = services();
+  platformServices.authenticate = async (token) =>
+    token === "valid" ? { accountId, response: browserIdentity } : null;
+  platformServices.authenticateBrowserSession = async (token) =>
+    token === "browser-valid"
+      ? { accountId, response: browserIdentity }
+      : null;
+  const app = createPlatformApp(platformServices, {
+    browserAuth: {
+      sessionCookieName: "radius_platform_session",
+      authenticate: async (token) =>
+        token === "browser-valid" ? browserIdentity : null,
+      organizationForRequest: async (url) => url.hostname.split(".")[0]!,
+      revoke: async () => true,
+      clearSessionCookie: () => "radius_platform_session=; Max-Age=0",
+    },
+  });
+  const denied = await app.request(
+    "https://northwind.curvehq.sh/api/platform/v1/identity",
+    { headers: { cookie: "radius_platform_session=browser-valid" } },
+  );
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, "ORGANIZATION_HOST_MISMATCH");
+
+  const allowed = await app.request(
+    "https://acme.curvehq.sh/api/platform/v1/identity",
+    { headers: { cookie: "radius_platform_session=browser-valid" } },
+  );
+  assert.equal(allowed.status, 200);
+  assert.deepEqual((await allowed.json()).organizations, browserIdentity.organizations);
+
+  const deniedBearer = await app.request(
+    "https://northwind.curvehq.sh/api/platform/v1/identity",
+    { headers: { authorization: "Bearer valid" } },
+  );
+  assert.equal(deniedBearer.status, 403);
 });
 
 test("validates and forwards organization membership changes", async () => {
@@ -401,7 +512,7 @@ test("registers a physical device and client installation observation", async ()
         clientInstanceId,
         physicalDevice: {
           fingerprint: `sha256:${"e".repeat(64)}`,
-          displayName: "Alexey's Mac",
+          displayName: "Test Mac",
           assetTag: null,
           platform: "darwin",
           architecture: "arm64",

@@ -108,7 +108,17 @@
 - Session transcripts consume typed canonical events through caller-owned
   read APIs. Group run activity without replacing event order, keep final
   messages outside collapsible traces, and honor provider-owned inline or
-  collapsible presentation records.
+  collapsible presentation records. Visible reasoning, progress, tool, and error
+  rows use one truncated line per action until the user explicitly expands that
+  individual row, which reveals its full wrapped detail. The run header controls
+  only whole-group visibility. Every populated group starts collapsed; its open
+  action list is capped at 16rem and scrolls independently. Collapsed traces
+  remove hidden rows from the accessibility tree with `aria-hidden` and `inert`.
+- Session pages may use a submitted user message as a temporary scroll anchor.
+  Reserve only the measured space needed to place that turn near the top, shrink
+  it as the answer grows, and cancel automatic following on real user scroll
+  intent. Removing follow mode must also remove the temporary spacer so the
+  response edge remains the true scroll boundary.
 - Show the pixel-grid thinking indicator only for a real non-terminal run.
   Reduced motion freezes its pixels while elapsed time may continue to update.
 - Completed assistant messages expose the working Copy markdown action. When a
@@ -116,6 +126,37 @@
   the run summary when one is identified, otherwise on the run's last final
   assistant message. Do not add retry, voting, reaction, or other no-op message
   controls.
+- Render message bodies as safe GFM Markdown without raw HTML hydration. Keep
+  ordinary content within the shared reader measure. Assistant tables may use
+  the page-owned workbench inset to break out to the available canvas; user and
+  system tables remain constrained by their message surfaces. Normalize common
+  unfenced terminal-table separators before parsing and compose table nodes with
+  the shared shadcn `Table` primitives rather than parallel table markup. Keep
+  transcript tables report-like: plain headers, regular values, roomy cells,
+  quiet single separators, and the documented outer border. Table Expand and
+  Copy actions use 24px targets with 12px icons in a vertical rail outside the
+  table's right border. Reveal the rail on hover or keyboard focus, retain it on
+  coarse pointers, and use the shared Tooltip and Dialog primitives with focus
+  restoration.
+- Treat code, math, diagrams, directives, media, and link previews as bounded
+  Markdown components, not raw HTML. Code and Mermaid use exact-source Copy and
+  the shared near-full-window Expand pattern. Keep plain source available while
+  lazy syntax or diagram rendering loads or fails. KaTeX remains non-trusting;
+  Mermaid remains strict, rejects embedded configuration, sanitizes SVG, and
+  exposes a source disclosure. Typed callouts use the shared Alert composition,
+  and details use native disclosure semantics with Escape restoration.
+- Renderer Markdown must not fetch remote media or metadata. Resolve remote
+  HTTPS images and user-triggered standalone-link previews through the typed
+  preload contract. Main owns DNS pinning, private-address rejection,
+  redirects, MIME and byte limits, timeouts, metadata cleanup, in-flight
+  deduplication, and bounded caching. Keep data/blob image exceptions narrow and
+  retain explicit loading, blocked, and unavailable presentation.
+- Stream assistant text through one stable ephemeral message event rather than
+  persisting token deltas. Replace that event in place for every chunk and use
+  the same event ID for the final journal message. Progressive terminal tables
+  may pad incomplete rows only while the event is streaming; completed messages
+  retain strict table recognition. Keep per-token cell updates immediate rather
+  than animating high-frequency data changes.
 - While a canonical plan is active, show only its compact current-step status
   above the session composer. Reveal the complete item list on pointer hover or
   keyboard focus; never add code-diff counts or coding-client language.

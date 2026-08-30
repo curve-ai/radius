@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./development": {
+      "types": "./src/development.ts",
+      "default": "./src/development.ts"
     }
   },
   "scripts": {
@@ -16,11 +20,13 @@
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz"
+    "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "@curve-ai/radius-runtime": "0.0.1",
     "@types/node": "22.19.1",
+    "@types/ws": "8.18.1",
     "tsx": "4.23.12",
     "typescript": "5.9.3"
   }

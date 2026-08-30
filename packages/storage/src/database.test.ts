@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -104,6 +104,96 @@ test("applies the initial migration and enforces typed message parts", async () 
         textContent: "invalid",
         artifactId: "c440b00f-e788-4616-8e60-b77d7bab5e1e",
       }),
+    );
+  } finally {
+    database.close();
+    await removeTemporaryDirectory(directory);
+  }
+});
+
+test("migrates an existing project root into the multi-folder table", async () => {
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "radius-roots-migration-"),
+  );
+  const database = await openRadiusDatabase({
+    path: path.join(directory, "radius.db"),
+  });
+
+  try {
+    await database.client.executeMultiple(`
+      CREATE TABLE client_instances (id text PRIMARY KEY NOT NULL);
+      CREATE TABLE projects (id text PRIMARY KEY NOT NULL);
+      CREATE TABLE project_roots (
+        project_id text NOT NULL,
+        client_instance_id text NOT NULL,
+        root_path text NOT NULL,
+        created_at_ms integer NOT NULL,
+        updated_at_ms integer NOT NULL,
+        PRIMARY KEY(project_id, client_instance_id)
+      );
+      INSERT INTO client_instances(id) VALUES ('${ids.client}');
+      INSERT INTO projects(id) VALUES ('project-before-multi-root');
+      INSERT INTO project_roots(
+        project_id,
+        client_instance_id,
+        root_path,
+        created_at_ms,
+        updated_at_ms
+      ) VALUES (
+        'project-before-multi-root',
+        '${ids.client}',
+        '/workspace/existing',
+        100,
+        100
+      );
+    `);
+    const migration = await readFile(
+      fileURLToPath(
+        new URL("../drizzle/0008_project_source_folders.sql", import.meta.url),
+      ),
+      "utf8",
+    );
+    for (const statement of migration
+      .split("--> statement-breakpoint")
+      .map((value) => value.trim())
+      .filter(Boolean)) {
+      await database.client.execute(statement);
+    }
+
+    const migrated = await database.client.execute(
+      "SELECT id, root_path FROM project_roots",
+    );
+    assert.equal(migrated.rows[0]?.root_path, "/workspace/existing");
+    assert.match(
+      String(migrated.rows[0]?.id),
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    await database.client.execute({
+      sql: `
+        INSERT INTO project_roots(
+          id,
+          project_id,
+          client_instance_id,
+          root_path,
+          created_at_ms,
+          updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        "new-root-id",
+        "project-before-multi-root",
+        ids.client,
+        "/workspace/second",
+        101,
+        101,
+      ],
+    });
+    const roots = await database.client.execute(
+      "SELECT root_path FROM project_roots ORDER BY root_path",
+    );
+    assert.deepEqual(
+      roots.rows.map((row) => row.root_path),
+      ["/workspace/existing", "/workspace/second"],
     );
   } finally {
     database.close();

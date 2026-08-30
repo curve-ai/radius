@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
+import { useProjects } from "@renderer/components/shell/project-context-value";
 import { WORKSPACE_TITLES } from "@renderer/components/shell/types";
 import { useSidebar } from "@renderer/components/ui/sidebar";
 import { cn } from "@renderer/lib/utils";
+import { WorkspaceSessionHeader } from "./workspace-session-header";
 import { WorkspaceToolPanelTrigger } from "./workspace-tool-panel";
 
 export function WorkspaceHeader({
@@ -24,6 +26,7 @@ export function WorkspaceHeader({
   onToolPanelOpenChange: (open: boolean) => void;
 }): ReactNode {
   const { activeView } = useWorkspaceNavigation();
+  const { activeSession } = useProjects();
   const { isMobile, state: sidebarState } = useSidebar();
   const [scrolled, setScrolled] = useState(false);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -73,15 +76,19 @@ export function WorkspaceHeader({
           </span>
         ) : (
           <>
-            <span
-              aria-hidden={collapsingTitle ? "true" : undefined}
-              className={cn(
-                "min-w-0 flex-1 truncate type-base text-foreground",
-                collapsingTitle && "radius-collapsing-header-title",
-              )}
-            >
-              {title ?? WORKSPACE_TITLES[activeView]}
-            </span>
+            {activeView === "workspace" && activeSession ? (
+              <WorkspaceSessionHeader key={activeSession.session.id} />
+            ) : (
+              <span
+                aria-hidden={collapsingTitle ? "true" : undefined}
+                className={cn(
+                  "min-w-0 flex-1 truncate type-base text-foreground",
+                  collapsingTitle && "radius-collapsing-header-title",
+                )}
+              >
+                {title ?? WORKSPACE_TITLES[activeView]}
+              </span>
+            )}
             {toolPanelAvailable ? (
               <div className="electron-window-no-drag ml-2 shrink-0">
                 <WorkspaceToolPanelTrigger

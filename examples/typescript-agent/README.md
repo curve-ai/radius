@@ -6,19 +6,24 @@ repository root:
 ```bash
 npx bun@1.3.14 install
 npx bun@1.3.14 run --cwd examples/typescript-agent validate
-npx bun@1.3.14 run --cwd examples/typescript-agent dev -- --prompt "Hello"
-npx bun@1.3.14 run --cwd examples/typescript-agent dev -- --sandbox --prompt "Hello from the sandbox"
-npx bun@1.3.14 run --cwd examples/typescript-agent deploy:dry-run
+npx bun@1.3.14 run --cwd examples/typescript-agent agent:dev
+# In a second terminal:
+npx bun@1.3.14 run --cwd examples/typescript-agent dev
+npx bun@1.3.14 run --cwd examples/typescript-agent build
+npx bun@1.3.14 run --cwd examples/typescript-agent deploy
 ```
 
-`dev` starts the agent as a supervised local ACP subprocess. The dry-run deploy
-writes the normalized deterministic manifest beneath `.radius/builds/` and does
-not contact Curve Cloud or mutate a remote platform.
+`agent:dev` runs the agent's own watch process and exposes authenticated-ready
+ACP WebSocket semantics on loopback. `radius dev` opens the ready Radius app,
+registers that endpoint, reloads only declarative Radius configuration, and
+never starts, watches, builds, or restarts the agent.
 
-On Apple Silicon macOS 26, `dev --sandbox` bundles the same source into a
+`radius build` bundles the source into a
 digest-pinned Node 22 `linux/arm64` OCI image, imports it through the Radius
-Swift helper, and runs the prompt in the real microVM. The initial builder uses
-Docker Buildx; the resulting agent execution does not use Docker.
+Swift helper, verifies the ACP handshake in the real microVM, and writes an
+immutable receipt beneath `.radius/builds/`. The initial builder uses Docker
+Buildx; the resulting agent execution does not use Docker. `radius deploy`
+uploads the exact successful build receipt without rebuilding it.
 
 For a full development deployment through the open Platform API and local OCI
 registry, follow

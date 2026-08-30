@@ -10,6 +10,8 @@ const semanticVersion = z
   .string()
   .regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/);
 const capabilitySegment = /^[a-z][a-z0-9_-]*$/;
+const environmentVariable = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 export const RelativeProjectPathSchema = nonempty.superRefine(
   (value, context) => {
@@ -84,12 +86,39 @@ export const AgentResourceConfigSchema = z.object({
   diskMb: positiveInteger.max(51_200).default(5120),
 });
 
+export const AgentDevelopmentConfigSchema = z.object({
+  endpoint: z
+    .string()
+    .url()
+    .superRefine((value, context) => {
+      const endpoint = new URL(value);
+      if (endpoint.protocol !== "ws:" && endpoint.protocol !== "wss:") {
+        context.addIssue({
+          code: "custom",
+          message: "Development ACP endpoints must use WebSocket",
+        });
+      }
+      if (!loopbackHosts.has(endpoint.hostname)) {
+        context.addIssue({
+          code: "custom",
+          message: "Development ACP endpoints must be loopback-only",
+        });
+      }
+    }),
+  authorizationEnv: z
+    .string()
+    .regex(environmentVariable)
+    .nullable()
+    .default(null),
+});
+
 export const AgentConfigSchema = z
   .object({
     schemaVersion: z.literal(RADIUS_AGENT_CONFIG_VERSION).default(1),
     agent: agentRef.nullable().default(null),
     name: z.string().trim().min(1).max(120),
     runtime: AgentRuntimeConfigSchema,
+    development: AgentDevelopmentConfigSchema.optional(),
     capabilities: z.array(CapabilityRequestSchema).default([]),
     networkAllowlist: z.array(nonempty).default([]),
     resources: AgentResourceConfigSchema.default({
@@ -141,3 +170,21 @@ export type AgentConfig = z.output<typeof AgentConfigSchema>;
 export type AgentManifest = z.output<typeof AgentManifestSchema>;
 export type AgentRuntimeConfig = z.output<typeof AgentRuntimeConfigSchema>;
 export type CapabilityRequest = z.output<typeof CapabilityRequestSchema>;
+
+export const AgentBuildReceiptSchema = z.object({
+  schemaVersion: z.literal(1),
+  buildDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  imageReference: z.string().trim().min(1),
+  sourceManifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  bundleSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  layoutPath: RelativeProjectPathSchema,
+  contextPath: RelativeProjectPathSchema,
+  manifest: AgentManifestSchema,
+  verifiedAt: z.string().datetime(),
+  verification: z.object({
+    kind: z.literal("microvm-acp"),
+    platform: z.literal("linux/arm64"),
+  }),
+});
+
+export type AgentBuildReceipt = z.infer<typeof AgentBuildReceiptSchema>;

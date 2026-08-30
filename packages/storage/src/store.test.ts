@@ -32,18 +32,23 @@ import {
   syncDeliveries,
 } from "./schema.js";
 import {
+  addProjectRoot,
   appendSessionEvent,
   createProject,
   createSession,
+  getSessionProjectContext,
+  getSessionRevision,
   listAgentRunFileOutcomes,
   listAllProjectSessions,
   listProjectSessions,
   listProjects,
   listRecentSessions,
   listSessionTranscript,
+  removeProjectRoot,
   setSessionArchived,
   setSessionPinned,
   updateProjectName,
+  updateSessionTitle,
 } from "./store.js";
 import { applyRemoteChange, configureSyncConnection } from "./store.js";
 
@@ -273,12 +278,134 @@ test("projects canonical plans and step updates into the session transcript", as
   });
 });
 
+test("projects shell approvals and results into the session transcript", async () => {
+  await withDatabase(async (database) => {
+    const session = await createSession(database, {
+      originClientInstanceId: clientId,
+      title: "Terminal approval",
+      now: Date.parse("2026-08-29T20:00:00.000Z"),
+    });
+    const agentRunId = "29e05e96-79cf-47aa-92cf-fc152a34a605";
+    const toolCallEventId = "451c1ca8-6a5c-4310-9d41-d699bd25e065";
+    const approvalRequestEventId = "2fa2f08c-fb16-4d83-9c99-b52ff69e03f8";
+    const toolInput = {
+      command: "/bin/pwd",
+      args: [],
+      cwd: "/workspace",
+      environment: [],
+      outsideProjectRoots: false,
+    };
+    const events = [
+      {
+        eventId: "bdf2f060-82ff-4b34-b994-9d74bba16b60",
+        sessionId: session.id,
+        sessionRevision: 2,
+        sourceClientInstanceId: clientId,
+        agentRunId,
+        occurredAt: "2026-08-29T20:01:00.000Z",
+        artifactLinks: [],
+        eventType: "agent_run" as const,
+        providerKey: "fx",
+        providerRunId: null,
+        triggeringMessageEventId: null,
+      },
+      {
+        eventId: toolCallEventId,
+        sessionId: session.id,
+        sessionRevision: 3,
+        sourceClientInstanceId: clientId,
+        agentRunId,
+        occurredAt: "2026-08-29T20:02:00.000Z",
+        artifactLinks: [],
+        eventType: "tool_call" as const,
+        triggeringMessageEventId: null,
+        capability: "shell",
+        operation: "execute",
+        inputSchemaId: "radius.shell.execute",
+        inputSchemaVersion: 1,
+        input: toolInput,
+      },
+      {
+        eventId: approvalRequestEventId,
+        sessionId: session.id,
+        sessionRevision: 4,
+        sourceClientInstanceId: clientId,
+        agentRunId,
+        occurredAt: "2026-08-29T20:03:00.000Z",
+        artifactLinks: [],
+        eventType: "approval_request" as const,
+        toolCallEventId,
+        reason: "Allow this command to run in /workspace",
+        expiresAt: "2026-08-29T20:13:00.000Z",
+      },
+      {
+        eventId: "ad0700dc-16f6-4569-95da-cf3100b55f2c",
+        sessionId: session.id,
+        sessionRevision: 5,
+        sourceClientInstanceId: clientId,
+        agentRunId,
+        occurredAt: "2026-08-29T20:04:00.000Z",
+        artifactLinks: [],
+        eventType: "approval_decision" as const,
+        approvalRequestEventId,
+        decision: "approved" as const,
+        actorType: "user" as const,
+        actorId: null,
+        note: null,
+      },
+      {
+        eventId: "7b4ae49e-8c72-4f9c-9c99-e1037c289e25",
+        sessionId: session.id,
+        sessionRevision: 6,
+        sourceClientInstanceId: clientId,
+        agentRunId,
+        occurredAt: "2026-08-29T20:05:00.000Z",
+        artifactLinks: [],
+        eventType: "tool_result" as const,
+        toolCallEventId,
+        outcome: "succeeded" as const,
+        outputSchemaId: "radius.shell.result",
+        outputSchemaVersion: 1,
+        output: { durationMs: 12, exitCode: 0 },
+      },
+    ];
+    for (const event of events) await appendSessionEvent(database, event);
+
+    const transcript = await listSessionTranscript(database, session.id);
+    assert.deepEqual(
+      transcript.map((event) => event.eventType),
+      [
+        "agent_run",
+        "tool_call",
+        "approval_request",
+        "approval_decision",
+        "tool_result",
+      ],
+    );
+    assert.deepEqual(
+      transcript.find((event) => event.eventType === "tool_call"),
+      {
+        eventId: toolCallEventId,
+        sessionRevision: 3,
+        occurredAt: "2026-08-29T20:02:00.000Z",
+        agentRunId,
+        eventType: "tool_call",
+        capability: "shell",
+        operation: "execute",
+        inputSchemaId: "radius.shell.execute",
+        inputSchemaVersion: 1,
+        input: toolInput,
+      },
+    );
+  });
+});
+
 test("stores provider presentation separately from durable project file outcomes", async () => {
   await withDatabase(async (database) => {
     const project = await createProject(database, {
       originClientInstanceId: clientId,
       name: "Customer work",
-      rootPath: "/workspace/customer-work",
+      rootPaths: ["/workspace/customer-work"],
       now: Date.parse("2026-08-22T14:00:00.000Z"),
     });
     const session = await createSession(database, {
@@ -286,6 +413,9 @@ test("stores provider presentation separately from durable project file outcomes
       projectId: project.id,
       title: "Prepare the customer brief",
       now: Date.parse("2026-08-22T14:01:00.000Z"),
+    });
+    assert.deepEqual(await getSessionProjectContext(database, session.id), {
+      projectId: project.id,
     });
     const agentRunId = "445d951a-ff55-4eca-a032-a8a58d818d09";
 
@@ -425,12 +555,12 @@ test("stores provider presentation separately from durable project file outcomes
   });
 });
 
-test("creates one-root projects and groups sessions without syncing the path", async () => {
+test("creates multi-folder projects and groups sessions without syncing paths", async () => {
   await withDatabase(async (database) => {
     const project = await createProject(database, {
       originClientInstanceId: clientId,
       name: "agentic-workspace",
-      rootPath: "/workspace/agentic-workspace",
+      rootPaths: ["/workspace/agentic-workspace", "/workspace/shared-design"],
       now: Date.parse("2026-08-22T12:00:00.000Z"),
     });
     const session = await createSession(database, {
@@ -440,8 +570,11 @@ test("creates one-root projects and groups sessions without syncing the path", a
       now: Date.parse("2026-08-22T12:01:00.000Z"),
     });
 
-    const [storedRoot] = await database.db.select().from(projectRoots);
-    assert.equal(storedRoot?.rootPath, "/workspace/agentic-workspace");
+    const storedRoots = await database.db.select().from(projectRoots);
+    assert.deepEqual(storedRoots.map((root) => root.rootPath).sort(), [
+      "/workspace/agentic-workspace",
+      "/workspace/shared-design",
+    ]);
     const changes = await database.db
       .select({
         kind: localChanges.kind,
@@ -453,14 +586,15 @@ test("creates one-root projects and groups sessions without syncing the path", a
       ["project.upsert", "session.upsert"],
     );
     assert.equal(
-      changes.some((change) =>
-        change.payloadJson.includes("/workspace/agentic-workspace"),
-      ),
+      changes.some((change) => change.payloadJson.includes("/workspace/")),
       false,
     );
 
     const summaries = await listProjects(database, clientId);
-    assert.equal(summaries[0]?.rootPath, "/workspace/agentic-workspace");
+    assert.deepEqual(
+      summaries[0]?.roots.map((root) => root.rootPath),
+      ["/workspace/agentic-workspace", "/workspace/shared-design"],
+    );
     const projectSessions = await listProjectSessions(
       database,
       project.id,
@@ -472,12 +606,76 @@ test("creates one-root projects and groups sessions without syncing the path", a
   });
 });
 
+test("creates projects without a folder and allows grouped sessions", async () => {
+  await withDatabase(async (database) => {
+    const project = await createProject(database, {
+      originClientInstanceId: clientId,
+      name: "Research",
+      now: Date.parse("2026-08-22T12:00:00.000Z"),
+    });
+    const session = await createSession(database, {
+      originClientInstanceId: clientId,
+      projectId: project.id,
+      title: "Compare providers",
+      now: Date.parse("2026-08-22T12:01:00.000Z"),
+    });
+
+    assert.deepEqual(project.roots, []);
+    assert.equal((await database.db.select().from(projectRoots)).length, 0);
+    assert.deepEqual((await listProjects(database, clientId))[0]?.roots, []);
+    assert.equal(
+      (await listProjectSessions(database, project.id, clientId))[0]?.id,
+      session.id,
+    );
+    assert.deepEqual(
+      (await database.db.select().from(localChanges)).map(
+        (change) => change.kind,
+      ),
+      ["project.upsert", "session.upsert"],
+    );
+  });
+});
+
+test("adds and removes local project source folders without sync changes", async () => {
+  await withDatabase(async (database) => {
+    const project = await createProject(database, {
+      originClientInstanceId: clientId,
+      name: "Sources",
+      rootPaths: ["/workspace/primary"],
+    });
+    const added = await addProjectRoot(database, {
+      projectId: project.id,
+      clientInstanceId: clientId,
+      rootPath: "/workspace/secondary",
+    });
+
+    assert.deepEqual(
+      (await listProjects(database, clientId))[0]?.roots.map(
+        (root) => root.rootPath,
+      ),
+      ["/workspace/primary", "/workspace/secondary"],
+    );
+    await removeProjectRoot(database, {
+      projectId: project.id,
+      clientInstanceId: clientId,
+      rootId: added.id,
+    });
+    assert.deepEqual(
+      (await listProjects(database, clientId))[0]?.roots.map(
+        (root) => root.rootPath,
+      ),
+      ["/workspace/primary"],
+    );
+    assert.equal((await database.db.select().from(localChanges)).length, 1);
+  });
+});
+
 test("renames a project with a typed revision and keeps its root local", async () => {
   await withDatabase(async (database) => {
     const project = await createProject(database, {
       originClientInstanceId: clientId,
       name: "Before",
-      rootPath: "/workspace/rename-test",
+      rootPaths: ["/workspace/rename-test"],
       now: Date.parse("2026-08-22T12:00:00.000Z"),
     });
 
@@ -505,6 +703,39 @@ test("renames a project with a typed revision and keeps its root local", async (
   });
 });
 
+test("renames a local session with a typed revision and sync change", async () => {
+  await withDatabase(async (database) => {
+    const session = await createSession(database, {
+      originClientInstanceId: clientId,
+      title: "Before",
+      now: Date.parse("2026-08-22T12:00:00.000Z"),
+    });
+
+    const renamed = await updateSessionTitle(database, {
+      sessionId: session.id,
+      originClientInstanceId: clientId,
+      title: "After",
+      now: Date.parse("2026-08-22T12:01:00.000Z"),
+    });
+
+    assert.equal(renamed.title, "After");
+    assert.equal(renamed.revision, 2);
+    assert.equal(await getSessionRevision(database, session.id), 2);
+    const [stored] = await database.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.id, session.id));
+    assert.equal(stored?.title, "After");
+    assert.equal(stored?.revision, 2);
+    const changes = await database.db.select().from(localChanges);
+    assert.equal(changes.length, 2);
+    assert.equal(
+      changes.some((change) => change.payloadJson.includes('"title":"After"')),
+      true,
+    );
+  });
+});
+
 test("lists only non-project sessions in recents with local pin state", async () => {
   await withDatabase(async (database) => {
     const recent = await createSession(database, {
@@ -515,7 +746,7 @@ test("lists only non-project sessions in recents with local pin state", async ()
     const project = await createProject(database, {
       originClientInstanceId: clientId,
       name: "Project",
-      rootPath: "/workspace/recents-test",
+      rootPaths: ["/workspace/recents-test"],
       now: Date.parse("2026-08-22T12:01:00.000Z"),
     });
     await createSession(database, {
@@ -551,7 +782,7 @@ test("pins sessions locally without creating a sync change", async () => {
     const project = await createProject(database, {
       originClientInstanceId: clientId,
       name: "Pinned work",
-      rootPath: "/workspace/pinned-work",
+      rootPaths: ["/workspace/pinned-work"],
       now: Date.parse("2026-08-22T16:00:00.000Z"),
     });
     const session = await createSession(database, {
@@ -645,13 +876,13 @@ test("rejects duplicate project roots without leaving partial records", async ()
     await createProject(database, {
       originClientInstanceId: clientId,
       name: "First",
-      rootPath: "/workspace/shared",
+      rootPaths: ["/workspace/shared"],
     });
     await assert.rejects(
       createProject(database, {
         originClientInstanceId: clientId,
         name: "Duplicate",
-        rootPath: "/workspace/shared",
+        rootPaths: ["/workspace/shared"],
       }),
     );
     assert.equal((await database.db.select().from(projects)).length, 1);

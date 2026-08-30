@@ -17,10 +17,12 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
+    "ws": "8.21.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "22.19.1",
+    "@types/ws": "8.18.1",
     "tsx": "4.23.12",
     "typescript": "5.9.3"
   }

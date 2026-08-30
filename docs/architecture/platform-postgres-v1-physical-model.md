@@ -106,9 +106,10 @@ Installation queries select the latest append-only observation directly.
 
 ## Approval and activation record
 
-Alexey approved replacing the pre-public project/release schema rather than
-maintaining compatibility aliases, adding physical-device management and the
-four installation/observation subjects, and resetting disposable Platform data.
+Maintainer approval covered replacing the pre-public project/release schema
+rather than maintaining compatibility aliases, adding physical-device
+management and the four installation/observation subjects, and resetting
+disposable Platform data.
 The approval did not authorize publication, production rollout, private Cloud
 schema changes, groups, assignments, or additional views.
 

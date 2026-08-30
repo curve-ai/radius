@@ -16,3 +16,7 @@ export {
 } from "./client.js";
 export * as platformSchema from "./schema/index.js";
 export { migratePlatformDatabase } from "./migrations.js";
+export {
+  provisionPlatformOrganization,
+  stableUuid as stablePlatformProvisioningUuid,
+} from "./provisioning.js";

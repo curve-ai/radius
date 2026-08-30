@@ -114,13 +114,13 @@ const ACCESS_OPTIONS: readonly {
   {
     mode: "ask",
     label: "Ask for approval",
-    description: "Ask before editing files or using the internet",
+    description: "Ask before commands or file changes",
     icon: Hand,
   },
   {
     mode: "full",
-    label: "Full access",
-    description: "Allow access to the internet and files on this computer",
+    label: "Project access",
+    description: "Use project folders and ask before accessing anything else",
     icon: ShieldAlert,
   },
 ];

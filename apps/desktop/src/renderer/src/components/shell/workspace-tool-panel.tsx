@@ -88,7 +88,11 @@ function WorkspaceToolPanelContents({
   );
 }
 
-export function WorkspaceToolPanel(): ReactNode {
+export function WorkspaceToolPanel({
+  overlay = false,
+}: {
+  overlay?: boolean;
+}): ReactNode {
   const { activeView, navigate } = useWorkspaceNavigation();
 
   return (
@@ -97,7 +101,8 @@ export function WorkspaceToolPanel(): ReactNode {
       aria-label="Workspace tools"
       surface="desktop"
       sharedLayoutId={WORKSPACE_TOOL_PANEL_LAYOUT_ID}
-      className="!top-12"
+      className={cn("!top-0", overlay && "pointer-events-none")}
+      panelClassName={overlay ? "pointer-events-auto" : undefined}
     >
       <WorkspaceToolPanelContents
         activeView={activeView}

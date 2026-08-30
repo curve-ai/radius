@@ -263,7 +263,9 @@ function cookie(
 
 function validateOidcUrl(value: string, allowInsecureLoopback = false): URL {
   const url = new URL(value);
-  const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  const loopback =
+    ["localhost", "127.0.0.1", "::1"].includes(url.hostname) ||
+    url.hostname.endsWith(".localhost");
   if (
     url.protocol !== "https:" &&
     !(url.protocol === "http:" && loopback && allowInsecureLoopback)

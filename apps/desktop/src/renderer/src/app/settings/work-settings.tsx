@@ -61,8 +61,8 @@ export function PermissionSettings(): ReactNode {
         description="Choose how new tasks may use files and the internet."
       >
         <UnavailableSetting
-          label="Full access"
-          reason="Default access persistence and runtime enforcement are not wired yet"
+          label="Project access"
+          reason="Default access persistence is not wired yet"
         />
       </SettingsRow>
       <SettingsRow
@@ -71,7 +71,7 @@ export function PermissionSettings(): ReactNode {
       >
         <UnavailableSetting
           label="Project folders"
-          reason="Project access policy is not wired yet"
+          reason="Folder access is managed from each project"
         />
       </SettingsRow>
       <SettingsRow

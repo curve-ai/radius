@@ -6,17 +6,14 @@ import {
   Copy,
   FileTerminal,
   MessageSquareText,
+  ShieldCheck,
+  ShieldX,
   Wrench,
 } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { SessionTranscriptEvent } from "../../../../radius-api";
+import { ActivityIndicator } from "@renderer/components/ui/activity-indicator";
 import { Button } from "@renderer/components/ui/button";
 import {
   AnimatePresence,
@@ -29,6 +26,9 @@ import {
   TooltipTrigger,
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/utils";
+import { useCopyFeedback } from "./copy-feedback";
+import { MessageMarkdown } from "./message-markdown";
+import { TerminalApproval } from "./terminal-approval";
 import {
   buildSessionTranscriptBlocks,
   isTerminalRunState,
@@ -50,7 +50,13 @@ type RunPresentationEvent = Extract<
 type TraceRowEvent = Extract<
   SessionTranscriptEvent,
   {
-    eventType: "reasoning_summary" | "message" | "tool_call" | "error";
+    eventType:
+      | "reasoning_summary"
+      | "message"
+      | "tool_call"
+      | "approval_request"
+      | "approval_decision"
+      | "error";
   }
 >;
 type ToolOutcome = Extract<
@@ -80,52 +86,46 @@ function useElapsed(startedAt: string, active: boolean): string {
   return formatElapsed(now - Date.parse(startedAt));
 }
 
-function ThinkingGrid(): ReactNode {
-  return (
-    <span
-      aria-hidden="true"
-      className="grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px]"
-    >
-      {Array.from({ length: 9 }, (_, index) => {
-        const row = Math.floor(index / 3);
-        const column = index % 3;
-        const delay = (column + Math.abs(row - 1)) * 90;
-        return (
-          <span
-            key={index}
-            className="radius-thinking-pixel size-1 rounded-[1px] bg-foreground"
-            style={{ "--thinking-delay": `${delay}ms` } as CSSProperties}
-          />
-        );
-      })}
-    </span>
-  );
+function RunDurationText({
+  active,
+  endedAt,
+  startedAt,
+}: {
+  active: boolean;
+  endedAt: string | null;
+  startedAt: string;
+}): ReactNode {
+  const liveDuration = useElapsed(startedAt, active);
+  return active
+    ? liveDuration
+    : formatElapsed(Date.parse(endedAt ?? startedAt) - Date.parse(startedAt));
 }
 
 function Message({
   event,
   completedPlan,
+  reduceMotion,
 }: {
   event: MessageEvent;
   completedPlan?: SessionPlan;
+  reduceMotion: boolean;
 }): ReactNode {
-  const [copied, setCopied] = useState(false);
-  const reduceMotion = useReducedMotion();
+  const { copied, copyText } = useCopyFeedback();
   const user = event.role === "user";
   const system =
     event.role === "system" || event.messageKind === "system_notice";
-  const copyIconTransform = reduceMotion === true ? "scale(1)" : "scale(0.96)";
+  const streaming = event.status === "streaming";
+  const copyIconTransform = reduceMotion ? "scale(1)" : "scale(0.96)";
 
   const copyMarkdown = async (): Promise<void> => {
-    await navigator.clipboard.writeText(event.text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1_500);
+    await copyText(event.text);
   };
 
   if (!event.text) return null;
 
   return (
     <article
+      data-session-event-id={event.eventId}
       aria-label={
         system ? "System message" : user ? "Your message" : "Assistant message"
       }
@@ -133,15 +133,19 @@ function Message({
     >
       <div
         className={cn(
-          "min-w-0 whitespace-pre-wrap text-sm leading-6 text-foreground",
-          user && "max-w-[88%] rounded-md bg-muted px-3 py-2.5",
+          "min-w-0 text-sm leading-6 text-foreground",
+          user && "max-w-[88%] rounded-lg bg-muted px-3 py-2.5",
           system &&
             "w-full rounded-md border border-border bg-card px-3 py-2.5 text-muted-foreground",
           !user && !system && "w-full",
         )}
       >
-        {event.text}
-        {!user && !system ? (
+        <MessageMarkdown
+          markdown={event.text}
+          fullWidthTables={!user && !system}
+          streaming={streaming}
+        />
+        {!user && !system && !streaming ? (
           <div className="pointer-events-none mt-2 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">
             <Tooltip disableHoverableContent>
               <TooltipTrigger asChild>
@@ -163,12 +167,12 @@ function Message({
                           opacity: 0,
                           transform: copyIconTransform,
                           transition: {
-                            duration: reduceMotion === true ? 0.1 : 0.08,
+                            duration: reduceMotion ? 0.1 : 0.08,
                             ease: TRANSCRIPT_STATE_EASE,
                           },
                         }}
                         transition={{
-                          duration: reduceMotion === true ? 0.1 : 0.12,
+                          duration: reduceMotion ? 0.1 : 0.12,
                           ease: TRANSCRIPT_STATE_EASE,
                         }}
                         className="block size-3"
@@ -212,22 +216,32 @@ function runLabel(
 function TraceRow({
   event,
   outcome,
+  reduceMotion,
 }: {
   event: TraceRowEvent;
   outcome?: ToolOutcome;
+  reduceMotion: boolean;
 }): ReactNode {
   const [expanded, setExpanded] = useState(false);
-  const reduceMotion = useReducedMotion();
   const isError = event.eventType === "error";
   const isToolCall = event.eventType === "tool_call";
-  const textEnterTransform =
-    reduceMotion === true ? "translateY(0px)" : "translateY(2px)";
-  const textExitTransform =
-    reduceMotion === true ? "translateY(0px)" : "translateY(-2px)";
+  const textEnterTransform = reduceMotion
+    ? "translateY(0px)"
+    : "translateY(2px)";
+  const textExitTransform = reduceMotion
+    ? "translateY(0px)"
+    : "translateY(-2px)";
 
   const icon =
     event.eventType === "reasoning_summary" ? (
       <Brain className="size-3.5 shrink-0" aria-hidden />
+    ) : event.eventType === "approval_request" ? (
+      <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+    ) : event.eventType === "approval_decision" &&
+      event.decision !== "approved" ? (
+      <ShieldX className="size-3.5 shrink-0" aria-hidden />
+    ) : event.eventType === "approval_decision" ? (
+      <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
     ) : event.eventType === "message" ? (
       <MessageSquareText className="size-3.5 shrink-0" aria-hidden />
     ) : isError ? (
@@ -247,6 +261,18 @@ function TraceRow({
     </>
   ) : event.eventType === "reasoning_summary" ? (
     event.summaryText
+  ) : event.eventType === "approval_request" ? (
+    event.reason
+  ) : event.eventType === "approval_decision" ? (
+    event.decision === "approved" ? (
+      "Command approved"
+    ) : event.decision === "denied" ? (
+      "Command denied"
+    ) : event.decision === "expired" ? (
+      "Command approval expired"
+    ) : (
+      "Command approval cancelled"
+    )
   ) : event.eventType === "message" ? (
     event.text
   ) : (
@@ -255,7 +281,7 @@ function TraceRow({
 
   return (
     <motion.div
-      layout={reduceMotion === true ? false : true}
+      layout={!reduceMotion}
       layoutDependency={expanded}
       transition={{
         layout: {
@@ -276,14 +302,14 @@ function TraceRow({
         )}
       >
         <motion.span
-          layout={reduceMotion === true ? false : "position"}
+          layout={reduceMotion ? false : "position"}
           layoutDependency={expanded}
           className={cn("shrink-0", expanded && "mt-0.5")}
         >
           {icon}
         </motion.span>
         <motion.span
-          layout={reduceMotion === true ? false : "position"}
+          layout={reduceMotion ? false : "position"}
           layoutDependency={expanded}
           className="relative min-w-0 flex-1"
         >
@@ -301,7 +327,7 @@ function TraceRow({
                 },
               }}
               transition={{
-                duration: reduceMotion === true ? 0.1 : 0.16,
+                duration: reduceMotion ? 0.1 : 0.16,
                 ease: TRANSCRIPT_STATE_EASE,
               }}
               className={cn(
@@ -315,7 +341,7 @@ function TraceRow({
         </motion.span>
         {outcome ? (
           <motion.span
-            layout={reduceMotion === true ? false : "position"}
+            layout={reduceMotion ? false : "position"}
             layoutDependency={expanded}
             className={cn(
               "ml-auto shrink-0 text-[0.6875rem]",
@@ -327,7 +353,7 @@ function TraceRow({
           </motion.span>
         ) : null}
         <motion.span
-          layout={reduceMotion === true ? false : "position"}
+          layout={reduceMotion ? false : "position"}
           layoutDependency={expanded}
           className={cn("shrink-0", expanded && "mt-0.5")}
         >
@@ -346,8 +372,15 @@ function TraceRow({
 
 function RunTrace({
   block,
+  onResolveTerminalApproval,
+  reduceMotion,
 }: {
   block: Extract<SessionTranscriptBlock, { kind: "run" }>;
+  onResolveTerminalApproval(
+    approvalRequestEventId: string,
+    decision: "approved" | "denied",
+  ): Promise<void>;
+  reduceMotion: boolean;
 }): ReactNode {
   const startedAt =
     block.events.find((event) => event.eventType === "agent_run")?.occurredAt ??
@@ -367,13 +400,7 @@ function RunTrace({
     )
     .at(-1);
   const endedAt = latestState && !working ? latestState.occurredAt : null;
-  const settledDuration = formatElapsed(
-    Date.parse(endedAt ?? startedAt) - Date.parse(startedAt),
-  );
-  const liveDuration = useElapsed(startedAt, working);
-  const duration = working ? liveDuration : settledDuration;
   const [expanded, setExpanded] = useState(false);
-  const reduceMotion = useReducedMotion();
   const resultByToolCall = useMemo(
     () =>
       new Map(
@@ -390,29 +417,90 @@ function RunTrace({
       ),
     [block.events],
   );
+  const toolCalls = useMemo(
+    () =>
+      new Map(
+        block.events
+          .filter(
+            (
+              event,
+            ): event is Extract<
+              SessionTranscriptEvent,
+              { eventType: "tool_call" }
+            > => event.eventType === "tool_call",
+          )
+          .map((event) => [event.eventId, event]),
+      ),
+    [block.events],
+  );
+  const decidedApprovalIds = useMemo(
+    () =>
+      new Set(
+        block.events.flatMap((event) =>
+          event.eventType === "approval_decision"
+            ? [event.approvalRequestEventId]
+            : [],
+        ),
+      ),
+    [block.events],
+  );
+  const pendingApprovals = block.events.filter(
+    (
+      event,
+    ): event is Extract<
+      SessionTranscriptEvent,
+      { eventType: "approval_request" }
+    > =>
+      event.eventType === "approval_request" &&
+      !decidedApprovalIds.has(event.eventId) &&
+      toolCalls.has(event.toolCallEventId),
+  );
   const rows = block.events.filter(
     (event): event is TraceRowEvent =>
       event.eventType === "reasoning_summary" ||
       (event.eventType === "message" && event.messageKind === "progress") ||
       event.eventType === "tool_call" ||
+      event.eventType === "approval_request" ||
+      event.eventType === "approval_decision" ||
       event.eventType === "error",
   );
   const canExpand = rows.length > 0;
   const label = runLabel(state, presentation);
   const completed = state === "completed";
-  const stateKey = state;
-  const stateEnterTransform =
-    reduceMotion === true ? "translateY(0px)" : "translateY(2px)";
-  const stateExitTransform =
-    reduceMotion === true ? "translateY(0px)" : "translateY(-2px)";
-  const indicatorEnterTransform =
-    reduceMotion === true
-      ? "translateY(0px) scale(1)"
-      : "translateY(2px) scale(1)";
-  const indicatorExitTransform =
-    reduceMotion === true
-      ? "translateY(0px) scale(1)"
-      : "translateY(0px) scale(0.96)";
+  const stateEnterTransform = reduceMotion
+    ? "translateY(0px)"
+    : "translateY(2px)";
+  const stateExitTransform = reduceMotion
+    ? "translateY(0px)"
+    : "translateY(-2px)";
+  const indicatorEnterTransform = reduceMotion
+    ? "translateY(0px) scale(1)"
+    : "translateY(2px) scale(1)";
+  const indicatorExitTransform = reduceMotion
+    ? "translateY(0px) scale(1)"
+    : "translateY(0px) scale(0.96)";
+  const stateTextMotionProps = {
+    layout: reduceMotion ? false : ("position" as const),
+    layoutDependency: state,
+    initial: { opacity: 0, transform: stateEnterTransform },
+    animate: { opacity: 1, transform: "translateY(0px)" },
+    exit: {
+      opacity: 0,
+      transform: stateExitTransform,
+      transition: {
+        duration: 0.1,
+        ease: TRANSCRIPT_STATE_EASE,
+      },
+    },
+    transition: {
+      duration: reduceMotion ? 0.1 : 0.16,
+      ease: TRANSCRIPT_STATE_EASE,
+      layout: {
+        duration: 0.16,
+        ease: TRANSCRIPT_STATE_EASE,
+      },
+    },
+  };
 
   const header = (
     <>
@@ -434,13 +522,13 @@ function RunTrace({
               },
             }}
             transition={{
-              duration: reduceMotion === true ? 0.1 : 0.16,
+              duration: reduceMotion ? 0.1 : 0.16,
               ease: TRANSCRIPT_STATE_EASE,
             }}
             className="shrink-0"
           >
             {working ? (
-              <ThinkingGrid />
+              <ActivityIndicator />
             ) : (
               <CircleAlert className="size-3.5 text-negative" aria-hidden />
             )}
@@ -449,28 +537,9 @@ function RunTrace({
       </AnimatePresence>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
-          key={`label-${stateKey}`}
+          key={`label-${state}`}
+          {...stateTextMotionProps}
           role={working ? "status" : undefined}
-          layout={reduceMotion === true ? false : "position"}
-          layoutDependency={stateKey}
-          initial={{ opacity: 0, transform: stateEnterTransform }}
-          animate={{ opacity: 1, transform: "translateY(0px)" }}
-          exit={{
-            opacity: 0,
-            transform: stateExitTransform,
-            transition: {
-              duration: 0.1,
-              ease: TRANSCRIPT_STATE_EASE,
-            },
-          }}
-          transition={{
-            duration: reduceMotion === true ? 0.1 : 0.16,
-            ease: TRANSCRIPT_STATE_EASE,
-            layout: {
-              duration: 0.16,
-              ease: TRANSCRIPT_STATE_EASE,
-            },
-          }}
           className={cn(
             "text-sm font-normal",
             working ? "radius-thinking-label" : "text-muted-foreground",
@@ -481,30 +550,16 @@ function RunTrace({
       </AnimatePresence>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
-          key={`duration-${stateKey}`}
-          layout={reduceMotion === true ? false : "position"}
-          layoutDependency={stateKey}
-          initial={{ opacity: 0, transform: stateEnterTransform }}
-          animate={{ opacity: 1, transform: "translateY(0px)" }}
-          exit={{
-            opacity: 0,
-            transform: stateExitTransform,
-            transition: {
-              duration: 0.1,
-              ease: TRANSCRIPT_STATE_EASE,
-            },
-          }}
-          transition={{
-            duration: reduceMotion === true ? 0.1 : 0.16,
-            ease: TRANSCRIPT_STATE_EASE,
-            layout: {
-              duration: 0.16,
-              ease: TRANSCRIPT_STATE_EASE,
-            },
-          }}
+          key={`duration-${state}`}
+          {...stateTextMotionProps}
           className="text-sm font-normal tabular-nums text-muted-foreground"
         >
-          {completed ? `Worked for ${duration}` : duration}
+          {completed ? "Worked for " : null}
+          <RunDurationText
+            active={working}
+            endedAt={endedAt}
+            startedAt={startedAt}
+          />
         </motion.span>
       </AnimatePresence>
       {canExpand ? (
@@ -547,6 +602,20 @@ function RunTrace({
         </div>
       )}
 
+      {pendingApprovals.map((request) => {
+        const toolCall = toolCalls.get(request.toolCallEventId);
+        return toolCall ? (
+          <TerminalApproval
+            key={request.eventId}
+            request={request}
+            toolCall={toolCall}
+            onResolve={(decision) =>
+              onResolveTerminalApproval(request.eventId, decision)
+            }
+          />
+        ) : null;
+      })}
+
       {canExpand ? (
         <div
           aria-hidden={!expanded}
@@ -566,6 +635,7 @@ function RunTrace({
                       key={event.eventId}
                       event={event}
                       outcome={resultByToolCall.get(event.eventId)}
+                      reduceMotion={reduceMotion}
                     />
                   );
                 })}
@@ -578,13 +648,19 @@ function RunTrace({
   );
 }
 
-export function SessionThread({
+export const SessionThread = memo(function SessionThread({
   events,
+  onResolveTerminalApproval,
   planPresentation,
 }: {
   events: readonly SessionTranscriptEvent[];
+  onResolveTerminalApproval(
+    approvalRequestEventId: string,
+    decision: "approved" | "denied",
+  ): Promise<void>;
   planPresentation: SessionPlanPresentation;
 }): ReactNode {
+  const reduceMotion = useReducedMotion() === true;
   const blocks = useMemo(() => buildSessionTranscriptBlocks(events), [events]);
 
   return (
@@ -597,11 +673,17 @@ export function SessionThread({
             completedPlan={planPresentation.completedPlanByMessageEventId.get(
               block.event.eventId,
             )}
+            reduceMotion={reduceMotion}
           />
         ) : (
-          <RunTrace key={block.runId} block={block} />
+          <RunTrace
+            key={block.runId}
+            block={block}
+            onResolveTerminalApproval={onResolveTerminalApproval}
+            reduceMotion={reduceMotion}
+          />
         ),
       )}
     </div>
   );
-}
+});

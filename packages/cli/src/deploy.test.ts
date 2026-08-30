@@ -76,19 +76,27 @@ test("prepares, uploads, and finalizes one exact remote deployment", async () =>
   const output: string[] = [];
   await deployAgent({
     root,
-    dryRun: false,
     environment: "staging",
     organization: "dev",
     platformClient: client,
-    buildOci: async ({ config }) => ({
+    build: {
       buildDigest: "a".repeat(64),
       imageReference: "radius.local/dev/remote-agent:test",
       imageDigest: `sha256:${"b".repeat(64)}`,
       layoutPath: join(root, "layout"),
       contextPath: join(root, "context"),
-      manifest: createAgentManifest(config),
+      manifest: createAgentManifest({
+        schemaVersion: 1,
+        agent: "agent_example1",
+        name: "Remote agent",
+        runtime: {
+          kind: "typescript",
+          entrypoint: "radius/agent.ts",
+          node: "22",
+        },
+      }),
       bundleSha256: "c".repeat(64),
-    }),
+    },
     pushOci: async () => `sha256:${"d".repeat(64)}`,
     io: { out: (message) => output.push(message), error: () => undefined },
   });

@@ -7,6 +7,8 @@ import {
   type AgentConnection,
   type AgentContext,
   type ContentBlock,
+  type EnvVariable,
+  type TerminalExitStatus,
   type StopReason,
   type Stream,
 } from "@agentclientprotocol/sdk";
@@ -19,7 +21,32 @@ export interface RadiusAgentRunContext {
   readonly prompt: readonly ContentBlock[];
   readonly text: string;
   readonly signal: AbortSignal;
+  readonly files: {
+    readTextFile(input: {
+      path: string;
+      line?: number | null;
+      limit?: number | null;
+    }): Promise<string>;
+    writeTextFile(input: { path: string; content: string }): Promise<void>;
+  };
+  readonly terminal: {
+    execute(input: RadiusTerminalExecuteInput): Promise<RadiusTerminalResult>;
+  };
   sendText(text: string): Promise<void>;
+}
+
+export interface RadiusTerminalExecuteInput {
+  command: string;
+  args?: string[];
+  cwd?: string | null;
+  env?: EnvVariable[];
+  outputByteLimit?: number | null;
+}
+
+export interface RadiusTerminalResult {
+  exitStatus: TerminalExitStatus | null;
+  output: string;
+  truncated: boolean;
 }
 
 export interface RadiusAgentRunResult {
@@ -64,7 +91,11 @@ export class RadiusAgent {
         return { sessionId };
       })
       .onRequest(methods.agent.session.prompt, async (context) =>
-        this.runPrompt(context.params.sessionId, context.params.prompt, context.client),
+        this.runPrompt(
+          context.params.sessionId,
+          context.params.prompt,
+          context.client,
+        ),
       )
       .onNotification(methods.agent.session.cancel, (context) => {
         this.sessions.get(context.params.sessionId)?.activeTurn?.abort();
@@ -110,12 +141,38 @@ export class RadiusAgent {
         cwd: session.cwd,
         prompt,
         text: prompt
-          .filter((item): item is Extract<ContentBlock, { type: "text" }> =>
-            item.type === "text",
+          .filter(
+            (item): item is Extract<ContentBlock, { type: "text" }> =>
+              item.type === "text",
           )
           .map((item) => item.text)
           .join("\n"),
         signal: turn.signal,
+        files: {
+          readTextFile: async (input) => {
+            const result = await client.request(
+              methods.client.fs.readTextFile,
+              {
+                sessionId,
+                path: input.path,
+                line: input.line,
+                limit: input.limit,
+              },
+            );
+            return result.content;
+          },
+          writeTextFile: async (input) => {
+            await client.request(methods.client.fs.writeTextFile, {
+              sessionId,
+              path: input.path,
+              content: input.content,
+            });
+          },
+        },
+        terminal: {
+          execute: (input) =>
+            executeTerminal(client, sessionId, session.cwd, turn.signal, input),
+        },
         sendText,
       });
 
@@ -133,6 +190,58 @@ export class RadiusAgent {
       if (session.activeTurn === turn) session.activeTurn = null;
     }
   }
+}
+
+async function executeTerminal(
+  client: AgentContext,
+  sessionId: string,
+  defaultCwd: string,
+  signal: AbortSignal,
+  input: RadiusTerminalExecuteInput,
+): Promise<RadiusTerminalResult> {
+  if (signal.aborted) throw abortError();
+  const terminal = await client.request(methods.client.terminal.create, {
+    sessionId,
+    command: input.command,
+    args: input.args,
+    cwd: input.cwd ?? defaultCwd,
+    env: input.env,
+    outputByteLimit: input.outputByteLimit,
+  });
+  const kill = (): void => {
+    void client.request(methods.client.terminal.kill, {
+      sessionId,
+      terminalId: terminal.terminalId,
+    });
+  };
+  signal.addEventListener("abort", kill, { once: true });
+  try {
+    await client.request(methods.client.terminal.waitForExit, {
+      sessionId,
+      terminalId: terminal.terminalId,
+    });
+    const output = await client.request(methods.client.terminal.output, {
+      sessionId,
+      terminalId: terminal.terminalId,
+    });
+    return {
+      exitStatus: output.exitStatus ?? null,
+      output: output.output,
+      truncated: output.truncated,
+    };
+  } finally {
+    signal.removeEventListener("abort", kill);
+    await client.request(methods.client.terminal.release, {
+      sessionId,
+      terminalId: terminal.terminalId,
+    });
+  }
+}
+
+function abortError(): Error {
+  const error = new Error("Radius agent turn was cancelled");
+  error.name = "AbortError";
+  return error;
 }
 
 export function defineAgent(definition: RadiusAgentDefinition): RadiusAgent {

@@ -64,8 +64,8 @@ errors
 ```
 
 Projects group zero or more sessions through nullable `sessions.project_id`.
-`project_roots` maps one project to one canonical root path on one client
-instance. Root paths are local capability configuration: they never appear in
+`project_roots` maps one project to zero or more canonical source-folder paths
+on one client instance. Root paths are local capability configuration: they never appear in
 the public project record, canonical payload, change log, or Cloud projection.
 A mirrored project therefore requires an explicit local folder link before it
 can grant filesystem access on the receiving installation.
@@ -126,7 +126,7 @@ their bytes.
 
 ## Project file changes
 
-Projects own local working roots, but absolute roots remain in local-only
+Projects may own local working roots, but absolute roots remain in local-only
 `project_roots` records and never enter the sync protocol. Agent mutations use
 normalized project-relative POSIX paths.
 
@@ -182,8 +182,9 @@ receipts make application idempotent.
 The accepted Drizzle definitions are in
 `packages/storage/src/schema.ts`. The reviewed initial forward migration is
 `packages/storage/drizzle/0000_initial_storage.sql`; durable scheduling and
-one-root projects are added by `0001_durable_scheduling.sql` and
-`0002_projects.sql`; typed agent-run/file-change additions are in
+projects are added by `0001_durable_scheduling.sql` and `0002_projects.sql`,
+then `0008_project_source_folders.sql` expands their local roots to a
+zero-to-many relationship; typed agent-run/file-change additions are in
 `0003_agent_run_file_changes.sql`, and local per-client session pins are in
 `0004_session_pins.sql`. Radius never runs
 `drizzle-kit push` against user data and never automatically applies a down

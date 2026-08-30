@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -57,6 +58,9 @@ export function ProjectProvider({
   const [error, setError] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [sessionRenameRequestId, setSessionRenameRequestId] = useState<
+    string | null
+  >(null);
   const [sessionReadAt, setSessionReadAt] = useState<Record<string, string>>(
     getInitialSessionReadAt,
   );
@@ -242,6 +246,22 @@ export function ProjectProvider({
     [projects, recents, updateSessionReadAt],
   );
 
+  const markSessionsUnread = useCallback(
+    (sessionIds: readonly string[]): void => {
+      const targetIds = new Set(sessionIds);
+      setSessionReadAt((current) => {
+        if (![...targetIds].some((sessionId) => sessionId in current)) {
+          return current;
+        }
+        const next = { ...current };
+        for (const sessionId of targetIds) delete next[sessionId];
+        localStorage.setItem(SESSION_READ_AT_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+    },
+    [],
+  );
+
   const activateSession = useCallback(
     async (sessionId: string): Promise<void> => {
       localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
@@ -258,6 +278,16 @@ export function ProjectProvider({
     setEditingProjectId(projectId);
   }, []);
 
+  const requestSessionRename = useCallback((sessionId: string): void => {
+    setSessionRenameRequestId(sessionId);
+  }, []);
+
+  const clearSessionRenameRequest = useCallback((sessionId: string): void => {
+    setSessionRenameRequestId((current) =>
+      current === sessionId ? null : current,
+    );
+  }, []);
+
   const handleProjectCreated = useCallback(
     async (project: ProjectSidebarRecord) => {
       selectProject(project.id);
@@ -266,15 +296,29 @@ export function ProjectProvider({
     [refresh, selectProject],
   );
 
-  const relinkProject = useCallback(
-    async (projectId: string): Promise<boolean> => {
+  const addProjectFolder = useCallback(
+    async (projectId: string): Promise<void> => {
       try {
-        const linked = await window.radius.relinkProject(projectId);
-        if (linked) await refresh();
-        return linked;
+        const root = await window.radius.addProjectFolder(projectId);
+        if (root) await refresh();
       } catch (cause) {
         setError(
-          projectErrorMessage(cause, "Project folder could not be linked"),
+          projectErrorMessage(cause, "Project folder could not be added"),
+        );
+        throw cause;
+      }
+    },
+    [refresh],
+  );
+
+  const removeProjectFolder = useCallback(
+    async (projectId: string, rootId: string): Promise<void> => {
+      try {
+        await window.radius.removeProjectFolder({ projectId, rootId });
+        await refresh();
+      } catch (cause) {
+        setError(
+          projectErrorMessage(cause, "Project folder could not be removed"),
         );
         throw cause;
       }
@@ -321,47 +365,66 @@ export function ProjectProvider({
     [refresh],
   );
 
+  const renameSession = useCallback(
+    async (sessionId: string, title: string): Promise<void> => {
+      try {
+        await window.radius.renameSession({ sessionId, title });
+        await refresh();
+      } catch (cause) {
+        setError(projectErrorMessage(cause, "Session could not be renamed"));
+        throw cause;
+      }
+    },
+    [refresh],
+  );
+
   const editingProject =
     projects.find((project) => project.id === editingProjectId) ?? null;
-  const activeSession = (() => {
+  const sessionsById = useMemo(() => {
+    const sessions = new Map<
+      string,
+      NonNullable<ProjectContextValue["activeSession"]>
+    >();
     for (const project of projects) {
-      const session = project.sessions.find(
-        (candidate) => candidate.id === activeSessionId,
-      );
-      if (session) return { project, session };
+      for (const session of project.sessions) {
+        sessions.set(session.id, { project, session });
+      }
     }
-    const recentSession = recents.find(
-      (candidate) => candidate.id === activeSessionId,
-    );
-    return recentSession ? { project: null, session: recentSession } : null;
-  })();
+    for (const session of recents) {
+      if (!sessions.has(session.id))
+        sessions.set(session.id, { project: null, session });
+    }
+    return sessions;
+  }, [projects, recents]);
+  const activeSession = activeSessionId
+    ? (sessionsById.get(activeSessionId) ?? null)
+    : null;
   const activeProject =
     activeSession?.project ??
     projects.find((project) => project.id === activeProjectId) ??
     null;
   const isSessionUnread = useCallback(
     (sessionId: string): boolean => {
-      const session = [
-        ...projects.flatMap((project) => project.sessions),
-        ...recents,
-      ].find((candidate) => candidate.id === sessionId);
-      return session
+      const entry = sessionsById.get(sessionId);
+      return entry
         ? hasUnreadAssistantMessage(
-            session,
+            entry.session,
             activeSession?.session.id ?? null,
             sessionReadAt,
           )
         : false;
     },
-    [activeSession?.session.id, projects, recents, sessionReadAt],
+    [activeSession?.session.id, sessionReadAt, sessionsById],
   );
   const value: ProjectContextValue = {
     activateSession,
+    addProjectFolder,
     activeProject,
     activeSession,
     archiveSession,
     clearActiveProject,
     clearActiveSession,
+    clearSessionRenameRequest,
     editProject,
     error,
     loading,
@@ -370,8 +433,12 @@ export function ProjectProvider({
     recents,
     isSessionUnread,
     markSessionsRead,
+    markSessionsUnread,
     refresh,
-    relinkProject,
+    requestSessionRename,
+    removeProjectFolder,
+    renameSession,
+    sessionRenameRequestId,
     revealProject,
     selectProject,
     selectSession,
@@ -391,10 +458,11 @@ export function ProjectProvider({
           key={editingProject.id}
           open
           project={editingProject}
+          onAddFolder={addProjectFolder}
           onOpenChange={(open) => {
             if (!open) setEditingProjectId(null);
           }}
-          onRelink={relinkProject}
+          onRemoveFolder={removeProjectFolder}
           onSaved={refresh}
         />
       )}

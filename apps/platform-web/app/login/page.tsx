@@ -19,7 +19,7 @@ export default async function LoginPage({
   const providerUnavailable = query.error === "not_configured";
   const loginUrl = new URL(
     "/api/platform/v1/auth/oidc/login",
-    platformPublicApiUrl(),
+    await platformPublicApiUrl(),
   );
   loginUrl.searchParams.set("return_to", returnTo);
 

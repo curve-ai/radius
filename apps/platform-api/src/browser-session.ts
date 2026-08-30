@@ -6,6 +6,7 @@ import {
   type PlatformPoolClient,
 } from "@curve-ai/platform-database";
 import type { PlatformIdentityResponse } from "@curve-ai/platform-contracts";
+import { PlatformOrganizationSlugSchema } from "@curve-ai/platform-contracts";
 
 import type { OidcIdentityClaims } from "./oidc.js";
 
@@ -15,6 +16,7 @@ export interface OidcProvisioningPolicy {
   allowedEmails: ReadonlySet<string>;
   allowedEmailDomains: ReadonlySet<string>;
   bootstrapAccountId?: string;
+  allowUnprovisionedIdentities: boolean;
   sessionTtlSeconds: number;
 }
 
@@ -37,10 +39,11 @@ export function normalizeOidcProvisioningPolicy(options: {
   allowedEmails?: readonly string[];
   allowedEmailDomains?: readonly string[];
   bootstrapAccountId?: string;
+  allowUnprovisionedIdentities?: boolean;
   sessionTtlSeconds?: number;
 }): OidcProvisioningPolicy {
   const organizationSlug = options.organizationSlug.trim().toLowerCase();
-  if (!/^[a-z][a-z0-9-]{0,62}$/.test(organizationSlug)) {
+  if (!PlatformOrganizationSlugSchema.safeParse(organizationSlug).success) {
     throw new Error("OIDC organization slug is invalid");
   }
   const role = options.role ?? "viewer";
@@ -61,7 +64,13 @@ export function normalizeOidcProvisioningPolicy(options: {
       .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
       .filter(Boolean),
   );
-  if (allowedEmails.size === 0 && allowedEmailDomains.size === 0) {
+  const allowUnprovisionedIdentities =
+    options.allowUnprovisionedIdentities !== false;
+  if (
+    allowUnprovisionedIdentities &&
+    allowedEmails.size === 0 &&
+    allowedEmailDomains.size === 0
+  ) {
     throw new Error("OIDC provisioning requires an email or domain allowlist");
   }
   for (const email of allowedEmails) {
@@ -97,6 +106,7 @@ export function normalizeOidcProvisioningPolicy(options: {
     allowedEmails,
     allowedEmailDomains,
     bootstrapAccountId: options.bootstrapAccountId,
+    allowUnprovisionedIdentities,
     sessionTtlSeconds,
   };
 }
@@ -358,6 +368,9 @@ function assertClaimsAllowed(
   claims: OidcIdentityClaims,
   policy: OidcProvisioningPolicy,
 ): void {
+  if (!policy.allowUnprovisionedIdentities) {
+    throw new Error("OIDC identity must be provisioned before sign-in");
+  }
   if (!claims.email || !claims.emailVerified) {
     throw new Error("OIDC provisioning requires a verified email claim");
   }

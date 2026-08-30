@@ -1,4 +1,3 @@
-import { Folder } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "@renderer/components/ui/button";
@@ -14,23 +13,27 @@ import { InlineFeedbackTransition } from "@renderer/components/ui/inline-feedbac
 import type { ProjectSidebarRecord } from "./project-context-value";
 import { projectErrorMessage } from "./project-errors";
 import { ProjectNameField } from "./project-name-field";
+import { ProjectSourceFoldersField } from "./project-source-folders-field";
 
 export function EditProjectDialog({
   open,
   project,
+  onAddFolder,
   onOpenChange,
-  onRelink,
+  onRemoveFolder,
   onSaved,
 }: {
   open: boolean;
   project: ProjectSidebarRecord;
+  onAddFolder: (projectId: string) => Promise<void>;
   onOpenChange: (open: boolean) => void;
-  onRelink: (projectId: string) => Promise<boolean>;
+  onRemoveFolder: (projectId: string, rootId: string) => Promise<void>;
   onSaved: () => Promise<void>;
 }): ReactNode {
   const [name, setName] = useState(project.name);
   const [saving, setSaving] = useState(false);
-  const [relinking, setRelinking] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -54,21 +57,35 @@ export function EditProjectDialog({
     }
   };
 
-  const relink = async (): Promise<void> => {
-    setRelinking(true);
+  const addFolder = async (): Promise<void> => {
+    setAdding(true);
     setError(null);
     try {
-      await onRelink(project.id);
+      await onAddFolder(project.id);
     } catch (cause) {
       setError(
         projectErrorMessage(cause, "Project folder could not be linked"),
       );
     } finally {
-      setRelinking(false);
+      setAdding(false);
     }
   };
 
-  const busy = saving || relinking;
+  const removeFolder = async (rootId: string): Promise<void> => {
+    setRemovingId(rootId);
+    setError(null);
+    try {
+      await onRemoveFolder(project.id, rootId);
+    } catch (cause) {
+      setError(
+        projectErrorMessage(cause, "Project folder could not be removed"),
+      );
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const busy = saving || adding || removingId !== null;
 
   return (
     <Dialog
@@ -89,7 +106,7 @@ export function EditProjectDialog({
               id="edit-project-description"
               className="sr-only"
             >
-              Rename the project or change its local root folder.
+              Rename the project or manage its local source folders.
             </DialogDescription>
           </DialogHeader>
 
@@ -101,30 +118,14 @@ export function EditProjectDialog({
               onChange={(event) => setName(event.target.value)}
             />
 
-            <div className="space-y-2">
-              <p className="text-sm text-foreground">Project folder</p>
-              <div className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-foreground/[0.015] p-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
-                  <Folder className="size-4" aria-hidden />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  {project.rootPath ?? "No local folder linked"}
-                </span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="xs"
-                  disabled={busy}
-                  onClick={() => void relink()}
-                >
-                  {relinking
-                    ? "Opening…"
-                    : project.rootPath
-                      ? "Change folder"
-                      : "Link folder"}
-                </Button>
-              </div>
-            </div>
+            <ProjectSourceFoldersField
+              adding={adding}
+              disabled={busy}
+              folders={project.roots}
+              removingId={removingId}
+              onAdd={() => void addFolder()}
+              onRemove={(folder) => void removeFolder(folder.id)}
+            />
 
             <InlineFeedbackTransition>
               {error ? (

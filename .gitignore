@@ -8,6 +8,7 @@ out/
 dist/
 .vite/
 .next/
+.next-managed/
 .eslintcache
 coverage/
 *.log

@@ -281,7 +281,7 @@ operator tenant model must move together to the agent/deployment vocabulary.
 
 ## Approval record
 
-Alexey approved:
+Maintainer approval covered:
 
 1. renaming the six Platform subjects above;
 2. adding exactly `physical_devices`, `client_installations`,

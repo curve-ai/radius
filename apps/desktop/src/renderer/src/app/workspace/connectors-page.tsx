@@ -19,6 +19,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { ActivityIndicator } from "@renderer/components/ui/activity-indicator";
 import { Button } from "@renderer/components/ui/button";
 import {
   Dialog,
@@ -41,31 +42,16 @@ import { Skeleton } from "@renderer/components/ui/skeleton";
 import { cn } from "@renderer/lib/utils";
 import type {
   DesktopConnector,
+  DesktopConnectorCatalogCategory,
+  DesktopConnectorCatalogCategoryPreview,
   DesktopConnectorCatalogEntry,
   DesktopConnectorEnabledTool,
 } from "../../../../radius-api";
 
-type CatalogCategory = DesktopConnectorCatalogEntry["category"];
 type ConnectorViewDirection = "back" | "forward";
 type ConnectorViewMotionContext = {
   direction: ConnectorViewDirection;
   reduceMotion: boolean;
-};
-
-type CatalogSection = {
-  category: CatalogCategory;
-  entries: DesktopConnectorCatalogEntry[];
-  key: string;
-  label: string;
-};
-
-const CATEGORY_LABELS: Record<CatalogCategory, string> = {
-  productivity: "Productivity",
-  developer_tools: "Developer tools",
-  data: "Data",
-  finance: "Finance",
-  communication: "Communication",
-  other: "More connectors",
 };
 
 const CONNECTOR_VIEW_EASE = [0.23, 1, 0.32, 1] as const;
@@ -265,6 +251,7 @@ function installStatus(connector: DesktopConnector | null): string {
 function ConnectorDetailView({
   backLabel,
   entry,
+  categoryLabels,
   installed,
   tools,
   toolsLoading,
@@ -274,6 +261,7 @@ function ConnectorDetailView({
 }: {
   backLabel: string;
   entry: DesktopConnectorCatalogEntry;
+  categoryLabels: string[];
   installed: DesktopConnector | null;
   tools: DesktopConnectorEnabledTool[];
   toolsLoading: boolean;
@@ -412,6 +400,14 @@ function ConnectorDetailView({
             <dt className="text-xs text-muted-foreground">Transport</dt>
             <dd className="mt-1 text-sm text-foreground">Streamable HTTP</dd>
           </div>
+          {categoryLabels.length > 0 ? (
+            <div>
+              <dt className="text-xs text-muted-foreground">Categories</dt>
+              <dd className="mt-1 text-sm text-foreground">
+                {categoryLabels.join(", ")}
+              </dd>
+            </div>
+          ) : null}
           {published ? (
             <div>
               <dt className="text-xs text-muted-foreground">Published</dt>
@@ -451,12 +447,18 @@ function ConnectorDetailView({
 }
 
 export function ConnectorsPage(): ReactNode {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotion() === true;
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [addUrl, setAddUrl] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<DesktopConnectorCatalogEntry[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<
+    DesktopConnectorCatalogCategory[]
+  >([]);
+  const [categoryPreviews, setCategoryPreviews] = useState<
+    DesktopConnectorCatalogCategoryPreview[]
+  >([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<DesktopConnector[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DesktopConnector | null>(
@@ -470,8 +472,9 @@ export function ConnectorsPage(): ReactNode {
   const [catalogNextCursor, setCatalogNextCursor] = useState<string | null>(
     null,
   );
-  const [selectedCategory, setSelectedCategory] =
-    useState<CatalogCategory | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
+    null,
+  );
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(
     null,
   );
@@ -482,51 +485,64 @@ export function ConnectorsPage(): ReactNode {
     installationId: string;
     tools: DesktopConnectorEnabledTool[];
   } | null>(null);
+  const catalogSentinelRef = useRef<HTMLDivElement>(null);
   const loadRequestRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
-  const load = useCallback(
-    async (search: string, category: CatalogCategory | null): Promise<void> => {
+  const loadConnectors = useCallback(async (): Promise<void> => {
+    try {
+      setConnectors(await window.radius.listConnectors());
+      setError(null);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Connectors could not be loaded",
+      );
+    }
+  }, []);
+
+  const loadCatalog = useCallback(
+    async (search: string, categoryId: string | null): Promise<void> => {
       const requestId = ++loadRequestRef.current;
       setLoading(true);
-      const [localResult, catalogResult] = await Promise.allSettled([
-        window.radius.listConnectors(),
-        window.radius.listConnectorCatalog({
-          ...(category ? { category } : {}),
+      try {
+        const result = await window.radius.listConnectorCatalog({
+          ...(categoryId ? { category: categoryId } : {}),
           ...(search ? { search } : {}),
-        }),
-      ]);
-      if (requestId !== loadRequestRef.current) return;
-      if (localResult.status === "fulfilled") {
-        setConnectors(localResult.value);
-        setError(null);
-      } else {
-        setError(
-          localResult.reason instanceof Error
-            ? localResult.reason.message
-            : "Connectors could not be loaded",
-        );
-      }
-      if (catalogResult.status === "fulfilled") {
-        setCatalog(catalogResult.value.connectors);
-        setCatalogNextCursor(catalogResult.value.nextCursor);
+        });
+        if (requestId !== loadRequestRef.current) return;
+        setCatalog(result.connectors);
+        setCatalogCategories(result.categories);
+        setCategoryPreviews(result.categoryPreviews);
+        setCatalogNextCursor(result.nextCursor);
         setCatalogError(null);
-      } else {
+      } catch {
+        if (requestId !== loadRequestRef.current) return;
         setCatalog([]);
+        setCatalogCategories([]);
+        setCategoryPreviews([]);
         setCatalogNextCursor(null);
         setCatalogError("The public connector catalog is unavailable");
+      } finally {
+        if (requestId === loadRequestRef.current) setLoading(false);
       }
-      setLoading(false);
     },
     [],
   );
 
   useEffect(() => {
+    const timer = window.setTimeout(() => void loadConnectors(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadConnectors]);
+
+  useEffect(() => {
     const timer = window.setTimeout(
-      () => void load(query, selectedCategory),
+      () => void loadCatalog(query, selectedCategoryId),
       250,
     );
     return () => window.clearTimeout(timer);
-  }, [load, query, selectedCategory]);
+  }, [loadCatalog, query, selectedCategoryId]);
 
   const installedByCatalogId = useMemo(
     () =>
@@ -553,34 +569,28 @@ export function ConnectorsPage(): ReactNode {
       ),
     [connectors],
   );
-  const catalogSections = useMemo(() => {
-    const sections: CatalogSection[] = [];
-    const categories = new Map<
-      CatalogCategory,
-      DesktopConnectorCatalogEntry[]
-    >();
-    for (const entry of catalog) {
-      const values = categories.get(entry.category) ?? [];
-      values.push(entry);
-      categories.set(entry.category, values);
-    }
-    for (const [category, entries] of categories) {
-      sections.push({
-        category,
-        entries,
-        key: `category-${category}`,
-        label: CATEGORY_LABELS[category],
-      });
-    }
-    return sections;
-  }, [catalog]);
   const selectedEntry = useMemo(
-    () => catalog.find((entry) => entry.id === selectedCatalogId) ?? null,
-    [catalog, selectedCatalogId],
+    () =>
+      catalog.find((entry) => entry.id === selectedCatalogId) ??
+      categoryPreviews
+        .flatMap((preview) => preview.connectors)
+        .find((entry) => entry.id === selectedCatalogId) ??
+      null,
+    [catalog, categoryPreviews, selectedCatalogId],
   );
   const selectedInstalled = selectedEntry
     ? (installedByCatalogId.get(selectedEntry.sourceServerName) ?? null)
     : null;
+  const selectedCategory =
+    catalogCategories.find((category) => category.id === selectedCategoryId) ??
+    null;
+  const categoryLabelById = useMemo(
+    () =>
+      new Map(
+        catalogCategories.map((category) => [category.id, category.label]),
+      ),
+    [catalogCategories],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -609,7 +619,10 @@ export function ConnectorsPage(): ReactNode {
   }, [selectedInstalled]);
 
   const refresh = (): void => {
-    void load(query, selectedCategory);
+    void Promise.all([
+      loadConnectors(),
+      loadCatalog(query, selectedCategoryId),
+    ]);
   };
 
   const openConnector = (catalogId: string): void => {
@@ -622,13 +635,13 @@ export function ConnectorsPage(): ReactNode {
     setSelectedCatalogId(null);
   };
 
-  const openCategory = (category: CatalogCategory): void => {
+  const openCategory = (categoryId: string): void => {
     setViewDirection("forward");
     setCatalog([]);
     setCatalogNextCursor(null);
     setCatalogError(null);
     setQuery("");
-    setSelectedCategory(category);
+    setSelectedCategoryId(categoryId);
     document.getElementById("main-content")?.scrollTo({ top: 0 });
   };
 
@@ -638,17 +651,18 @@ export function ConnectorsPage(): ReactNode {
     setCatalogNextCursor(null);
     setCatalogError(null);
     setQuery("");
-    setSelectedCategory(null);
+    setSelectedCategoryId(null);
     document.getElementById("main-content")?.scrollTo({ top: 0 });
   };
 
-  const loadMore = async (): Promise<void> => {
-    if (!selectedCategory || !catalogNextCursor || loadingMore) return;
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (!catalogNextCursor || loadingMoreRef.current) return;
     const requestId = loadRequestRef.current;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const result = await window.radius.listConnectorCatalog({
-        category: selectedCategory,
+        ...(selectedCategoryId ? { category: selectedCategoryId } : {}),
         cursor: catalogNextCursor,
         ...(query ? { search: query } : {}),
       });
@@ -662,12 +676,43 @@ export function ConnectorsPage(): ReactNode {
       setCatalogError(null);
     } catch {
       if (requestId === loadRequestRef.current) {
-        setCatalogError("More connectors could not be loaded");
+        setCatalogError("Additional connectors could not be loaded");
       }
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  };
+  }, [catalogNextCursor, query, selectedCategoryId]);
+
+  useEffect(() => {
+    const sentinel = catalogSentinelRef.current;
+    if (
+      !sentinel ||
+      !catalogNextCursor ||
+      scope !== "public" ||
+      selectedCatalogId !== null ||
+      (selectedCategoryId === null && !query)
+    ) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) void loadMore();
+      },
+      { rootMargin: "1000px 0px" },
+    );
+    observer.observe(sentinel);
+
+    return () => observer.disconnect();
+  }, [
+    catalogNextCursor,
+    loadMore,
+    query,
+    scope,
+    selectedCatalogId,
+    selectedCategoryId,
+  ]);
 
   const installCustom = async (
     event: FormEvent<HTMLFormElement>,
@@ -677,7 +722,7 @@ export function ConnectorsPage(): ReactNode {
     setAddError(null);
     try {
       await window.radius.installConnector({ name: addName, url: addUrl });
-      await load(query, selectedCategory);
+      await loadConnectors();
       setAddName("");
       setAddUrl("");
       setAddOpen(false);
@@ -700,7 +745,7 @@ export function ConnectorsPage(): ReactNode {
     setPendingAction(id);
     try {
       await window.radius.installCatalogConnector(id);
-      await load(query, selectedCategory);
+      await loadConnectors();
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -718,7 +763,7 @@ export function ConnectorsPage(): ReactNode {
     try {
       await window.radius.deleteConnector(deleteTarget.id);
       setDeleteTarget(null);
-      await load(query, selectedCategory);
+      await loadConnectors();
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Connector deletion failed",
@@ -729,21 +774,19 @@ export function ConnectorsPage(): ReactNode {
   };
 
   let viewKey: string;
-  let viewDepth: 0 | 1 | 2;
   let viewContent: ReactNode;
 
   if (selectedEntry) {
     viewKey = `detail:${selectedEntry.id}`;
-    viewDepth = 2;
     viewContent = (
       <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-7 sm:px-8 sm:pt-9">
         <ConnectorDetailView
-          backLabel={
-            selectedCategory
-              ? CATEGORY_LABELS[selectedCategory]
-              : "All connectors"
-          }
+          backLabel={selectedCategory?.label ?? "All connectors"}
           entry={selectedEntry}
+          categoryLabels={selectedEntry.categoryIds.flatMap((categoryId) => {
+            const label = categoryLabelById.get(categoryId);
+            return label ? [label] : [];
+          })}
           installed={selectedInstalled}
           tools={
             selectedInstalled &&
@@ -762,9 +805,7 @@ export function ConnectorsPage(): ReactNode {
       </section>
     );
   } else if (selectedCategory) {
-    const categoryLabel = CATEGORY_LABELS[selectedCategory];
-    viewKey = `category:${selectedCategory}`;
-    viewDepth = 1;
+    viewKey = `category:${selectedCategory.id}`;
     viewContent = (
       <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-7 sm:px-8 sm:pt-9">
         <Button type="button" variant="ghost" size="sm" onClick={closeCategory}>
@@ -772,7 +813,9 @@ export function ConnectorsPage(): ReactNode {
           All connectors
         </Button>
 
-        <h2 className="mt-7 type-lg text-foreground">{categoryLabel}</h2>
+        <h2 className="mt-7 type-lg text-foreground">
+          {selectedCategory.label}
+        </h2>
         <ConnectorSearch value={query} onChange={setQuery} />
 
         {error ? (
@@ -804,13 +847,13 @@ export function ConnectorsPage(): ReactNode {
 
         {loading && catalog.length === 0 ? (
           <div className="mt-8 grid gap-3 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-            {Array.from({ length: 10 }, (_, index) => (
+            {Array.from({ length: 8 }, (_, index) => (
               <Skeleton key={index} className="h-[4.5rem] w-full" />
             ))}
           </div>
         ) : catalog.length > 0 ? (
           <>
-            <div className="mt-8 grid border-t border-border min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
+            <div className="mt-8 grid border-t border-border pt-1 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
               {catalog.map((entry) => (
                 <CatalogRow
                   key={entry.id}
@@ -825,26 +868,32 @@ export function ConnectorsPage(): ReactNode {
               ))}
             </div>
             {catalogNextCursor ? (
-              <div className="mt-7 flex justify-center">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={loadingMore}
-                  onClick={() => void loadMore()}
-                >
-                  {loadingMore ? "Loading" : "Load more"}
-                </Button>
-              </div>
+              <div
+                ref={catalogSentinelRef}
+                className="h-px"
+                aria-hidden="true"
+              />
             ) : null}
+            <div className="flex h-12 items-center justify-center">
+              {loadingMore ? (
+                <ActivityIndicator
+                  label="Loading more connectors"
+                  className="text-muted-foreground"
+                />
+              ) : null}
+            </div>
           </>
         ) : !loading && !catalogError ? (
           <div className="py-14 text-center">
             <p className="text-sm text-foreground">
-              No {categoryLabel.toLowerCase()} match this search
+              {query
+                ? "No connectors match this search"
+                : `No ${selectedCategory.label.toLowerCase()} connectors found`}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Try a product name, service, or capability.
+              {query
+                ? "Try a product name, service, or capability."
+                : "Return to all connectors and choose another category."}
             </p>
           </div>
         ) : null}
@@ -852,7 +901,6 @@ export function ConnectorsPage(): ReactNode {
     );
   } else {
     viewKey = "root";
-    viewDepth = 0;
     viewContent = (
       <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 sm:pt-12">
         <div className="flex items-start justify-between gap-6">
@@ -977,60 +1025,132 @@ export function ConnectorsPage(): ReactNode {
               </div>
             ) : null}
 
-            {catalogSections.map((section) => {
-              const sectionId = `connector-section-${section.label
-                .replace(/\s+/g, "-")
-                .toLowerCase()}`;
-              return (
-                <section
-                  key={section.key}
-                  className="mt-9"
-                  aria-labelledby={sectionId}
+            {query && catalog.length > 0 ? (
+              <section
+                className="mt-9"
+                aria-labelledby="connector-search-results-heading"
+              >
+                <h3
+                  id="connector-search-results-heading"
+                  className="type-md-sm text-foreground"
                 >
-                  <div className="flex items-center justify-between gap-4">
-                    <h3 id={sectionId} className="type-md-sm text-foreground">
-                      {section.label}
-                    </h3>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => openCategory(section.category)}
-                    >
-                      Show more
-                      <ChevronRight className="size-3.5" aria-hidden />
-                    </Button>
-                  </div>
-                  <div className="mt-3 grid border-t border-border min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-                    {section.entries.map((entry) => (
-                      <CatalogRow
-                        key={entry.id}
-                        entry={entry}
-                        installed={
-                          installedByCatalogId.get(entry.sourceServerName) ??
-                          null
-                        }
-                        pending={pendingAction !== null}
-                        onOpen={openConnector}
-                        onInstall={(id) => void installCatalogEntry(id)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
+                  Search results
+                </h3>
+                <div className="mt-3 grid border-t border-border pt-1 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
+                  {catalog.map((entry) => (
+                    <CatalogRow
+                      key={entry.id}
+                      entry={entry}
+                      installed={
+                        installedByCatalogId.get(entry.sourceServerName) ?? null
+                      }
+                      pending={pendingAction !== null}
+                      onOpen={openConnector}
+                      onInstall={(id) => void installCatalogEntry(id)}
+                    />
+                  ))}
+                </div>
+                {catalogNextCursor ? (
+                  <div
+                    ref={catalogSentinelRef}
+                    className="h-px"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <div className="flex h-12 items-center justify-center">
+                  {loadingMore ? (
+                    <ActivityIndicator
+                      label="Loading more connectors"
+                      className="text-muted-foreground"
+                    />
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
-            {!loading && !catalogError && catalogSections.length === 0 ? (
+            {!query && categoryPreviews.length > 0
+              ? categoryPreviews.map((preview) => {
+                  const category = catalogCategories.find(
+                    (value) => value.id === preview.categoryId,
+                  );
+                  if (!category || preview.connectors.length === 0) return null;
+                  const headingId = `connector-category-${category.id}`;
+                  return (
+                    <section
+                      key={category.id}
+                      className="mt-9"
+                      aria-labelledby={headingId}
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <h3
+                          id={headingId}
+                          className="type-md-sm text-foreground"
+                        >
+                          {category.label}
+                        </h3>
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => openCategory(category.id)}
+                        >
+                          See more
+                          <ChevronRight className="size-3.5" aria-hidden />
+                        </Button>
+                      </div>
+                      <div className="mt-3 grid border-t border-border pt-1 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
+                        {preview.connectors.map((entry) => (
+                          <CatalogRow
+                            key={entry.id}
+                            entry={entry}
+                            installed={
+                              installedByCatalogId.get(
+                                entry.sourceServerName,
+                              ) ?? null
+                            }
+                            pending={pendingAction !== null}
+                            onOpen={openConnector}
+                            onInstall={(id) => void installCatalogEntry(id)}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })
+              : null}
+
+            {!query && loading && categoryPreviews.length === 0 ? (
+              <div className="mt-9 grid gap-8">
+                {Array.from({ length: 3 }, (_, index) => (
+                  <div key={index}>
+                    <Skeleton className="h-6 w-40" />
+                    <Skeleton className="mt-3 h-36 w-full" />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {!loading && !catalogError && query && catalog.length === 0 ? (
               <div className="py-14 text-center">
                 <p className="text-sm text-foreground">
-                  {query
-                    ? "No connectors match this search"
-                    : "No public connectors found"}
+                  No connectors match this search
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {query
-                    ? "Try a product name, service, or capability."
-                    : "Refresh after the public catalog has been synchronized."}
+                  Try a product name, service, or capability.
+                </p>
+              </div>
+            ) : null}
+
+            {!loading &&
+            !catalogError &&
+            !query &&
+            categoryPreviews.length === 0 ? (
+              <div className="py-14 text-center">
+                <p className="text-sm text-foreground">
+                  No categorized connectors found
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Refresh after the category catalog has been synchronized.
                 </p>
               </div>
             ) : null}
@@ -1042,7 +1162,7 @@ export function ConnectorsPage(): ReactNode {
 
   const viewMotionContext: ConnectorViewMotionContext = {
     direction: viewDirection,
-    reduceMotion: reduceMotion === true,
+    reduceMotion,
   };
 
   return (
@@ -1061,10 +1181,9 @@ export function ConnectorsPage(): ReactNode {
             animate="center"
             exit="exit"
             transition={{
-              duration: reduceMotion === true ? 0.1 : 0.16,
+              duration: reduceMotion ? 0.1 : 0.16,
               ease: CONNECTOR_VIEW_EASE,
             }}
-            data-connector-view-depth={viewDepth}
             className="w-full"
           >
             {viewContent}

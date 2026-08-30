@@ -43,10 +43,18 @@ design system in `../../../../../../../DESIGN.md` also apply here.
   the inner trailing position, archive at the outer trailing position, and both
   controls hidden until hover or keyboard focus on fine-pointer desktop input.
   Preserve visible controls on coarse pointers and full keyboard access.
+  Right-clicking a session row opens the same native action menu as the active
+  session header; Rename must select the session and enter the durable title
+  editor rather than creating a second rename surface.
 - Do not render an empty status ring or repurpose runtime state as unread state.
-  The only trailing circle is a solid `--brand` unread marker derived from
-  the latest assistant message being newer than this client's last-read
-  timestamp.
+  A session with a currently executing local runtime shows a restrained
+  trailing loader; otherwise the only trailing circle is a solid `--brand`
+  unread marker derived from the latest assistant message being newer than this
+  client's last-read timestamp. Both statuses hide on row hover or keyboard
+  focus so Pin/Unpin and Archive take precedence.
+- Project session rows retain the full available interactive width. Nesting is
+  communicated by left content padding, never by shrinking or offsetting the
+  row surface.
 - Pin relocation and archive removal use Motion layout transitions with the
   shared `(0.23, 1, 0.32, 1)` curve at 180ms and 160ms respectively. Keep the
   opacity and transform exit at 120ms, and collapse layout motion under reduced
@@ -56,16 +64,22 @@ design system in `../../../../../../../DESIGN.md` also apply here.
   square-compose control always starts a new chat: project headings select that
   project first, while Recents clears project context for a standalone chat.
   Do not reuse the compose control for rename or edit.
+- An active session header owns its clickable in-place title editor and adjacent
+  action menu. Rename must persist through storage and sync revision handling,
+  not local display state. Keep Pin/Unpin, Rename, Archive, supported Copy
+  actions real. When an explicitly requested native-menu reference includes an
+  unsupported operation, keep it disabled with no handler until its behavior is
+  defined. Native menus inherit system type, spacing, material, and item sizing.
 
 ## Available verification
 
-- Run verification only when Alexey explicitly requests it. Available checks
+- Run verification only when it is explicitly requested. Available checks
   include the desktop typecheck, lint, tests, and package commands from
   `radius/`, plus the relevant sidebar surface in an actual preload-backed
   Electron window.
 - A requested appearance-specific check should use the mode relevant to the
-  change or reported issue. Run a multi-theme matrix only when Alexey asks for
-  one.
+  change or reported issue. Run a multi-theme matrix only when explicitly
+  requested.
 - For deterministic regression checks, start Electron with a remote debugging
   port and inspect computed styles. A valid workspace trace has:
   - `.radius-sidebar-material` with the translucent gradient and no backdrop

@@ -22,6 +22,16 @@ test("normalizes fail-closed OIDC provisioning policy", () => {
   );
 });
 
+test("supports shared Cloud sign-in only for pre-provisioned identities", () => {
+  const policy = normalizeOidcProvisioningPolicy({
+    organizationSlug: "acme",
+    allowUnprovisionedIdentities: false,
+  });
+  assert.equal(policy.allowUnprovisionedIdentities, false);
+  assert.equal(policy.allowedEmails.size, 0);
+  assert.equal(policy.allowedEmailDomains.size, 0);
+});
+
 test("rejects OIDC sessions for suspended and removed memberships", () => {
   assert.doesNotThrow(() => assertOidcMembershipActive("active"));
   assert.throws(() => assertOidcMembershipActive("suspended"), /not active/);

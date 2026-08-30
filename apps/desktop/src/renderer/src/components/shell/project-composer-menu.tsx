@@ -21,7 +21,6 @@ export function ProjectComposerMenu(): ReactNode {
     loading,
     openCreateProjectDialog,
     projects,
-    relinkProject,
     selectProject,
   } = useProjects();
   const projectsVisible = loading || projects.length > 0 || error;
@@ -55,13 +54,8 @@ export function ProjectComposerMenu(): ReactNode {
                   <ActionToolPanelButton
                     type="button"
                     selected={selected}
-                    className="rounded-lg px-1.5"
-                    onClick={() => {
-                      selectProject(project.id);
-                      if (!project.rootPath) {
-                        void relinkProject(project.id).catch(() => {});
-                      }
-                    }}
+                    className="px-1.5"
+                    onClick={() => selectProject(project.id)}
                   >
                     <ActionToolPanelItemIcon>
                       <Folder aria-hidden />
@@ -71,9 +65,9 @@ export function ProjectComposerMenu(): ReactNode {
                         {project.name}
                       </ActionToolPanelItemLabel>
                     </ActionToolPanelItemContent>
-                    {selected || !project.rootPath ? (
+                    {selected ? (
                       <ActionToolPanelItemMeta className="text-sm">
-                        {selected ? "Current" : "Relink"}
+                        Current
                       </ActionToolPanelItemMeta>
                     ) : null}
                   </ActionToolPanelButton>
@@ -95,7 +89,7 @@ export function ProjectComposerMenu(): ReactNode {
         <ComposerContextMenuClose>
           <ActionToolPanelButton
             type="button"
-            className="rounded-lg px-1.5"
+            className="px-1.5"
             onClick={openCreateProjectDialog}
           >
             <ActionToolPanelItemIcon>

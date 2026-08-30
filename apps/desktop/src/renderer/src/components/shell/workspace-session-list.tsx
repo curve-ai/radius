@@ -1,4 +1,13 @@
-import { Archive, Folder, Pin, PinOff, Plus, SquarePen } from "lucide-react";
+import {
+  Archive,
+  ChevronRight,
+  Folder,
+  LoaderCircle,
+  Pin,
+  PinOff,
+  Plus,
+  SquarePen,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -10,6 +19,12 @@ import {
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import { type WorkspaceSessionRecord } from "@renderer/components/shell/project-context-value";
+import {
+  ActionToolPanelButton,
+  ActionToolPanelItemContent,
+  ActionToolPanelItemIcon,
+  ActionToolPanelItemLabel,
+} from "@renderer/components/ui/action-tool-panel";
 import {
   SidebarGroup,
   SidebarGroupAction,
@@ -32,8 +47,16 @@ import {
   TooltipTrigger,
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/utils";
+import type { NativeControlMenuPoint } from "../../../../radius-api";
 import { ProjectActionMenu, RecentsActionMenu } from "./project-action-menu";
+import {
+  showProjectActionMenu,
+  showRecentsActionMenu,
+  type ProjectActionMenuOptions,
+  type RecentsActionMenuOptions,
+} from "./project-action-menu-actions";
 import { useProjects } from "./project-context-value";
+import { showSessionActionMenu } from "./session-action-menu-actions";
 
 const PINNED_PROJECTS_STORAGE_KEY = "radius:pinned-project-ids";
 const SESSION_ACTION_CLASS =
@@ -44,6 +67,13 @@ type SessionLayoutIntent = {
   kind: "relocate" | "remove";
   duration: 0.16 | 0.18;
 };
+
+function toggleSetValue<T>(current: ReadonlySet<T>, value: T): Set<T> {
+  const next = new Set(current);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
 
 function getInitialPinnedProjectIds(): Set<string> {
   try {
@@ -68,6 +98,7 @@ function SessionSidebarRow({
   session,
   unread,
   onArchive,
+  onOpenMenu,
   onSelect,
   onSetPinned,
 }: {
@@ -78,6 +109,10 @@ function SessionSidebarRow({
   session: WorkspaceSessionRecord;
   unread: boolean;
   onArchive: (session: WorkspaceSessionRecord) => void;
+  onOpenMenu: (
+    session: WorkspaceSessionRecord,
+    point: NativeControlMenuPoint,
+  ) => void;
   onSelect: (sessionId: string) => void;
   onSetPinned: (session: WorkspaceSessionRecord) => void;
 }): ReactNode {
@@ -85,6 +120,7 @@ function SessionSidebarRow({
   const pinned = session.pinnedAt !== null;
   const pinLabel = pinned ? "Unpin" : "Pin";
   const animateLayout = !reduceMotion && layoutIntent !== null;
+  const hasTrailingStatus = session.working || unread;
 
   return (
     <motion.li
@@ -125,25 +161,40 @@ function SessionSidebarRow({
       }
       data-slot="sidebar-menu-item"
       data-sidebar="menu-item"
-      className={cn(
-        "group/menu-item relative",
-        indented && "ml-7 w-[calc(100%-1.75rem)]",
-      )}
+      className="group/menu-item relative w-full"
     >
       <SidebarMenuButton
         type="button"
         isActive={active}
         aria-current={active ? "page" : undefined}
-        className="pr-14! hover:bg-sidebar-accent/55! data-[active=true]:bg-sidebar-accent! data-[active=true]:font-normal md:pr-2! md:group-focus-within/menu-item:pr-14! md:group-hover/menu-item:pr-14!"
+        className={cn(
+          "pr-14! hover:bg-sidebar-accent/55! data-[active=true]:bg-sidebar-accent! data-[active=true]:font-normal md:pr-2! md:group-focus-within/menu-item:pr-14! md:group-hover/menu-item:pr-14!",
+          indented && "pl-9!",
+          hasTrailingStatus && "md:pr-8!",
+        )}
         title={session.title}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onOpenMenu(session, { x: event.clientX, y: event.clientY });
+        }}
         onClick={() => onSelect(session.id)}
       >
         <span className="truncate">{session.title}</span>
       </SidebarMenuButton>
-      {unread ? (
+      {hasTrailingStatus ? (
         <span className="pointer-events-none absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center transition-opacity duration-[80ms] group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0">
-          <span className="size-2 rounded-full bg-brand" aria-hidden />
-          <span className="sr-only">Unread</span>
+          {session.working ? (
+            <LoaderCircle
+              className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none"
+              strokeWidth={1.75}
+              aria-hidden
+            />
+          ) : (
+            <span className="size-2 rounded-full bg-brand" aria-hidden />
+          )}
+          <span className="sr-only">
+            {session.working ? "Working" : "Unread"}
+          </span>
         </span>
       ) : null}
       <Tooltip disableHoverableContent>
@@ -183,7 +234,7 @@ function SessionSidebarRow({
 }
 
 export function WorkspaceSessionList(): ReactNode {
-  const { navigate } = useWorkspaceNavigation();
+  const { activeView, navigate } = useWorkspaceNavigation();
   const {
     activeProject,
     activeSession,
@@ -194,9 +245,11 @@ export function WorkspaceSessionList(): ReactNode {
     isSessionUnread,
     loading: projectsLoading,
     markSessionsRead,
+    markSessionsUnread,
     openCreateProjectDialog,
     projects,
     recents,
+    requestSessionRename,
     revealProject,
     selectProject,
     selectSession,
@@ -205,10 +258,17 @@ export function WorkspaceSessionList(): ReactNode {
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [pinnedProjectIds, setPinnedProjectIds] = useState<Set<string>>(
     getInitialPinnedProjectIds,
   );
   const [recentsExpanded, setRecentsExpanded] = useState(false);
+  const [recentsCollapsed, setRecentsCollapsed] = useState(false);
+  const [openControlMenuId, setOpenControlMenuId] = useState<string | null>(
+    null,
+  );
   const [layoutIntent, setLayoutIntent] = useState<SessionLayoutIntent | null>(
     null,
   );
@@ -226,6 +286,15 @@ export function WorkspaceSessionList(): ReactNode {
     layoutIntentRef.current = null;
     setLayoutIntent(null);
   }, []);
+
+  const setControlMenuOpen = useCallback(
+    (menuId: string, open: boolean): void => {
+      setOpenControlMenuId((current) =>
+        open ? menuId : current === menuId ? null : current,
+      );
+    },
+    [],
+  );
 
   const beginLayoutIntent = useCallback((intent: SessionLayoutIntent) => {
     if (layoutTimerRef.current !== null) {
@@ -367,9 +436,7 @@ export function WorkspaceSessionList(): ReactNode {
   };
   const toggleProjectPinned = (projectId: string): void => {
     setPinnedProjectIds((current) => {
-      const next = new Set(current);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
+      const next = toggleSetValue(current, projectId);
       localStorage.setItem(
         PINNED_PROJECTS_STORAGE_KEY,
         JSON.stringify([...next]),
@@ -383,17 +450,68 @@ export function WorkspaceSessionList(): ReactNode {
   ): ReactNode => (
     <SessionSidebarRow
       key={session.id}
-      active={activeSession?.session.id === session.id}
+      active={
+        activeView === "workspace" && activeSession?.session.id === session.id
+      }
       indented={indented}
       layoutIntent={layoutIntent}
       pending={pendingSessionIds.has(session.id)}
       session={session}
       unread={isSessionUnread(session.id)}
       onArchive={handleArchive}
+      onOpenMenu={openSessionActionMenu}
       onSelect={openSession}
       onSetPinned={handlePin}
     />
   );
+  const runControlMenu = (
+    menuId: string,
+    showMenu: () => Promise<void>,
+  ): void => {
+    setControlMenuOpen(menuId, true);
+    void showMenu()
+      .catch(() => undefined)
+      .finally(() => setControlMenuOpen(menuId, false));
+  };
+  const openSessionActionMenu = (
+    session: WorkspaceSessionRecord,
+    point: NativeControlMenuPoint,
+  ): void => {
+    const project = projects.find((candidate) =>
+      candidate.sessions.some((item) => item.id === session.id),
+    );
+    runControlMenu(`session:${session.id}`, () =>
+      showSessionActionMenu(
+        {
+          canMarkUnread: session.lastAssistantMessageAt !== null,
+          pinned: session.pinnedAt !== null,
+          sessionId: session.id,
+          title: session.title,
+          workingDirectories: project?.roots.map((root) => root.rootPath) ?? [],
+          onArchive: () => handleArchive(session),
+          onMarkUnread: () => markSessionsUnread([session.id]),
+          onRename: () => {
+            openSession(session.id);
+            requestSessionRename(session.id);
+          },
+          onTogglePin: () => handlePin(session),
+        },
+        point,
+      ),
+    );
+  };
+  const recentsActionMenuOptions: RecentsActionMenuOptions = {
+    hasUnreadChats: recentSessions.some((session) =>
+      isSessionUnread(session.id),
+    ),
+    onMarkAllRead: () =>
+      markSessionsRead(recentSessions.map((session) => session.id)),
+  };
+  const openRecentsActionMenu = (point: NativeControlMenuPoint): void => {
+    runControlMenu("recents", () =>
+      showRecentsActionMenu(recentsActionMenuOptions, point),
+    );
+  };
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -448,82 +566,109 @@ export function WorkspaceSessionList(): ReactNode {
                   const visibleSessions = expanded
                     ? unpinnedSessions
                     : unpinnedSessions.slice(0, 5);
-                  const projectSessionIds = project.sessions.map(
-                    (session) => session.id,
-                  );
-                  const hasUnreadChats = project.sessions.some((session) =>
-                    isSessionUnread(session.id),
-                  );
+                  const collapsed = collapsedProjectIds.has(project.id);
+                  const projectActive =
+                    activeProject?.id === project.id && !activeSession;
+                  const sessionsId = `project-${project.id}-sessions`;
+                  const controlMenuId = `project:${project.id}`;
+                  const projectActionMenuOptions: ProjectActionMenuOptions = {
+                    pinned: pinnedProjectIds.has(project.id),
+                    rootCount: project.roots.length,
+                    onEdit: () => editProject(project.id),
+                    onReveal: () => void revealProject(project.id),
+                    onTogglePin: () => toggleProjectPinned(project.id),
+                  };
+                  const openProjectActionMenu = (
+                    point: NativeControlMenuPoint,
+                  ): void => {
+                    runControlMenu(controlMenuId, () =>
+                      showProjectActionMenu(projectActionMenuOptions, point),
+                    );
+                  };
 
                   return (
                     <SidebarMenuItem key={project.id}>
-                      <div className="group/project relative">
-                        <SidebarMenuButton
+                      <div className="group/control-box-target group/project relative">
+                        <ActionToolPanelButton
                           type="button"
-                          isActive={
-                            activeProject?.id === project.id && !activeSession
-                          }
-                          tooltip={project.name}
-                          className="pr-[4.5rem] hover:bg-sidebar-accent/55 data-[active=true]:font-normal"
+                          aria-expanded={!collapsed}
+                          aria-controls={sessionsId}
+                          aria-current={projectActive ? "page" : undefined}
+                          data-active={projectActive}
+                          className="min-h-8 gap-2 rounded-md py-1 pr-[4.5rem] hover:bg-sidebar-accent/55 focus-visible:bg-sidebar-accent/55 focus-visible:ring-sidebar-ring data-[active=true]:bg-sidebar-accent"
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            openProjectActionMenu({
+                              x: event.clientX,
+                              y: event.clientY,
+                            });
+                          }}
                           onClick={() => {
-                            selectProject(project.id);
-                            navigate("workspace");
+                            setCollapsedProjectIds((current) =>
+                              toggleSetValue(current, project.id),
+                            );
                           }}
                         >
-                          <Folder aria-hidden />
-                          <span>{project.name}</span>
-                        </SidebarMenuButton>
-                        <div className="absolute right-1 top-1 flex items-center gap-0.5">
+                          <ActionToolPanelItemIcon className="size-5 text-sidebar-foreground [&_svg]:size-3.5">
+                            <Folder aria-hidden />
+                          </ActionToolPanelItemIcon>
+                          <ActionToolPanelItemContent className="flex items-center gap-1">
+                            <ActionToolPanelItemLabel className="truncate text-sidebar-foreground">
+                              {project.name}
+                            </ActionToolPanelItemLabel>
+                            <ChevronRight
+                              className={cn(
+                                "size-3.5! shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] duration-100 group-hover/action-tool-button:opacity-100 group-focus-visible/action-tool-button:opacity-100 motion-reduce:transition-none",
+                                !collapsed && "rotate-90",
+                              )}
+                              strokeWidth={1.75}
+                              aria-hidden
+                            />
+                          </ActionToolPanelItemContent>
+                        </ActionToolPanelButton>
+                        <div className="absolute inset-y-1 right-1 flex items-center gap-1">
                           <ProjectActionMenu
+                            open={openControlMenuId === controlMenuId}
                             projectName={project.name}
-                            hasUnreadChats={hasUnreadChats}
-                            pinned={pinnedProjectIds.has(project.id)}
-                            revealAvailable={project.rootPath !== null}
-                            onEdit={() => editProject(project.id)}
-                            onMarkAllRead={() =>
-                              markSessionsRead(projectSessionIds)
-                            }
-                            onReveal={() => void revealProject(project.id)}
-                            onTogglePin={() => toggleProjectPinned(project.id)}
+                            onOpen={openProjectActionMenu}
                           />
                           <button
                             type="button"
                             aria-label={`New chat in ${project.name}`}
                             title="New chat"
-                            className="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sidebar-ring group-hover/project:opacity-100 group-focus-within/project:opacity-100"
+                            className="flex size-5 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sidebar-ring group-hover/project:opacity-100 group-focus-within/project:opacity-100"
                             onClick={() => startProjectChat(project.id)}
                           >
                             <SquarePen
-                              className="size-3.5"
+                              className="size-3"
                               strokeWidth={1.75}
                               aria-hidden
                             />
                           </button>
                         </div>
                       </div>
-                      <SidebarMenu>
-                        <AnimatePresence initial={false} mode="popLayout">
-                          {visibleSessions.map((session) =>
-                            renderSession(session, true),
-                          )}
-                        </AnimatePresence>
-                      </SidebarMenu>
-                      {unpinnedSessions.length > 5 ? (
-                        <button
-                          type="button"
-                          className="ml-7 flex h-7 w-[calc(100%-1.75rem)] items-center rounded-md px-2 text-left text-sm text-muted-foreground outline-none hover:bg-sidebar-accent/55 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                          onClick={() =>
-                            setExpandedProjectIds((current) => {
-                              const next = new Set(current);
-                              if (next.has(project.id)) next.delete(project.id);
-                              else next.add(project.id);
-                              return next;
-                            })
-                          }
-                        >
-                          {expanded ? "Show less" : "Show more"}
-                        </button>
-                      ) : null}
+                      <div id={sessionsId} hidden={collapsed}>
+                        <SidebarMenu>
+                          <AnimatePresence initial={false} mode="popLayout">
+                            {visibleSessions.map((session) =>
+                              renderSession(session, true),
+                            )}
+                          </AnimatePresence>
+                        </SidebarMenu>
+                        {unpinnedSessions.length > 5 ? (
+                          <button
+                            type="button"
+                            className="flex h-7 w-full items-center rounded-md pl-9 pr-2 text-left text-sm text-muted-foreground outline-none hover:bg-sidebar-accent/55 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                            onClick={() =>
+                              setExpandedProjectIds((current) =>
+                                toggleSetValue(current, project.id),
+                              )
+                            }
+                          >
+                            {expanded ? "Show less" : "Show more"}
+                          </button>
+                        ) : null}
+                      </div>
                     </SidebarMenuItem>
                   );
                 })}
@@ -538,34 +683,57 @@ export function WorkspaceSessionList(): ReactNode {
         </SidebarGroup>
 
         {recentSessions.length > 0 ? (
-          <SidebarGroup className="group/recents pt-0">
-            <SidebarGroupLabel className="pr-[4.5rem] font-normal">
-              Recents
-            </SidebarGroupLabel>
-            <div className="absolute right-3 top-3 flex items-center gap-0.5">
-              <RecentsActionMenu
-                hasUnreadChats={recentSessions.some((session) =>
-                  isSessionUnread(session.id),
-                )}
-                onMarkAllRead={() =>
-                  markSessionsRead(recentSessions.map((session) => session.id))
-                }
-              />
-              <button
+          <SidebarGroup className="group/control-box-target group/recents pt-0">
+            <div className="relative">
+              <ActionToolPanelButton
                 type="button"
-                aria-label="New standalone chat"
-                title="New chat"
-                className="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sidebar-ring group-hover/recents:opacity-100 group-focus-within/recents:opacity-100"
-                onClick={startRecentChat}
+                aria-expanded={!recentsCollapsed}
+                aria-controls="recent-sessions"
+                className="min-h-8 gap-2 rounded-md py-1 pr-[4.5rem] hover:bg-sidebar-accent/55 focus-visible:bg-sidebar-accent/55 focus-visible:ring-sidebar-ring"
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openRecentsActionMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
+                onClick={() => setRecentsCollapsed((current) => !current)}
               >
-                <SquarePen
-                  className="size-3.5"
-                  strokeWidth={1.75}
-                  aria-hidden
+                <ActionToolPanelItemContent className="flex items-center gap-1">
+                  <ActionToolPanelItemLabel className="text-xs text-sidebar-foreground/70">
+                    Recents
+                  </ActionToolPanelItemLabel>
+                  <ChevronRight
+                    className={cn(
+                      "size-3.5! shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] duration-100 group-hover/action-tool-button:opacity-100 group-focus-visible/action-tool-button:opacity-100 motion-reduce:transition-none",
+                      !recentsCollapsed && "rotate-90",
+                    )}
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </ActionToolPanelItemContent>
+              </ActionToolPanelButton>
+              <div className="absolute inset-y-1 right-1 flex items-center gap-1">
+                <RecentsActionMenu
+                  open={openControlMenuId === "recents"}
+                  onOpen={openRecentsActionMenu}
                 />
-              </button>
+                <button
+                  type="button"
+                  aria-label="New standalone chat"
+                  title="New chat"
+                  className="flex size-5 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sidebar-ring group-hover/recents:opacity-100 group-focus-within/recents:opacity-100"
+                  onClick={startRecentChat}
+                >
+                  <SquarePen
+                    className="size-3.5"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </button>
+              </div>
             </div>
-            <SidebarGroupContent>
+            <SidebarGroupContent id="recent-sessions" hidden={recentsCollapsed}>
               <SidebarMenu>
                 <AnimatePresence initial={false} mode="popLayout">
                   {visibleRecents.map((session) => renderSession(session))}
