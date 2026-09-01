@@ -17,17 +17,23 @@ test(
     context.after(() => rm(projectRoot, { force: true, recursive: true }));
     const results: Array<{
       exitCode: number | null;
+      output: string;
       outputTruncated: boolean;
     }> = [];
+    const progress: string[] = [];
     const manager = new MacOsTerminalManager({
       projectRoots: [projectRoot],
       authorize: async (request) => {
         authorizations.push(request.outsideProjectRoots);
         return "tool-call-1";
       },
+      onProgress: (result) => {
+        progress.push(result.output);
+      },
       onResult: (result) => {
         results.push({
           exitCode: result.exitCode,
+          output: result.output,
           outputTruncated: result.outputTruncated,
         });
       },
@@ -61,7 +67,14 @@ test(
     assert.equal(status.exitCode, 0);
     assert.equal(output.output, "terminal-ready");
     assert.equal(output.truncated, false);
-    assert.deepEqual(results, [{ exitCode: 0, outputTruncated: false }]);
+    assert.deepEqual(progress, ["terminal-ready"]);
+    assert.deepEqual(results, [
+      {
+        exitCode: 0,
+        output: "terminal-ready",
+        outputTruncated: false,
+      },
+    ]);
   },
 );
 

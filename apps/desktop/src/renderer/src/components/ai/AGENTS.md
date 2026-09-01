@@ -108,19 +108,15 @@
   reflow. Reduced motion keeps a 100ms opacity transition and disables movement.
 - Keep motion brief, purposeful, and compatible with reduced-motion settings.
 - Do not render or store raw chain-of-thought. Components may present concise
-  reasoning summaries supplied by a trusted caller.
+  user-visible reasoning updates explicitly supplied through ACP.
 - Session transcripts consume typed canonical events through caller-owned
-  read APIs. Group run activity without replacing event order, keep final
-  messages outside collapsible traces, and honor provider-owned inline or
-  collapsible presentation records. Visible reasoning, progress, tool, and error
-  rows use one truncated line per action until the user explicitly expands that
-  individual row, which reveals its full wrapped detail. The run header controls
-  only whole-group visibility. A populated live group starts expanded and
-  collapses once when the run reaches a terminal state unless the user already
-  chose its disclosure state. Historical terminal groups start collapsed. The
-  open action list is capped at 16rem and scrolls independently. Collapsed
-  traces remove hidden rows from the accessibility tree with `aria-hidden` and
-  `inert`.
+  read APIs. Preserve provider event order, keep final messages outside the run,
+  and render intermediate agent messages as full-width commentary between the
+  actions they describe. Each tool call owns its compact disclosure, exact
+  agent-provided title, elapsed state, and bounded input/progress/output detail.
+  Completed calls remain visible as static rows. Individual reasoning and error
+  rows stay truncated until expanded. Hidden disclosure content leaves the
+  accessibility tree with `aria-hidden` and `inert`.
 - Session pages may use a submitted user message as a temporary scroll anchor.
   Reserve only the measured space needed to place that turn near the top, shrink
   it as the answer grows, and cancel automatic following on real user scroll
@@ -129,10 +125,11 @@
 - Show the pixel-grid thinking indicator only for a real non-terminal run.
   Animate its pixels and shimmer only while the run is actively working;
   approval and user-wait states remain still while elapsed time may continue to
-  update. Derive the compact activity label from canonical safe event
-  categories, never raw commands, paths, or arbitrary provider text. Keep one
-  persistent live-region label while overlapping visual transition copies stay
-  hidden from assistive technology. Reduced motion removes movement and blur.
+  update. Use the ACP tool title for tool-call rows and reserve the fallback run
+  label for startup or thinking periods that have no current agent-authored
+  action. Keep one persistent live-region label while overlapping visual
+  transition copies stay hidden from assistive technology. Reduced motion
+  removes movement and blur.
 - Completed assistant messages expose the working Copy markdown action and the
   canonical message time in the same quiet hover/focus toolbar. Format the
   visible value as local time today, weekday plus time earlier in the current

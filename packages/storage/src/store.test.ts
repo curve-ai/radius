@@ -365,9 +365,23 @@ test("projects shell approvals and results into the session transcript", async (
         note: null,
       },
       {
-        eventId: "7b4ae49e-8c72-4f9c-9c99-e1037c289e25",
+        eventId: "7b4ae49e-8c72-4f9c-9c99-e1037c289e24",
         sessionId: session.id,
         sessionRevision: 6,
+        sourceClientInstanceId: clientId,
+        agentRunId,
+        occurredAt: "2026-08-29T20:04:30.000Z",
+        artifactLinks: [],
+        eventType: "tool_progress" as const,
+        toolCallEventId,
+        progressSchemaId: "radius.shell.progress",
+        progressSchemaVersion: 1,
+        progress: { output: "workspace-ready", status: "in_progress" },
+      },
+      {
+        eventId: "7b4ae49e-8c72-4f9c-9c99-e1037c289e25",
+        sessionId: session.id,
+        sessionRevision: 7,
         sourceClientInstanceId: clientId,
         agentRunId,
         occurredAt: "2026-08-29T20:05:00.000Z",
@@ -390,6 +404,7 @@ test("projects shell approvals and results into the session transcript", async (
         "tool_call",
         "approval_request",
         "approval_decision",
+        "tool_progress",
         "tool_result",
       ],
     );
@@ -407,6 +422,39 @@ test("projects shell approvals and results into the session transcript", async (
         inputSchemaVersion: 1,
         input: toolInput,
       },
+    );
+    assert.deepEqual(
+      transcript.find((event) => event.eventType === "tool_progress"),
+      {
+        eventId: "7b4ae49e-8c72-4f9c-9c99-e1037c289e24",
+        sessionRevision: 6,
+        occurredAt: "2026-08-29T20:04:30.000Z",
+        agentRunId,
+        eventType: "tool_progress",
+        toolCallEventId,
+        progressSchemaId: "radius.shell.progress",
+        progressSchemaVersion: 1,
+        progress: { output: "workspace-ready", status: "in_progress" },
+      },
+    );
+    const syncedEvents = (await database.db.select().from(localChanges))
+      .filter((change) => change.kind === "session.event.append")
+      .map((change) => JSON.parse(change.payloadJson));
+    assert.deepEqual(
+      syncedEvents.find((event) => event.eventId === toolCallEventId)?.input,
+      { redacted: "Tool input remains on the originating device" },
+    );
+    assert.deepEqual(
+      syncedEvents.find(
+        (event) => event.eventId === "7b4ae49e-8c72-4f9c-9c99-e1037c289e24",
+      )?.progress,
+      { status: "in_progress" },
+    );
+    assert.deepEqual(
+      syncedEvents.find(
+        (event) => event.eventId === "7b4ae49e-8c72-4f9c-9c99-e1037c289e25",
+      )?.output,
+      { redacted: "Tool output remains on the originating device" },
     );
   });
 });

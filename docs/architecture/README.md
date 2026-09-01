@@ -106,6 +106,8 @@ The React renderer is unprivileged. Electron owns operating-system integration b
   dashboard session integration, and role-aware organization administration.
 - [`sync-v1-data-model.md`](sync-v1-data-model.md) — accepted typed local schema, public envelope, artifact model, authority rules, and migration plan.
 - [`../guides/sync-provider.md`](../guides/sync-provider.md) — implement a compatible service and connect a cloned Radius application.
+- [`../guides/bundling-fx.md`](../guides/bundling-fx.md) — prepare, package,
+  and verify the built-in FX agent for the Apple Silicon desktop release.
 - [`../../hosting/postgres/README.md`](../../hosting/postgres/README.md) — pinned
   official PostgreSQL base, empty-by-default extension authority, and image
   verification workflow used by the self-hosted Platform.

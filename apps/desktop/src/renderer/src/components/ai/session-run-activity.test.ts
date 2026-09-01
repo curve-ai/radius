@@ -70,11 +70,11 @@ test("shows trusted startup states without exposing arbitrary run detail", () =>
   });
 });
 
-test("uses the latest unfinished tool call and returns to response streaming", () => {
+test("uses the latest agent-provided tool title and returns to response streaming", () => {
   const command = toolCall("command", "shell", "execute");
   assert.deepEqual(deriveWorkingRunActivity([command], false), {
-    key: "running-command",
-    label: "Running a command",
+    key: "tool:command",
+    label: "execute",
   });
 
   assert.deepEqual(
@@ -94,31 +94,16 @@ test("keeps an earlier concurrent tool visible when a newer tool finishes", () =
       [search, fetch, toolResult("fetch-result", fetch.eventId)],
       false,
     ),
-    { key: "searching", label: "Searching workspace" },
+    { key: "tool:search", label: "Search" },
   );
 });
 
-test("maps ACP tool kinds to compact safe activity labels", () => {
-  const cases = [
-    ["acp.read", "Reading project files"],
-    ["acp.edit", "Editing project files"],
-    ["acp.delete", "Deleting project files"],
-    ["acp.move", "Moving project files"],
-    ["acp.search", "Searching workspace"],
-    ["acp.execute", "Running a command"],
-    ["acp.think", "Thinking"],
-    ["acp.fetch", "Fetching information"],
-    ["acp.switch_mode", "Switching modes"],
-    ["acp.other", "Using a tool"],
-  ] as const;
-
-  for (const [capability, label] of cases) {
-    assert.equal(
-      deriveWorkingRunActivity(
-        [toolCall(capability, capability, "Untrusted provider title")],
-        false,
-      ).label,
-      label,
-    );
-  }
+test("does not replace an ACP tool title with a client-authored category", () => {
+  assert.equal(
+    deriveWorkingRunActivity(
+      [toolCall("read", "acp.read", "Reading memory.md")],
+      false,
+    ).label,
+    "Reading memory.md",
+  );
 });

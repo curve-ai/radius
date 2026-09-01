@@ -49,6 +49,15 @@ export interface TerminalExecutionResult {
   correlationId: string;
   durationMs: number;
   exitCode: number | null;
+  output: string;
+  outputTruncated: boolean;
+  signal: string | null;
+}
+
+export interface TerminalExecutionProgress {
+  correlationId: string;
+  exitCode: number | null;
+  output: string;
   outputTruncated: boolean;
   signal: string | null;
 }
@@ -60,6 +69,7 @@ export interface MacOsTerminalManagerOptions {
     request: TerminalAuthorizationRequest,
     signal: AbortSignal,
   ): Promise<string>;
+  onProgress?(result: TerminalExecutionProgress): Promise<void> | void;
   onResult(result: TerminalExecutionResult): Promise<void> | void;
 }
 
@@ -71,6 +81,8 @@ interface ManagedTerminal {
   output: string;
   outputLimitBytes: number;
   outputTruncated: boolean;
+  lastReportedOutput: string | null;
+  lastReportedStatus: string | null;
   startedAtMs: number;
   resultRecorded: boolean;
   temporaryRoot: string;
@@ -292,6 +304,8 @@ export class MacOsTerminalManager implements AcpTerminalHandlers {
         MAX_OUTPUT_LIMIT_BYTES,
       ),
       outputTruncated: false,
+      lastReportedOutput: null,
+      lastReportedStatus: null,
       startedAtMs: Date.now(),
       resultRecorded: false,
       temporaryRoot,
@@ -319,6 +333,7 @@ export class MacOsTerminalManager implements AcpTerminalHandlers {
   }> {
     this.#assertSession(request.sessionId);
     const terminal = this.#requireTerminal(request.terminalId);
+    await this.#reportProgress(terminal);
     await this.#recordResult(terminal);
     return {
       output: terminal.output,
@@ -336,7 +351,9 @@ export class MacOsTerminalManager implements AcpTerminalHandlers {
       this.#requireTerminal(request.terminalId).exit,
       signal,
     );
-    await this.#recordResult(this.#requireTerminal(request.terminalId));
+    const terminal = this.#requireTerminal(request.terminalId);
+    await this.#reportProgress(terminal);
+    await this.#recordResult(terminal);
     return status;
   }
 
@@ -411,11 +428,34 @@ export class MacOsTerminalManager implements AcpTerminalHandlers {
         correlationId: terminal.correlationId,
         durationMs: Date.now() - terminal.startedAtMs,
         exitCode: terminal.exitStatus.exitCode,
+        output: terminal.output,
         outputTruncated: terminal.outputTruncated,
         signal: terminal.exitStatus.signal,
       });
     } finally {
       await rm(terminal.temporaryRoot, { force: true, recursive: true });
     }
+  }
+
+  async #reportProgress(terminal: ManagedTerminal): Promise<void> {
+    if (!this.options.onProgress) return;
+    const status = terminal.exitStatus
+      ? `${terminal.exitStatus.exitCode ?? ""}:${terminal.exitStatus.signal ?? ""}`
+      : "running";
+    if (
+      terminal.lastReportedOutput === terminal.output &&
+      terminal.lastReportedStatus === status
+    ) {
+      return;
+    }
+    terminal.lastReportedOutput = terminal.output;
+    terminal.lastReportedStatus = status;
+    await this.options.onProgress({
+      correlationId: terminal.correlationId,
+      exitCode: terminal.exitStatus?.exitCode ?? null,
+      output: terminal.output,
+      outputTruncated: terminal.outputTruncated,
+      signal: terminal.exitStatus?.signal ?? null,
+    });
   }
 }

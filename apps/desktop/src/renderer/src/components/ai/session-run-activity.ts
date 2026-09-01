@@ -37,41 +37,10 @@ const STARTUP_ACTIVITY_BY_DETAIL = new Map<string, SessionRunActivity>([
 ]);
 
 function activityForToolCall(event: ToolCallEvent): SessionRunActivity {
-  if (event.capability === "shell") {
-    return { key: "running-command", label: "Running a command" };
-  }
-
-  if (event.capability === "workspace.files") {
-    if (event.operation === "read") {
-      return { key: "reading-files", label: "Reading project files" };
-    }
-    if (event.operation === "write" || event.operation === "edit") {
-      return { key: "editing-files", label: "Editing project files" };
-    }
-    return { key: "using-files", label: "Using project files" };
-  }
-
-  const kind = event.capability.startsWith("acp.")
-    ? event.capability.slice("acp.".length)
-    : "other";
-  if (kind === "read")
-    return { key: "reading-files", label: "Reading project files" };
-  if (kind === "edit")
-    return { key: "editing-files", label: "Editing project files" };
-  if (kind === "delete")
-    return { key: "deleting-files", label: "Deleting project files" };
-  if (kind === "move")
-    return { key: "moving-files", label: "Moving project files" };
-  if (kind === "search")
-    return { key: "searching", label: "Searching workspace" };
-  if (kind === "execute")
-    return { key: "running-command", label: "Running a command" };
-  if (kind === "think") return { key: "thinking", label: "Thinking" };
-  if (kind === "fetch")
-    return { key: "fetching", label: "Fetching information" };
-  if (kind === "switch_mode")
-    return { key: "switching-mode", label: "Switching modes" };
-  return { key: "using-tool", label: "Using a tool" };
+  return {
+    key: `tool:${event.eventId}`,
+    label: event.operation,
+  };
 }
 
 function latestOpenToolCall(
