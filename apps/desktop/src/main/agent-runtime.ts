@@ -110,6 +110,7 @@ import {
 import {
   MacOsTerminalManager,
   type TerminalAuthorizationRequest,
+  type TerminalExecutionProgress,
   type TerminalExecutionResult,
 } from "./terminal-execution";
 import { applyAgentSessionTitleUpdate } from "./agent-session-title";
@@ -1150,16 +1151,14 @@ async function authorizeTerminal(
     eventType: "tool_call",
     triggeringMessageEventId: null,
     capability: "shell",
-    operation: "execute",
+    operation: "Running command",
     inputSchemaId: "radius.shell.execute",
     inputSchemaVersion: 1,
     input: {
-      command: "Command details remain on the originating Mac",
-      args: [],
-      cwd: request.outsideProjectRoots
-        ? "Outside project folders"
-        : "Project folders",
-      environment: request.environment.map((entry) => ({ name: entry.name })),
+      command: request.command,
+      args: request.args,
+      cwd: request.cwd,
+      environment: request.environment,
       outsideProjectRoots: request.outsideProjectRoots,
     },
   });
@@ -1204,6 +1203,33 @@ async function authorizeTerminal(
   return toolCallEventId;
 }
 
+async function appendTerminalProgress(
+  journal: RuntimeSessionJournal,
+  agentRunId: string,
+  result: TerminalExecutionProgress,
+): Promise<void> {
+  await journal.append({
+    eventId: randomUUID(),
+    agentRunId,
+    eventType: "tool_progress",
+    toolCallEventId: result.correlationId,
+    progressSchemaId: "radius.shell.progress",
+    progressSchemaVersion: 1,
+    progress: {
+      exitCode: result.exitCode,
+      output: result.output,
+      outputTruncated: result.outputTruncated,
+      signal: result.signal,
+      status:
+        result.exitCode === null && result.signal === null
+          ? "in_progress"
+          : result.exitCode === 0
+            ? "completed"
+            : "failed",
+    },
+  });
+}
+
 async function appendTerminalResult(
   journal: RuntimeSessionJournal,
   agentRunId: string,
@@ -1225,6 +1251,7 @@ async function appendTerminalResult(
     output: {
       durationMs: result.durationMs,
       exitCode: result.exitCode,
+      output: result.output,
       outputTruncated: result.outputTruncated,
       signal: result.signal,
     },
@@ -1248,13 +1275,11 @@ async function authorizeFileAccess(
     eventType: "tool_call",
     triggeringMessageEventId: null,
     capability: "workspace.files",
-    operation: request.operation,
+    operation: `${request.operation === "read" ? "Reading" : "Writing"} ${path.basename(request.path)}`,
     inputSchemaId: `radius.workspace.files.${request.operation}`,
     inputSchemaVersion: 1,
     input: {
-      path: request.outsideProjectRoots
-        ? "Outside project file"
-        : "Project file",
+      path: request.path,
       outsideProjectRoots: request.outsideProjectRoots,
     },
   });
@@ -1330,12 +1355,18 @@ async function runAgentSession(input: {
   journal: RuntimeSessionJournal;
 }): Promise<void> {
   const agentRunId = randomUUID();
-  const assistantMessageEventId = randomUUID();
-  const assistantMessageOccurredAt = new Date().toISOString();
+  let assistantMessageEventId = randomUUID();
+  let assistantMessageOccurredAt = new Date().toISOString();
+  let responseProviderMessageId: string | null = null;
+  let responseText = "";
+  let responseParts: CollectedResponsePart[] | null = null;
+  let thoughtMessageId: string | null = null;
+  let thoughtText = "";
   const streamedMessage = <Status extends StreamedMessageEvent["status"]>(
     status: Status,
     text: string,
     artifacts: StreamingSessionTranscriptMessage["artifacts"] = [],
+    messageKind: "progress" | "final" = "progress",
   ): Extract<StreamedMessageEvent, { status: Status }> =>
     ({
       eventId: assistantMessageEventId,
@@ -1344,7 +1375,7 @@ async function runAgentSession(input: {
       agentRunId,
       eventType: "message",
       role: "assistant",
-      messageKind: "final",
+      messageKind,
       status,
       text,
       artifacts,
@@ -1362,8 +1393,6 @@ async function runAgentSession(input: {
   const providerKey = release?.providerId ?? "radius-development";
   const capabilities =
     release?.capabilities ?? developmentConnection!.capabilities;
-  let responseText = "";
-  let responseParts: CollectedResponsePart[] | null = null;
   let runtime: RunningAgentRuntime | null = null;
   let fxProfile: FxRuntimeProfileLease | null = null;
   let browserTools: BrowserToolServer | null = null;
@@ -1375,6 +1404,107 @@ async function runAgentSession(input: {
   const connectorMcpContexts: ActiveMcpPermissionContext[] = [];
   let fileSystemManager: HostFileSystemManager | null = null;
   let terminalManager: MacOsTerminalManager | null = null;
+
+  const resetResponseBuffer = (providerMessageId: string | null): void => {
+    assistantMessageEventId = randomUUID();
+    assistantMessageOccurredAt = new Date().toISOString();
+    responseProviderMessageId = providerMessageId;
+    responseText = "";
+    responseParts = null;
+  };
+
+  const persistBufferedResponse = async (
+    messageKind: "progress" | "final",
+    status: "completed" | "cancelled",
+    finishReason: string | null,
+  ): Promise<boolean> => {
+    const collectedResponseParts =
+      responseParts ??
+      (responseText ? [{ kind: "text" as const, text: responseText }] : []);
+    const finalizedResponseParts = fxProfile
+      ? await importFxGeneratedImages(
+          input.sessionId,
+          fxProfile.path,
+          collectedResponseParts,
+        )
+      : collectedResponseParts;
+    const messageText = finalizedResponseParts
+      .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+      .join("");
+    const messageParts = durableMessageParts(finalizedResponseParts);
+    if (messageParts.length === 0) return false;
+
+    const images = finalizedResponseParts.flatMap((part) =>
+      part.kind === "image" ? [part.image] : [],
+    );
+    await input.journal.append(
+      {
+        eventId: assistantMessageEventId,
+        agentRunId,
+        eventType: "message",
+        role: "assistant",
+        messageKind,
+        status,
+        model: input.modelId,
+        providerMessageId: responseProviderMessageId,
+        finishReason,
+        parts: messageParts,
+      },
+      {
+        artifactLinks: images.map((image) => image.artifactLink),
+        fileLocations: Object.fromEntries(
+          images.map((image) => [
+            image.artifactLink.artifact.id,
+            image.fileLocation,
+          ]),
+        ),
+      },
+    );
+    broadcastSessionTranscriptStream({
+      sessionId: input.sessionId,
+      eventId: assistantMessageEventId,
+      event: streamedMessage(
+        status,
+        messageText.trim(),
+        images.map((image) => ({
+          id: image.artifactLink.artifact.id,
+          name: image.artifactLink.artifact.name,
+          artifactType: "image",
+          storageKind: "file",
+          mimeType:
+            image.artifactLink.artifact.storageKind === "file"
+              ? image.artifactLink.artifact.mimeType
+              : null,
+          availability: "local",
+          url: null,
+        })),
+        messageKind,
+      ),
+      mode: "replace",
+    });
+    streamingSessionMessages.delete(input.sessionId);
+    return true;
+  };
+
+  const flushProgressResponse = async (): Promise<void> => {
+    if (await persistBufferedResponse("progress", "completed", null)) {
+      resetResponseBuffer(null);
+    }
+  };
+
+  const flushThought = async (): Promise<void> => {
+    const summaryText = thoughtText.trim();
+    thoughtMessageId = null;
+    thoughtText = "";
+    if (!summaryText) return;
+    await input.journal.append({
+      eventId: randomUUID(),
+      agentRunId,
+      eventType: "reasoning_summary",
+      summaryKind: "analysis",
+      summaryText,
+    });
+  };
 
   try {
     await input.journal.append({
@@ -1584,6 +1714,8 @@ async function runAgentSession(input: {
             request,
             signal,
           ),
+        onProgress: (result) =>
+          appendTerminalProgress(input.journal, agentRunId, result),
         onResult: (result) =>
           appendTerminalResult(input.journal, agentRunId, result),
       });
@@ -1687,7 +1819,48 @@ async function runAgentSession(input: {
       },
       terminal: terminalManager ?? undefined,
       onUpdate: async ({ update }: { update: SessionUpdate }) => {
+        if (
+          update.sessionUpdate !== "agent_thought_chunk" &&
+          thoughtText.trim()
+        ) {
+          await flushThought();
+        }
+        if (
+          update.sessionUpdate === "tool_call" &&
+          (responseText.trim() || responseParts?.length)
+        ) {
+          await flushProgressResponse();
+        }
+        if (update.sessionUpdate === "agent_thought_chunk") {
+          if (responseText.trim() || responseParts?.length) {
+            await flushProgressResponse();
+          }
+          if (update.content.type === "text") {
+            const nextMessageId = update.messageId?.trim() || null;
+            if (
+              thoughtText.trim() &&
+              nextMessageId &&
+              thoughtMessageId &&
+              nextMessageId !== thoughtMessageId
+            ) {
+              await flushThought();
+            }
+            thoughtMessageId ??= nextMessageId;
+            thoughtText += update.content.text;
+          }
+          return;
+        }
         if (update.sessionUpdate === "agent_message_chunk") {
+          const nextMessageId = update.messageId?.trim() || null;
+          if (
+            (responseText.trim() || responseParts?.length) &&
+            nextMessageId &&
+            responseProviderMessageId &&
+            nextMessageId !== responseProviderMessageId
+          ) {
+            await flushProgressResponse();
+          }
+          responseProviderMessageId ??= nextMessageId;
           if (update.content.type === "text") {
             const textOffset = responseText.length;
             responseText += update.content.text;
@@ -1696,7 +1869,7 @@ async function runAgentSession(input: {
             }
             publishStreamingSessionMessage(
               input.sessionId,
-              streamedMessage("streaming", responseText),
+              streamedMessage("streaming", responseText, [], "progress"),
               update.content.text,
               textOffset,
             );
@@ -1771,71 +1944,12 @@ async function runAgentSession(input: {
       detail: `Waiting for ${displayName}`,
     });
     const result = await runtime.prompt(input.prompt);
-
-    const collectedResponseParts =
-      responseParts ??
-      (responseText ? [{ kind: "text" as const, text: responseText }] : []);
-    const finalizedResponseParts = fxProfile
-      ? await importFxGeneratedImages(
-          input.sessionId,
-          fxProfile.path,
-          collectedResponseParts,
-        )
-      : collectedResponseParts;
-    responseText = finalizedResponseParts
-      .flatMap((part) => (part.kind === "text" ? [part.text] : []))
-      .join("");
-    const messageParts = durableMessageParts(finalizedResponseParts);
-    if (messageParts.length > 0) {
-      const images = finalizedResponseParts.flatMap((part) =>
-        part.kind === "image" ? [part.image] : [],
-      );
-      await input.journal.append(
-        {
-          eventId: assistantMessageEventId,
-          agentRunId,
-          eventType: "message",
-          role: "assistant",
-          messageKind: "final",
-          status: result.stopReason === "cancelled" ? "cancelled" : "completed",
-          model: input.modelId,
-          providerMessageId: null,
-          finishReason: result.stopReason,
-          parts: messageParts,
-        },
-        {
-          artifactLinks: images.map((image) => image.artifactLink),
-          fileLocations: Object.fromEntries(
-            images.map((image) => [
-              image.artifactLink.artifact.id,
-              image.fileLocation,
-            ]),
-          ),
-        },
-      );
-      broadcastSessionTranscriptStream({
-        sessionId: input.sessionId,
-        eventId: assistantMessageEventId,
-        event: streamedMessage(
-          result.stopReason === "cancelled" ? "cancelled" : "completed",
-          responseText.trim(),
-          images.map((image) => ({
-            id: image.artifactLink.artifact.id,
-            name: image.artifactLink.artifact.name,
-            artifactType: "image",
-            storageKind: "file",
-            mimeType:
-              image.artifactLink.artifact.storageKind === "file"
-                ? image.artifactLink.artifact.mimeType
-                : null,
-            availability: "local",
-            url: null,
-          })),
-        ),
-        mode: "replace",
-      });
-      streamingSessionMessages.delete(input.sessionId);
-    }
+    await flushThought();
+    await persistBufferedResponse(
+      "final",
+      result.stopReason === "cancelled" ? "cancelled" : "completed",
+      result.stopReason,
+    );
     await input.journal.append({
       eventId: randomUUID(),
       agentRunId,
@@ -1953,11 +2067,35 @@ async function appendRuntimeUpdate(
       inputSchemaVersion: 1,
       input: jsonValue(update.rawInput),
     });
+    const progress = acpToolProgress(update);
+    if (progress !== null) {
+      await journal.append({
+        eventId: randomUUID(),
+        agentRunId,
+        eventType: "tool_progress",
+        toolCallEventId: eventId,
+        progressSchemaId: "acp.tool-progress",
+        progressSchemaVersion: 1,
+        progress,
+      });
+    }
     return;
   }
   if (update.sessionUpdate !== "tool_call_update") return;
   const toolCallEventId = state.toolCallEventIds.get(update.toolCallId);
   if (!toolCallEventId) return;
+  const progress = acpToolProgress(update);
+  if (progress !== null) {
+    await journal.append({
+      eventId: randomUUID(),
+      agentRunId,
+      eventType: "tool_progress",
+      toolCallEventId,
+      progressSchemaId: "acp.tool-progress",
+      progressSchemaVersion: 1,
+      progress,
+    });
+  }
   const outcome = terminalToolOutcome(update.status);
   if (!outcome) return;
   await journal.append({
@@ -1968,8 +2106,29 @@ async function appendRuntimeUpdate(
     outcome,
     outputSchemaId: "acp.tool-result",
     outputSchemaVersion: 1,
-    output: jsonValue(update.rawOutput),
+    output: jsonValue(
+      update.rawOutput ??
+        (update.content === undefined ? null : { content: update.content }),
+    ),
   });
+}
+
+function acpToolProgress(
+  update: Extract<
+    SessionUpdate,
+    { sessionUpdate: "tool_call" | "tool_call_update" }
+  >,
+): JsonValue | null {
+  const progress = {
+    ...(update.kind !== undefined ? { kind: update.kind } : {}),
+    ...(update.status !== undefined ? { status: update.status } : {}),
+    ...(update.title !== undefined ? { title: update.title } : {}),
+    ...(update.content !== undefined ? { content: update.content } : {}),
+    ...(update.locations !== undefined ? { locations: update.locations } : {}),
+    ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+    ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+  };
+  return Object.keys(progress).length > 0 ? jsonValue(progress) : null;
 }
 
 function terminalToolOutcome(

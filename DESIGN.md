@@ -503,23 +503,23 @@ The shell is one coordinated workspace, not a collection of independent pages.
   `sandbox:` targets may read only beneath `.codex/generated_images`. Every path
   requires an allowlisted raster MIME, bounded bytes, and a matching signature.
   Agent-run activity is grouped separately from final messages and follows the
-  provider-owned inline or collapsible presentation record. While a run is
-  actively working, its compact 3x3 pixel wave, event-derived activity label,
-  and elapsed timer communicate real work in progress. The label uses safe
-  activity categories from canonical host and ACP events rather than raw
-  command, path, or provider text. Approval and user-wait states interrupt
-  immediately, keep the elapsed timer, and freeze the wave and text shimmer so
-  Radius does not imply continued work. Visible reasoning, progress, tool, and error rows use one
-  quiet truncated line per action until the user explicitly expands that
-  individual row, which reveals its full wrapped detail. The run header controls
-  only the visibility of the whole group. A populated live group starts expanded
-  so current activity remains visible, then collapses once when the run reaches a
-  terminal state unless the user already chose its disclosure state. Historical
-  terminal groups start collapsed. An open action list is limited to 16rem with
-  contained vertical scrolling. Completed runs settle to a static status.
-  Reduced motion freezes the wave, removes label movement and blur, and does
-  not stop the timer. Reasoning rows
-  contain only stored concise summaries, never raw chain-of-thought. Transcript
+  provider-owned event order. Agent commentary remains full-width prose between
+  the actions it describes. Each tool call is its own compact disclosure and
+  uses the human-readable ACP title exactly as the agent reports it. Active tool
+  calls retain their elapsed timer; expanding one reveals the reported input,
+  progress, terminal output, and result in one bounded code surface. Host
+  terminal and file operations provide the same exact local detail. Raw tool
+  input, progress content, and output remain on that originating device; sync
+  retains only the tool title, kind, and status needed for a truthful remote
+  transcript. Approval and user-wait states interrupt immediately, keep elapsed
+  time, and freeze active shimmer so Radius does not imply continued work. Reasoning and error rows use
+  one quiet truncated line until the user expands that individual row. When no
+  commentary or tool call describes the current work, the compact 3x3 pixel wave
+  and fallback run label communicate the remaining startup or thinking state.
+  Completed tool calls remain in place as static disclosures. Reduced motion
+  freezes the wave and removes disclosure movement without stopping live timers.
+  ACP thought chunks are treated as agent-authored, user-visible reasoning
+  summaries rather than hidden model chain-of-thought. Transcript
   loading, empty, refresh-error, and stale-content states remain explicit. The
   session composer shows its fixed canonical project when one was selected at creation;
   standalone sessions omit the project brow rather than offering project

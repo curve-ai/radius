@@ -276,6 +276,17 @@ export type SessionTranscriptEventRecord =
       sessionRevision: number;
       occurredAt: string;
       agentRunId: string | null;
+      eventType: "tool_progress";
+      toolCallEventId: string;
+      progressSchemaId: string;
+      progressSchemaVersion: number;
+      progress: JsonValue;
+    }
+  | {
+      eventId: string;
+      sessionRevision: number;
+      occurredAt: string;
+      agentRunId: string | null;
       eventType: "tool_result";
       toolCallEventId: string;
       outcome: "succeeded" | "failed" | "cancelled";
@@ -1543,6 +1554,10 @@ export async function listSessionTranscript(
       toolInputSchemaId: toolCalls.inputSchemaId,
       toolInputSchemaVersion: toolCalls.inputSchemaVersion,
       toolInputJson: toolCalls.inputJson,
+      toolProgressCallEventId: toolProgressEvents.toolCallEventId,
+      toolProgressSchemaId: toolProgressEvents.progressSchemaId,
+      toolProgressSchemaVersion: toolProgressEvents.progressSchemaVersion,
+      toolProgressJson: toolProgressEvents.progressJson,
       toolCallEventId: toolResults.toolCallEventId,
       toolOutcome: toolResults.outcome,
       toolOutputSchemaId: toolResults.outputSchemaId,
@@ -1579,6 +1594,10 @@ export async function listSessionTranscript(
     .leftJoin(taskPlans, eq(taskPlans.id, taskPlanEvents.planId))
     .leftJoin(taskStepUpdates, eq(taskStepUpdates.eventId, sessionEvents.id))
     .leftJoin(toolCalls, eq(toolCalls.eventId, sessionEvents.id))
+    .leftJoin(
+      toolProgressEvents,
+      eq(toolProgressEvents.eventId, sessionEvents.id),
+    )
     .leftJoin(toolResults, eq(toolResults.eventId, sessionEvents.id))
     .leftJoin(approvalRequests, eq(approvalRequests.eventId, sessionEvents.id))
     .leftJoin(
@@ -1812,6 +1831,25 @@ export async function listSessionTranscript(
             outputSchemaId: row.toolOutputSchemaId,
             outputSchemaVersion: row.toolOutputSchemaVersion,
             output: JSON.parse(row.toolOutputJson) as JsonValue,
+          },
+        ];
+      case "tool_progress":
+        if (
+          !row.toolProgressCallEventId ||
+          !row.toolProgressSchemaId ||
+          row.toolProgressSchemaVersion === null ||
+          !row.toolProgressJson
+        ) {
+          throw new Error(`Tool progress event ${row.eventId} is incomplete`);
+        }
+        return [
+          {
+            ...base,
+            eventType: row.eventType,
+            toolCallEventId: row.toolProgressCallEventId,
+            progressSchemaId: row.toolProgressSchemaId,
+            progressSchemaVersion: row.toolProgressSchemaVersion,
+            progress: JSON.parse(row.toolProgressJson) as JsonValue,
           },
         ];
       case "approval_request":
@@ -2160,13 +2198,14 @@ export async function appendSessionEvent(
   options: AppendEventOptions = {},
 ): Promise<SessionEventRecord> {
   const event = SessionEventRecordSchema.parse(eventInput);
+  const syncEvent = sessionEventForSync(event);
   const { envelope, payloadJson } = prepareLocalChange({
     originClientInstanceId: event.sourceClientInstanceId,
     sessionId: event.sessionId,
     sessionRevision: event.sessionRevision,
     createdAt: event.occurredAt,
     kind: "session.event.append",
-    payload: event,
+    payload: syncEvent,
   });
 
   await database.db.transaction(async (tx) => {
@@ -2223,6 +2262,37 @@ export async function appendSessionEvent(
   });
 
   return event;
+}
+
+function sessionEventForSync(event: SessionEventRecord): SessionEventRecord {
+  if (event.eventType === "tool_call") {
+    return {
+      ...event,
+      input: { redacted: "Tool input remains on the originating device" },
+    };
+  }
+  if (event.eventType === "tool_result") {
+    return {
+      ...event,
+      output: { redacted: "Tool output remains on the originating device" },
+    };
+  }
+  if (event.eventType !== "tool_progress") return event;
+
+  const progress =
+    event.progress !== null &&
+    !Array.isArray(event.progress) &&
+    typeof event.progress === "object"
+      ? event.progress
+      : {};
+  return {
+    ...event,
+    progress: Object.fromEntries(
+      ["kind", "status", "title"].flatMap((key) =>
+        typeof progress[key] === "string" ? [[key, progress[key]]] : [],
+      ),
+    ),
+  };
 }
 
 function localChangeEnvelope(

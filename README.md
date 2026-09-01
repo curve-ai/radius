@@ -140,6 +140,10 @@ Support profile by default. See the
 [desktop testing profile guide](docs/guides/desktop-testing.md) before using
 `RADIUS_USER_DATA_PATH` or cloning encrypted local state.
 
+Maintainers preparing the built-in FX agent should follow the
+[FX bundling runbook](docs/guides/bundling-fx.md) for the pinned binaries,
+deterministic OCI layout, packaged resources, and verification gates.
+
 ## Desktop updates
 
 Packaged Radius clients check the public `curve-ai/radius` GitHub Releases feed

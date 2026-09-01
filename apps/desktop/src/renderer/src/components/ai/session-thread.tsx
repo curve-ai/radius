@@ -5,12 +5,19 @@ import {
   CircleAlert,
   Copy,
   FileTerminal,
-  MessageSquareText,
   ShieldCheck,
   ShieldX,
   Wrench,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import React, {
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+void React;
 
 import type {
   SessionTranscriptEvent,
@@ -39,10 +46,6 @@ import {
   SessionRunActivityLabel,
   type DisplayedRunActivity,
 } from "./session-run-activity-label";
-import {
-  resolveSessionRunDisclosure,
-  toggleSessionRunDisclosure,
-} from "./session-run-disclosure";
 import { TerminalApproval } from "./terminal-approval";
 import {
   buildSessionTranscriptBlocks,
@@ -52,6 +55,12 @@ import {
   type SessionTranscriptBlock,
 } from "./session-transcript";
 import { PlanProgress } from "./plan-progress";
+import {
+  toolCallPresentation,
+  type ToolCallEvent,
+  type ToolProgressEvent,
+  type ToolResultEvent,
+} from "./tool-call-presentation";
 
 type MessageEvent = Extract<SessionTranscriptEvent, { eventType: "message" }>;
 type RunStateEvent = Extract<
@@ -65,19 +74,9 @@ type RunPresentationEvent = Extract<
 type TraceRowEvent = Extract<
   SessionTranscriptEvent,
   {
-    eventType:
-      | "reasoning_summary"
-      | "message"
-      | "tool_call"
-      | "approval_request"
-      | "approval_decision"
-      | "error";
+    eventType: "reasoning_summary" | "approval_decision" | "error";
   }
 >;
-type ToolOutcome = Extract<
-  SessionTranscriptEvent,
-  { eventType: "tool_result" }
->["outcome"];
 
 const TRANSCRIPT_STATE_EASE = [0.23, 1, 0.32, 1] as const;
 const TRACE_ROW_LAYOUT_EASE = [0.77, 0, 0.175, 1] as const;
@@ -282,16 +281,13 @@ function runLabel(
 
 function TraceRow({
   event,
-  outcome,
   reduceMotion,
 }: {
   event: TraceRowEvent;
-  outcome?: ToolOutcome;
   reduceMotion: boolean;
 }): ReactNode {
   const [expanded, setExpanded] = useState(false);
   const isError = event.eventType === "error";
-  const isToolCall = event.eventType === "tool_call";
   const textEnterTransform = reduceMotion
     ? "translateY(0px)"
     : "translateY(2px)";
@@ -302,49 +298,29 @@ function TraceRow({
   const icon =
     event.eventType === "reasoning_summary" ? (
       <Brain className="size-3.5 shrink-0" aria-hidden />
-    ) : event.eventType === "approval_request" ? (
-      <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
     ) : event.eventType === "approval_decision" &&
       event.decision !== "approved" ? (
       <ShieldX className="size-3.5 shrink-0" aria-hidden />
     ) : event.eventType === "approval_decision" ? (
       <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
-    ) : event.eventType === "message" ? (
-      <MessageSquareText className="size-3.5 shrink-0" aria-hidden />
     ) : isError ? (
       <CircleAlert className="size-3.5 shrink-0" aria-hidden />
-    ) : event.capability.includes("file") ? (
-      <FileTerminal className="size-3.5 shrink-0" aria-hidden />
     ) : (
       <Wrench className="size-3.5 shrink-0" aria-hidden />
     );
 
-  const content = isToolCall ? (
-    <>
-      <span className="text-foreground">{event.operation}</span>
-      <span className="ml-2 font-mono text-[0.6875rem] text-muted-foreground">
-        {event.capability}
-      </span>
-    </>
-  ) : event.eventType === "reasoning_summary" ? (
-    event.summaryText
-  ) : event.eventType === "approval_request" ? (
-    event.reason
-  ) : event.eventType === "approval_decision" ? (
-    event.decision === "approved" ? (
-      "Command approved"
-    ) : event.decision === "denied" ? (
-      "Command denied"
-    ) : event.decision === "expired" ? (
-      "Command approval expired"
-    ) : (
-      "Command approval cancelled"
-    )
-  ) : event.eventType === "message" ? (
-    event.text
-  ) : (
-    event.message
-  );
+  const content =
+    event.eventType === "reasoning_summary"
+      ? event.summaryText
+      : event.eventType === "approval_decision"
+        ? event.decision === "approved"
+          ? "Command approved"
+          : event.decision === "denied"
+            ? "Command denied"
+            : event.decision === "expired"
+              ? "Command approval expired"
+              : "Command approval cancelled"
+        : event.message;
 
   return (
     <motion.div
@@ -406,19 +382,6 @@ function TraceRow({
             </motion.span>
           </AnimatePresence>
         </motion.span>
-        {outcome ? (
-          <motion.span
-            layout={reduceMotion ? false : "position"}
-            layoutDependency={expanded}
-            className={cn(
-              "ml-auto shrink-0 text-[0.6875rem]",
-              expanded && "mt-0.5",
-              outcome === "failed" && "text-negative",
-            )}
-          >
-            {outcome}
-          </motion.span>
-        ) : null}
         <motion.span
           layout={reduceMotion ? false : "position"}
           layoutDependency={expanded}
@@ -437,11 +400,124 @@ function TraceRow({
   );
 }
 
+function ToolCallRow({
+  event,
+  progress,
+  reduceMotion,
+  result,
+  working,
+}: {
+  event: ToolCallEvent;
+  progress: readonly ToolProgressEvent[];
+  reduceMotion: boolean;
+  result?: ToolResultEvent;
+  working: boolean;
+}): ReactNode {
+  const [expanded, setExpanded] = useState(false);
+  const presentation = toolCallPresentation(event, progress, result);
+  const duration = useElapsed(event.occurredAt, presentation.active);
+  const hasDetails = presentation.details.length > 0;
+  const icon =
+    event.capability === "shell" || event.capability === "acp.execute" ? (
+      <FileTerminal className="size-3.5" aria-hidden />
+    ) : (
+      <Wrench className="size-3.5" aria-hidden />
+    );
+
+  const header = (
+    <>
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-sm",
+          presentation.active && working
+            ? "radius-thinking-label"
+            : "text-muted-foreground",
+          presentation.failed && "text-negative",
+        )}
+      >
+        {presentation.title}
+        {presentation.active ? (
+          <span className="tabular-nums text-muted-foreground">
+            {` for ${duration}`}
+          </span>
+        ) : null}
+      </span>
+      {hasDetails ? (
+        <ChevronDown
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+            expanded && "rotate-180",
+          )}
+          aria-hidden
+        />
+      ) : null}
+    </>
+  );
+
+  return (
+    <motion.div
+      layout={!reduceMotion}
+      layoutDependency={expanded}
+      transition={{
+        layout: { duration: 0.18, ease: TRACE_ROW_LAYOUT_EASE },
+      }}
+      className="w-full"
+      data-tool-call-id={event.eventId}
+    >
+      {hasDetails ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="-ml-1.5 flex min-h-8 w-[calc(100%+0.375rem)] items-center gap-2 rounded-sm px-1.5 text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.99]"
+        >
+          {header}
+        </button>
+      ) : (
+        <div className="flex min-h-8 items-center gap-2">{header}</div>
+      )}
+      {presentation.active ? (
+        <span className="sr-only" role="status" aria-live="polite">
+          {presentation.title}
+        </span>
+      ) : null}
+      {hasDetails ? (
+        <div
+          aria-hidden={!expanded}
+          inert={!expanded}
+          className="grid transition-[grid-template-rows,opacity] duration-200"
+          style={{
+            gridTemplateRows: expanded ? "1fr" : "0fr",
+            opacity: expanded ? 1 : 0,
+          }}
+        >
+          <div className="overflow-hidden">
+            <div className="my-1 max-h-64 overflow-auto rounded-md border border-border bg-muted/50 px-3 py-2.5">
+              {presentation.details.map((detail) => (
+                <section key={detail.label} className="not-last:mb-3">
+                  <div className="mb-1 text-sm text-muted-foreground">
+                    {detail.label}
+                  </div>
+                  <pre className="m-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-foreground">
+                    {detail.text}
+                  </pre>
+                </section>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </motion.div>
+  );
+}
+
 function RunTrace({
   assistantStreaming,
   block,
   onResolveTerminalApproval,
   reduceMotion,
+  sessionId,
 }: {
   assistantStreaming: boolean;
   block: Extract<SessionTranscriptBlock, { kind: "run" }>;
@@ -450,6 +526,7 @@ function RunTrace({
     selection: ToolApprovalSelection,
   ): Promise<void>;
   reduceMotion: boolean;
+  sessionId: string;
 }): ReactNode {
   const startedAt =
     block.events.find((event) => event.eventType === "agent_run")?.occurredAt ??
@@ -470,8 +547,6 @@ function RunTrace({
     )
     .at(-1);
   const endedAt = latestState && !live ? latestState.occurredAt : null;
-  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
-  const expanded = resolveSessionRunDisclosure(live, userExpanded);
   const resultByToolCall = useMemo(
     () =>
       new Map(
@@ -484,10 +559,20 @@ function RunTrace({
               { eventType: "tool_result" }
             > => event.eventType === "tool_result",
           )
-          .map((event) => [event.toolCallEventId, event.outcome]),
+          .map((event) => [event.toolCallEventId, event]),
       ),
     [block.events],
   );
+  const progressByToolCall = useMemo(() => {
+    const progress = new Map<string, ToolProgressEvent[]>();
+    for (const event of block.events) {
+      if (event.eventType !== "tool_progress") continue;
+      const entries = progress.get(event.toolCallEventId) ?? [];
+      entries.push(event);
+      progress.set(event.toolCallEventId, entries);
+    }
+    return progress;
+  }, [block.events]);
   const toolCalls = useMemo(
     () =>
       new Map(
@@ -515,19 +600,14 @@ function RunTrace({
       ),
     [block.events],
   );
-  const pendingApprovals = block.events.filter(
+  const rows = block.events.filter(
     (
       event,
-    ): event is Extract<
-      SessionTranscriptEvent,
-      { eventType: "approval_request" }
-    > =>
-      event.eventType === "approval_request" &&
-      !decidedApprovalIds.has(event.eventId) &&
-      toolCalls.has(event.toolCallEventId),
-  );
-  const rows = block.events.filter(
-    (event): event is TraceRowEvent =>
+    ): event is
+      | TraceRowEvent
+      | ToolCallEvent
+      | Extract<SessionTranscriptEvent, { eventType: "message" }>
+      | Extract<SessionTranscriptEvent, { eventType: "approval_request" }> =>
       event.eventType === "reasoning_summary" ||
       (event.eventType === "message" && event.messageKind === "progress") ||
       event.eventType === "tool_call" ||
@@ -535,7 +615,17 @@ function RunTrace({
       event.eventType === "approval_decision" ||
       event.eventType === "error",
   );
-  const canExpand = rows.length > 0;
+  const hasActiveTool = [...toolCalls.values()].some(
+    (event) =>
+      toolCallPresentation(
+        event,
+        progressByToolCall.get(event.eventId) ?? [],
+        resultByToolCall.get(event.eventId),
+      ).active,
+  );
+  const showRunStatus =
+    (live && !hasActiveTool && !assistantStreaming) ||
+    (state !== "working" && state !== "completed" && rows.length === 0);
   const nextActivity = useMemo<DisplayedRunActivity>(() => {
     if (activelyWorking) {
       return {
@@ -550,173 +640,77 @@ function RunTrace({
     };
   }, [activelyWorking, assistantStreaming, block.events, presentation, state]);
   const completed = state === "completed";
-  const stateEnterTransform = reduceMotion
-    ? "translateY(0px)"
-    : "translateY(2px)";
-  const stateExitTransform = reduceMotion
-    ? "translateY(0px)"
-    : "translateY(-2px)";
-  const indicatorEnterTransform = reduceMotion
-    ? "translateY(0px) scale(1)"
-    : "translateY(2px) scale(1)";
-  const indicatorExitTransform = reduceMotion
-    ? "translateY(0px) scale(1)"
-    : "translateY(0px) scale(0.96)";
-  const stateTextMotionProps = {
-    layout: reduceMotion ? false : ("position" as const),
-    layoutDependency: state,
-    initial: { opacity: 0, transform: stateEnterTransform },
-    animate: { opacity: 1, transform: "translateY(0px)" },
-    exit: {
-      opacity: 0,
-      transform: stateExitTransform,
-      transition: {
-        duration: 0.1,
-        ease: TRANSCRIPT_STATE_EASE,
-      },
-    },
-    transition: {
-      duration: reduceMotion ? 0.1 : 0.16,
-      ease: TRANSCRIPT_STATE_EASE,
-      layout: {
-        duration: 0.16,
-        ease: TRANSCRIPT_STATE_EASE,
-      },
-    },
-  };
-
-  const header = (
-    <>
-      <AnimatePresence initial={false} mode="popLayout">
-        {live || state === "failed" ? (
-          <motion.span
-            key={live ? "live-indicator" : "failed-indicator"}
-            initial={{ opacity: 0, transform: indicatorEnterTransform }}
-            animate={{
-              opacity: 1,
-              transform: "translateY(0px) scale(1)",
-            }}
-            exit={{
-              opacity: 0,
-              transform: indicatorExitTransform,
-              transition: {
-                duration: 0.1,
-                ease: TRANSCRIPT_STATE_EASE,
-              },
-            }}
-            transition={{
-              duration: reduceMotion ? 0.1 : 0.16,
-              ease: TRANSCRIPT_STATE_EASE,
-            }}
-            className="shrink-0"
-          >
-            {live ? (
-              <ActivityIndicator active={activelyWorking} />
-            ) : (
-              <CircleAlert className="size-3.5 text-negative" aria-hidden />
-            )}
-          </motion.span>
-        ) : null}
-      </AnimatePresence>
-      <SessionRunActivityLabel
-        live={live}
-        nextActivity={nextActivity}
-        reduceMotion={reduceMotion}
-      />
-      <AnimatePresence initial={false} mode="popLayout">
-        <motion.span
-          key={`duration-${state}`}
-          {...stateTextMotionProps}
-          className="text-sm font-normal tabular-nums text-muted-foreground"
-        >
-          {completed ? "Worked for " : null}
-          <RunDurationText
-            active={live}
-            endedAt={endedAt}
-            startedAt={startedAt}
-          />
-        </motion.span>
-      </AnimatePresence>
-      {canExpand ? (
-        <ChevronDown
-          className={cn(
-            "size-3.5 text-muted-foreground transition-transform duration-200",
-            expanded && "rotate-180",
-          )}
-          aria-hidden
-        />
-      ) : null}
-    </>
-  );
+  if (!live && rows.length === 0) return null;
 
   return (
     <section
       aria-label="Agent work"
-      className="mb-3 w-full border-b border-border"
+      className="mb-3 flex w-full flex-col gap-1"
     >
-      {canExpand ? (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setUserExpanded(toggleSessionRunDisclosure(expanded))}
-          className={cn(
-            "-ml-1.5 flex min-h-7 w-fit gap-2 rounded-sm px-1.5 text-left transition-colors duration-150 hover:bg-accent active:scale-[0.99]",
-            live || state === "failed" ? "items-center" : "items-baseline",
-          )}
-        >
-          {header}
-        </button>
-      ) : (
-        <div
-          className={cn(
-            "flex min-h-7 w-fit gap-2",
-            live || state === "failed" ? "items-center" : "items-baseline",
-          )}
-        >
-          {header}
-        </div>
-      )}
-
-      {pendingApprovals.map((request) => {
-        const toolCall = toolCalls.get(request.toolCallEventId);
-        return toolCall ? (
-          <TerminalApproval
-            key={request.eventId}
-            request={request}
-            toolCall={toolCall}
-            onResolve={(decision) =>
-              onResolveTerminalApproval(request.eventId, decision)
-            }
+      {rows.map((event) => {
+        if (event.eventType === "message") {
+          return (
+            <Message
+              key={event.eventId}
+              event={event}
+              reduceMotion={reduceMotion}
+              sessionId={sessionId}
+            />
+          );
+        }
+        if (event.eventType === "tool_call") {
+          return (
+            <ToolCallRow
+              key={event.eventId}
+              event={event}
+              progress={progressByToolCall.get(event.eventId) ?? []}
+              reduceMotion={reduceMotion}
+              result={resultByToolCall.get(event.eventId)}
+              working={activelyWorking}
+            />
+          );
+        }
+        if (event.eventType === "approval_request") {
+          const toolCall = toolCalls.get(event.toolCallEventId);
+          return toolCall && !decidedApprovalIds.has(event.eventId) ? (
+            <TerminalApproval
+              key={event.eventId}
+              request={event}
+              toolCall={toolCall}
+              onResolve={(decision) =>
+                onResolveTerminalApproval(event.eventId, decision)
+              }
+            />
+          ) : null;
+        }
+        return (
+          <TraceRow
+            key={event.eventId}
+            event={event}
+            reduceMotion={reduceMotion}
           />
-        ) : null;
+        );
       })}
-
-      {canExpand ? (
-        <div
-          aria-hidden={!expanded}
-          inert={!expanded}
-          className="grid transition-[grid-template-rows,opacity] duration-200"
-          style={{
-            gridTemplateRows: expanded ? "1fr" : "0fr",
-            opacity: expanded ? 1 : 0,
-          }}
-        >
-          <div className="overflow-hidden">
-            <div className="ml-[5px] mt-1 max-h-64 overflow-y-auto overscroll-contain border-l border-border pb-1 pl-[1.125rem] pr-1">
-              <div className="flex flex-col gap-0.5">
-                {rows.map((event) => {
-                  return (
-                    <TraceRow
-                      key={event.eventId}
-                      event={event}
-                      outcome={resultByToolCall.get(event.eventId)}
-                      reduceMotion={reduceMotion}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+      {showRunStatus ? (
+        <div className="flex min-h-8 w-fit items-center gap-2">
+          {live ? (
+            <ActivityIndicator active={activelyWorking} />
+          ) : state === "failed" ? (
+            <CircleAlert className="size-3.5 text-negative" aria-hidden />
+          ) : null}
+          <SessionRunActivityLabel
+            live={live}
+            nextActivity={nextActivity}
+            reduceMotion={reduceMotion}
+          />
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {completed ? "Worked for " : null}
+            <RunDurationText
+              active={live}
+              endedAt={endedAt}
+              startedAt={startedAt}
+            />
+          </span>
         </div>
       ) : null}
     </section>
@@ -774,6 +768,7 @@ export const SessionThread = memo(function SessionThread({
             block={block}
             onResolveTerminalApproval={onResolveTerminalApproval}
             reduceMotion={reduceMotion}
+            sessionId={sessionId}
           />
         ),
       )}
