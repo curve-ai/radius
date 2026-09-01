@@ -19,6 +19,20 @@ import {
 import { migrateRadiusDatabase, openRadiusDatabase } from "./database.js";
 import { clientInstances } from "./schema.js";
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      (error as NodeJS.ErrnoException).code === "EBUSY"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 test("persists and independently revokes MCP tool and server approvals", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "radius-mcp-grants-"));
   const database = await openRadiusDatabase({
@@ -128,6 +142,6 @@ test("persists and independently revokes MCP tool and server approvals", async (
     );
   } finally {
     database.close();
-    await rm(directory, { force: true, recursive: true });
+    await removeTemporaryDirectory(directory);
   }
 });
