@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  AgentReleaseInstallError,
   connectAgentAuthenticationAccount,
   disconnectAgentAuthentication,
   getAgentAuthenticationSummary,
@@ -13,7 +14,7 @@ import {
   type InstallAgentReleaseInput,
 } from "./agent-auth-store.js";
 import { migrateRadiusDatabase, openRadiusDatabase } from "./database.js";
-import { clientInstances } from "./schema.js";
+import { agentAuthenticationBindings, clientInstances } from "./schema.js";
 
 const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
 const clientId = "19353755-3c5e-4529-b58d-c74dacf7b68d";
@@ -152,7 +153,89 @@ test("rejects release metadata changes for the same version", async () => {
         ...releaseInput,
         imageDigest: `sha256:${"c".repeat(64)}`,
       }),
-      /Image digest changed for immutable release/,
+      (error) =>
+        error instanceof AgentReleaseInstallError &&
+        error.code === "AGENT_RELEASE_IMMUTABLE_CONFLICT" &&
+        error.field === "image_digest",
+    );
+  });
+});
+
+test("rejects a different release version reusing one immutable image", async () => {
+  await withDatabase(async (database) => {
+    await installAgentRelease(database, releaseInput);
+    await assert.rejects(
+      installAgentRelease(database, {
+        ...releaseInput,
+        releaseVersion: "backend/release-2026.09.01+radius",
+        manifestSha256: "c".repeat(64),
+        now: now + 1_000,
+      }),
+      (error) =>
+        error instanceof AgentReleaseInstallError &&
+        error.code === "AGENT_RELEASE_IMAGE_CONFLICT" &&
+        error.field === "image_digest",
+    );
+  });
+});
+
+test("preserves authentication history when selecting a newer release", async () => {
+  await withDatabase(async (database) => {
+    const first = await installAgentRelease(database, releaseInput);
+    await connectAgentAuthenticationAccount(database, {
+      installationId: first.installationId,
+      requirementKey: "codex-subscription",
+      custodyKind: "encrypted_agent_state",
+      credentialRef: "vault:agent:fx:openai-codex",
+      remoteSubject: "account-123",
+      accountLabel: "Codex subscription",
+      expiresAt: "2026-08-25T20:00:00.000Z",
+      now: now + 1_000,
+    });
+
+    const second = await installAgentRelease(database, {
+      ...releaseInput,
+      releaseVersion: "0.0.6",
+      imageDigest: `sha256:${"c".repeat(64)}`,
+      manifestSha256: "d".repeat(64),
+      now: now + 2_000,
+    });
+
+    assert.notEqual(first.releaseId, second.releaseId);
+    assert.equal(first.installationId, second.installationId);
+    assert.equal(
+      (await getAgentAuthenticationSummary(database, second.installationId))
+        .ready,
+      false,
+    );
+
+    const historicalBindings = await database.db
+      .select()
+      .from(agentAuthenticationBindings);
+    assert.equal(historicalBindings.length, 1);
+    assert.equal(historicalBindings[0]?.releaseId, first.releaseId);
+    assert.equal(historicalBindings[0]?.unboundAtMs, now + 2_000);
+    assert.equal(historicalBindings[0]?.unboundReason, "release_replaced");
+
+    const reconnected = await connectAgentAuthenticationAccount(database, {
+      installationId: second.installationId,
+      requirementKey: "codex-subscription",
+      custodyKind: "encrypted_agent_state",
+      credentialRef: "vault:agent:fx:openai-codex",
+      remoteSubject: "account-123",
+      accountLabel: "Codex subscription",
+      expiresAt: "2026-08-25T20:00:00.000Z",
+      now: now + 3_000,
+    });
+    assert.equal(reconnected.ready, true);
+
+    const bindings = await database.db
+      .select()
+      .from(agentAuthenticationBindings);
+    assert.equal(bindings.length, 2);
+    assert.equal(
+      bindings.find((binding) => binding.unboundAtMs === null)?.releaseId,
+      second.releaseId,
     );
   });
 });

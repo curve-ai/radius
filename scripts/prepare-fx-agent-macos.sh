@@ -11,6 +11,9 @@ release_base="https://github.com/vercel-labs/fx/releases/download/v${fx_version}
 
 repository_root=$(cd "$(dirname "$0")/.." && pwd)
 output_root="$repository_root/apps/runtime-host-macos/.build/provider-assets/fx"
+release_template="$repository_root/apps/runtime-host-macos/Config/fx-release-template.json"
+radius_release_version=$(jq -er '.releaseVersion' "$release_template")
+image_reference=$(jq -er '.image.reference' "$release_template")
 stage_dir=$(mktemp -d)
 cleanup() {
   rm -rf "$stage_dir"
@@ -59,12 +62,10 @@ done
 "$repository_root/scripts/build-binary-agent-oci-layout.sh" \
   "$stage_dir/linux/fx" \
   "$prepared_root/oci-layout" \
-  "radius.local/fx:${fx_version}" \
-  "$fx_version" \
-  "$stage_dir/cacert.pem" >/dev/null
-cp \
-  "$repository_root/apps/runtime-host-macos/Config/fx-release-template.json" \
-  "$prepared_root/release-template.json"
+  "$image_reference" \
+  "$radius_release_version" \
+  "$stage_dir/cacert.pem" \
+  "$release_template" >/dev/null
 printf '%s\n' \
   "Source: https://curl.se/ca/cacert.pem" \
   "SHA-256: $ca_bundle_sha256" \

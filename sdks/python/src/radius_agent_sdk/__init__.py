@@ -24,6 +24,7 @@ from acp.schema import (
     ImageContentBlock,
     Implementation,
     ResourceContentBlock,
+    SessionInfoUpdate,
     TextContentBlock,
 )
 
@@ -78,6 +79,19 @@ class RunContext:
         await self._client.session_update(
             session_id=self.session_id,
             update=update_agent_message(text_block(text)),
+        )
+
+    async def set_session_title(self, title: str) -> None:
+        normalized = title.strip()
+        if not normalized:
+            raise ValueError("Session title is required")
+        self.raise_if_cancelled()
+        await self._client.session_update(
+            session_id=self.session_id,
+            update=SessionInfoUpdate(
+                session_update="session_info_update",
+                title=normalized,
+            ),
         )
 
 

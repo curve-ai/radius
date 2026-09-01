@@ -313,11 +313,11 @@ export const toolProviders = sqliteTable(
       () => clientInstances.id,
       { onDelete: "restrict" },
     ),
-    installationId: id("installation_id").references(
+    installationId: text("installation_id").references(
       () => connectorInstallations.id,
       { onDelete: "restrict" },
     ),
-    endpointId: id("endpoint_id").references(
+    endpointId: text("endpoint_id").references(
       () => connectorReleaseEndpoints.id,
       { onDelete: "restrict" },
     ),
@@ -348,6 +348,10 @@ export const toolProviders = sqliteTable(
     check(
       "tool_providers_profile_revision_paired",
       sql`(${table.profileConnectionId} is null and ${table.appliedProfileRevision} is null) or (${table.profileConnectionId} is not null and ${table.appliedProfileRevision} > 0)`,
+    ),
+    check(
+      "tool_providers_connector_origin_paired",
+      sql`(${table.installationId} is null and ${table.endpointId} is null) or (${table.installationId} is not null and ${table.endpointId} is not null)`,
     ),
     check(
       "tool_providers_credential_connected",

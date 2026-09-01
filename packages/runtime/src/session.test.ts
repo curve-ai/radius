@@ -146,7 +146,11 @@ test("streams messages and bridges an exact permission decision", async () => {
     assert.equal(result.text, "Hello from the agent");
     assert.equal(permissionTitle, "Use a test tool");
     assert.equal(terminalReleased, true);
-    assert.deepEqual(updates, ["agent_message_chunk", "tool_call"]);
+    assert.deepEqual(updates, [
+      "session_info_update",
+      "agent_message_chunk",
+      "tool_call",
+    ]);
   } finally {
     runtime.close();
   }
@@ -166,6 +170,14 @@ async function sendTestTurn(
     path: "/tmp/radius-runtime-test/note.txt",
   });
   assert.equal(file.content, "saved");
+
+  await clientContext.notify(methods.client.session.update, {
+    sessionId: request.sessionId,
+    update: {
+      sessionUpdate: "session_info_update",
+      title: "Runtime test session",
+    },
+  });
 
   const terminal = await clientContext.request(methods.client.terminal.create, {
     sessionId: request.sessionId,

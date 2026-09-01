@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { provisionPlatformOrganization } from "@curve-ai/platform-database";
 
-import { createPlatformApp, PlatformApiError } from "./app.js";
+import { createPlatformApp } from "./app.js";
 import {
   createPostgresBrowserAuth,
   createPostgresBrowserSessionAuth,
@@ -13,71 +13,40 @@ import { normalizePlatformOidcOptions } from "./oidc.js";
 import { createPostgresPlatformServices } from "./postgres-services.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
-const databaseUrl = process.env.DATABASE_URL?.trim();
+const databaseUrl = requiredEnvironment("DATABASE_URL");
 const bootstrapDevelopmentAuthority =
   process.env.RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY === "true";
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
 
-const runtime = databaseUrl
-  ? await createPostgresPlatformServices({
-      connectionString: databaseUrl,
-      bootstrapDevelopmentAuthority,
-      developmentAccessToken: developmentToken,
-      migrationsDirectory: process.env.RADIUS_PLATFORM_MIGRATIONS_DIR,
-      registry: process.env.RADIUS_PLATFORM_REGISTRY,
-      registryVerification: process.env.RADIUS_PLATFORM_REGISTRY_VERIFY,
-      allowInsecureRegistryVerification:
-        process.env.RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE === "true",
-      registryUsername: process.env.RADIUS_PLATFORM_REGISTRY_USERNAME,
-      registryPassword: process.env.RADIUS_PLATFORM_REGISTRY_PASSWORD,
-    })
-  : null;
+const runtime = await createPostgresPlatformServices({
+  connectionString: databaseUrl,
+  bootstrapDevelopmentAuthority,
+  developmentAccessToken: developmentToken,
+  migrationsDirectory: process.env.RADIUS_PLATFORM_MIGRATIONS_DIR,
+  registry: process.env.RADIUS_PLATFORM_REGISTRY,
+  registryVerification: process.env.RADIUS_PLATFORM_REGISTRY_VERIFY,
+  allowInsecureRegistryVerification:
+    process.env.RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE === "true",
+  registryUsername: process.env.RADIUS_PLATFORM_REGISTRY_USERNAME,
+  registryPassword: process.env.RADIUS_PLATFORM_REGISTRY_PASSWORD,
+});
 
-if ((developmentToken || bootstrapDevelopmentAuthority) && !databaseUrl) {
-  throw new Error(
-    "DATABASE_URL is required for the PostgreSQL Platform provider",
-  );
-}
-
-const services = runtime?.services ?? {
-  authenticate: async () => null,
-  authenticateBrowserSession: async () => null,
-  listOrganizationMemberships: notConfigured("Organization membership"),
-  updateOrganizationMembership: notConfigured("Organization membership"),
-  listDeveloperTokens: notConfigured("Developer token"),
-  createDeveloperToken: notConfigured("Developer token"),
-  revokeDeveloperToken: notConfigured("Developer token"),
-  listAgents: notConfigured("Agent"),
-  listAgentDeployments: notConfigured("Agent deployment"),
-  listAgentEnvironmentHistory: notConfigured("Agent environment"),
-  prepareAgentDeployment: notConfigured("Agent deployment"),
-  finalizeAgentDeployment: notConfigured("Agent deployment"),
-  promoteAgentDeployment: notConfigured("Deployment"),
-  rollbackAgentDeployment: notConfigured("Deployment"),
-  registerClientInstallation: notConfigured("Client installation"),
-  reportAgentInstallation: notConfigured("Agent installation"),
-  listInstallations: notConfigured("Installation"),
-};
-
-const browserAuth = runtime
-  ? browserAuthFromEnvironment(runtime.pool, sharedOrigins)
+const browserAuth = browserAuthFromEnvironment(runtime.pool, sharedOrigins);
+const provisioningToken =
+  process.env.RADIUS_PLATFORM_PROVISIONING_TOKEN?.trim();
+const provisioning = provisioningToken
+  ? {
+      authenticate: async (candidate: string) =>
+        constantTimeEqual(candidate, provisioningToken),
+      provisionOrganization: (
+        request: Parameters<typeof provisionPlatformOrganization>[1],
+      ) => provisionPlatformOrganization(runtime.pool, request),
+    }
   : undefined;
-const provisioningToken = process.env.RADIUS_PLATFORM_PROVISIONING_TOKEN?.trim();
-const provisioning =
-  runtime && provisioningToken
-    ? {
-        authenticate: async (candidate: string) =>
-          constantTimeEqual(candidate, provisioningToken),
-        provisionOrganization: (
-          request: Parameters<typeof provisionPlatformOrganization>[1],
-        ) => provisionPlatformOrganization(runtime.pool, request),
-      }
-    : undefined;
-const app = createPlatformApp(services, {
+const app = createPlatformApp(runtime.services, {
   browserAuth,
   provisioning,
-  deploymentMode:
-    sharedOrigins ? "managed" : "self_hosted",
+  deploymentMode: sharedOrigins ? "managed" : "self_hosted",
 });
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 3100),
@@ -87,20 +56,16 @@ const server = Bun.serve({
 async function shutdown(signal: string): Promise<void> {
   console.info(`[platform-api] received ${signal}; shutting down`);
   server.stop();
-  await runtime?.close();
+  await runtime.close();
 }
 
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-function notConfigured(subject: string): () => Promise<never> {
-  return async () => {
-    throw new PlatformApiError(
-      503,
-      "NOT_CONFIGURED",
-      `${subject} provider is not configured`,
-    );
-  };
+function requiredEnvironment(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required`);
+  return value;
 }
 
 function browserAuthFromEnvironment(

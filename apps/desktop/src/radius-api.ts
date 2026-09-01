@@ -6,6 +6,7 @@ import type {
   ConnectorCatalogTaxonomyCategory,
 } from "@curve-ai/radius-connector-protocol";
 import type {
+  ComposerDraftContext,
   ConnectorSummary,
   ConnectorEnabledToolSummary,
   SessionTranscriptEventRecord,
@@ -107,6 +108,12 @@ export interface SessionTranscriptStreamUpdate {
 }
 export const SESSION_TRANSCRIPT_STREAM_CHANNEL =
   "radius:session-transcript-stream";
+export const SESSION_RUN_ACTIVITY_DETAIL = {
+  connectingAgent: "Connecting to the development agent",
+  resumingWork: "Continuing with approved access",
+  startingFxAgent: "Preparing the local fx runtime",
+  startingLocalAgent: "Preparing the local agent runtime",
+} as const;
 export const AGENTS_CHANGED_CHANNEL = "radius:agents-changed";
 export type DesktopConnector = ConnectorSummary;
 export type DesktopConnectorCatalogEntry = ConnectorCatalogEntry;
@@ -125,6 +132,13 @@ export interface ProjectFolderSelection {
   selectionId: string;
   rootPath: string;
   defaultName: string;
+}
+
+export type { ComposerDraftContext } from "@curve-ai/radius-storage";
+
+export interface SaveComposerDraftInput {
+  context: ComposerDraftContext;
+  content: string;
 }
 
 export interface DesktopSyncStatus {
@@ -175,7 +189,7 @@ export interface BrowserConnectionStatus {
 }
 
 export interface StartAgentPromptInput {
-  accessMode: "ask" | "full";
+  accessMode: "ask" | "project" | "full";
   agentId: string;
   modelId?: string | null;
   prompt: string;
@@ -189,10 +203,22 @@ export interface StartAgentPromptResult {
   userMessageEventId: string;
 }
 
-export interface ResolveTerminalApprovalInput {
+export type ToolApprovalSelection =
+  "allow_once" | "allow_always" | "allow_server" | "denied";
+
+export interface ResolveToolApprovalInput {
   approvalRequestEventId: string;
-  decision: "approved" | "denied";
+  selection: ToolApprovalSelection;
   sessionId: string;
+}
+
+export interface McpApprovalGrantSummary {
+  grantId: string;
+  scope: "server" | "tool";
+  providerId: string;
+  providerLabel: string;
+  toolName: string | null;
+  grantedAt: string;
 }
 
 export type MarkdownMediaResolution =
@@ -211,14 +237,16 @@ export type MarkdownMediaResolution =
 export type MarkdownLinkPreviewResolution =
   | {
       state: "ready";
-      description: string | null;
-      finalUrl: string;
-      imageDataUrl: string | null;
-      siteName: string;
-      title: string;
+      faviconDataUrl: string | null;
+      faviconDarkDataUrl: string | null;
     }
   | { state: "blocked"; reason: "unsafe_url" }
   | { state: "unavailable" };
+
+export interface OpenSessionFileInput {
+  href: string;
+  sessionId: string;
+}
 
 export interface CloudConnectionInput {
   frontendUrl: string;
@@ -227,6 +255,7 @@ export interface CloudConnectionInput {
 
 export interface RadiusApi {
   platform: string;
+  handleTitlebarDoubleClick(): Promise<void>;
   setNativeTheme(preference: ThemePreference): Promise<boolean>;
   showNativeControlMenu(input: NativeControlMenuInput): Promise<string | null>;
   writeClipboardText(text: string): Promise<void>;
@@ -234,6 +263,9 @@ export interface RadiusApi {
   listProjects(): Promise<ProjectSidebarRecord[]>;
   listRecentSessions(): Promise<RecentSidebarSession[]>;
   listSessionTranscript(sessionId: string): Promise<SessionTranscriptEvent[]>;
+  getComposerDraft(context: ComposerDraftContext): Promise<string | null>;
+  saveComposerDraft(input: SaveComposerDraftInput): Promise<void>;
+  clearComposerDraft(context: ComposerDraftContext): Promise<void>;
   onSessionTranscriptStream(
     listener: (update: SessionTranscriptStreamUpdate) => void,
   ): () => void;
@@ -265,6 +297,7 @@ export interface RadiusApi {
     name: string;
     url: string;
   }): Promise<DesktopConnector>;
+  connectConnector(installationId: string): Promise<DesktopConnector>;
   disconnectConnector(providerId: string): Promise<void>;
   deleteConnector(installationId: string): Promise<void>;
   listAgents(): Promise<DesktopAgentSummary[]>;
@@ -280,11 +313,21 @@ export interface RadiusApi {
   startAgentPrompt(
     input: StartAgentPromptInput,
   ): Promise<StartAgentPromptResult>;
-  resolveTerminalApproval(input: ResolveTerminalApprovalInput): Promise<void>;
+  resolveToolApproval(input: ResolveToolApprovalInput): Promise<void>;
+  listMcpApprovalGrants(): Promise<McpApprovalGrantSummary[]>;
+  revokeMcpApproval(input: {
+    grantId: string;
+    scope: "server" | "tool";
+  }): Promise<void>;
   resolveMarkdownMedia(url: string): Promise<MarkdownMediaResolution>;
   resolveMarkdownLinkPreview(
     url: string,
   ): Promise<MarkdownLinkPreviewResolution>;
+  openSessionFile(input: OpenSessionFileInput): Promise<void>;
+  resolveSessionArtifactImage(input: {
+    sessionId: string;
+    artifactId: string;
+  }): Promise<MarkdownMediaResolution>;
   cancelAgentSession(sessionId: string): Promise<void>;
   syncStatus(): Promise<DesktopSyncStatus>;
   syncNow(): Promise<DesktopSyncStatus>;

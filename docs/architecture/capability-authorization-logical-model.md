@@ -10,7 +10,9 @@ agent availability resolution are implemented. The first macOS ACP terminal
 and text-file adapters now enforce release requests, project roots, exact
 outside-path approvals, and invocation history without a schema change. Policy
 revisions, run snapshots, durable external-path grants, and the guest MCP bridge
-remain in progress.
+remain in progress. Exact MCP tool grants plus provider-wide MCP grants and
+their append-only revocations are implemented as local authorization
+foundations.
 
 ## Mission
 
@@ -78,12 +80,12 @@ exercise them. A capability descriptor sent to an agent is not bearer authority.
 
 **Capability contract**
 : A versioned host-recognized namespace such as `workspace.files`, `shell`, or a
-  namespaced MCP server contract.
+namespaced MCP server contract.
 
 **Capability operation**
 : One callable operation within a contract, such as `read`, `write`, `execute`,
-  or `get_issue`. The pair `(capability key, operation name)` matches the current
-  tool-event vocabulary.
+or `get_issue`. The pair `(capability key, operation name)` matches the current
+tool-event vocabulary.
 
 **Agent-release request**
 : One operation requested by one immutable signed agent release. A request is a
@@ -91,33 +93,33 @@ prerequisite, never a grant.
 
 **Agent tool interface**
 : A versioned host integration surface an agent can consume, such as the
-  Radius-managed MCP bridge. Support may be declared in the signed manifest or
-  reported by a bounded probe of the exact signed release during staging.
+Radius-managed MCP bridge. Support may be declared in the signed manifest or
+reported by a bounded probe of the exact signed release during staging.
 
 **Tool provider**
 : A device-local configured executor, such as Radius's built-in filesystem or
-  shell adapter, or one configured MCP server connection.
+shell adapter, or one configured MCP server connection.
 
 **Tool binding**
 : The mapping from one tool provider's callable tool to one capability operation
-  and its exact versioned schemas.
+and its exact versioned schemas.
 
 **Policy ceiling**
 : A mandatory maximum imposed by the host or an organization. A more specific
-  preference cannot loosen it.
+preference cannot loosen it.
 
 **Policy preference**
 : A local-user choice such as a persistent project grant or a session access
-  profile. Specific preferences may replace broader preferences, but no
-  preference can override a denial or a policy ceiling.
+profile. Specific preferences may replace broader preferences, but no
+preference can override a denial or a policy ceiling.
 
 **Run authorization snapshot**
 : Immutable evidence of the descriptors offered to one run and the policy
-  revisions used to derive them. It does not authorize execution by itself.
+revisions used to derive them. It does not authorize execution by itself.
 
 **Invocation approval**
 : A decision about the exact immutable input of one tool call. It has no effect
-  on later calls unless the user separately creates a durable policy revision.
+on later calls unless the user separately creates a durable policy revision.
 
 ## Logical subjects
 
@@ -125,17 +127,17 @@ Names below are candidate logical names, not approved physical table names.
 
 ### Agent package subjects
 
-| Subject | Primary identity | Required characteristics | Alternate identity and rules |
-| --- | --- | --- | --- |
-| `agent_identities` | Opaque agent UUID | Stable publisher reference, stable vendor agent key, display name | Publisher plus vendor agent key is unique. No publisher secret is stored. |
-| `agent_releases` | Opaque release UUID | Agent identity, semantic/display version, immutable image digest, manifest digest, protocol version, publication time | Image digest is globally unique; agent plus version is unique. A release is immutable after verification. |
-| `agent_release_revocations` | Release UUID | Revoking issuer, revocation time, stable reason code, optional evidence reference | At most one effective revocation per release. Revocation is append-only and does not edit the release. |
-| `agent_installations` | Opaque installation UUID | Client instance, agent identity, selected release, lifecycle state, installation/update times | At most one active installation of one agent identity on one client. Disable or uninstall rather than deleting referenced history. |
-| `agent_release_capability_requests` | Release plus capability-operation key | Required/optional requirement, manifest position if presentation order matters | One request per release and operation. Capability lists are rows, never a JSON or comma-delimited list. |
-| `agent_release_tool_interface_declarations` | Release plus tool-interface key | Interface kind, required/optional requirement, declaration source (`manifest` or `runtime_discovery`) | One declaration per release and interface. Absence means unsupported. |
-| `agent_release_tool_interface_versions` | Declaration plus protocol version | One accepted protocol version | Declaration plus protocol version is unique. Versions are rows, never a JSON list. |
-| `agent_installation_interface_probe_reports` | Opaque report UUID | Agent installation, exact release, interface kind and negotiated version, probe outcome, creation time | A successful report belongs to the selected release and current installation. Later probes supersede rather than edit evidence. |
-| `agent_installation_probe_capability_requests` | Probe report plus capability operation | Required/optional requirement reported by the runtime | One request per report and operation. Reports may request but never grant authority. |
+| Subject                                        | Primary identity                       | Required characteristics                                                                                                           | Alternate identity and rules                                                                                                          |
+| ---------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_identities`                             | Opaque agent UUID                      | Stable publisher reference, stable vendor agent key, display name                                                                  | Publisher plus vendor agent key is unique. No publisher secret is stored.                                                             |
+| `agent_releases`                               | Opaque release UUID                    | Agent identity, opaque provider/backend version label, immutable image digest, manifest digest, protocol version, publication time | Agent plus version and image digest are each unique. Versions are non-empty opaque labels. A release is immutable after verification. |
+| `agent_release_revocations`                    | Release UUID                           | Revoking issuer, revocation time, stable reason code, optional evidence reference                                                  | At most one effective revocation per release. Revocation is append-only and does not edit the release.                                |
+| `agent_installations`                          | Opaque installation UUID               | Client instance, agent identity, selected release, lifecycle state, installation/update times                                      | At most one active installation of one agent identity on one client. Disable or uninstall rather than deleting referenced history.    |
+| `agent_release_capability_requests`            | Release plus capability-operation key  | Required/optional requirement, manifest position if presentation order matters                                                     | One request per release and operation. Capability lists are rows, never a JSON or comma-delimited list.                               |
+| `agent_release_tool_interface_declarations`    | Release plus tool-interface key        | Interface kind, required/optional requirement, declaration source (`manifest` or `runtime_discovery`)                              | One declaration per release and interface. Absence means unsupported.                                                                 |
+| `agent_release_tool_interface_versions`        | Declaration plus protocol version      | One accepted protocol version                                                                                                      | Declaration plus protocol version is unique. Versions are rows, never a JSON list.                                                    |
+| `agent_installation_interface_probe_reports`   | Opaque report UUID                     | Agent installation, exact release, interface kind and negotiated version, probe outcome, creation time                             | A successful report belongs to the selected release and current installation. Later probes supersede rather than edit evidence.       |
+| `agent_installation_probe_capability_requests` | Probe report plus capability operation | Required/optional requirement reported by the runtime                                                                              | One request per report and operation. Reports may request but never grant authority.                                                  |
 
 Capability-specific manifest data that Radius must authorize is modeled as a
 typed child subject. For example, declared network destinations are individual
@@ -151,13 +153,13 @@ introduce a capability contract or operation unknown to the host.
 
 ### Capability and provider subjects
 
-| Subject | Primary identity | Required characteristics | Alternate identity and rules |
-| --- | --- | --- | --- |
-| `capability_contracts` | Opaque contract UUID | Stable capability key, contract version, provider kind, description | Capability key plus contract version is unique. Contracts are immutable after use. |
-| `capability_operations` | Opaque operation UUID | Contract, operation name, input/output/progress schema identifiers and versions, risk class, whether interactive approval is permitted | Contract plus operation name is unique. A schema change creates a new contract/operation version. |
-| `tool_providers` | Opaque provider UUID | Client instance, provider kind, stable local provider key, label, configured/disabled times | Client plus local provider key is unique. Health is observed runtime state, not a durable grant. |
-| `tool_bindings` | Opaque binding UUID | Provider, capability operation, provider-native tool name, discovered schema hash, enabled/disabled times | Provider plus native tool name plus discovered schema hash is unique. A changed MCP schema creates a new binding and does not inherit grants silently. |
-| `network_destinations` | Opaque destination UUID | Canonical hostname, optional port, transport/TLS requirements | Canonical destination tuple is unique. Each destination is one row; allowlists are relationships. |
+| Subject                 | Primary identity        | Required characteristics                                                                                                               | Alternate identity and rules                                                                                                                           |
+| ----------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `capability_contracts`  | Opaque contract UUID    | Stable capability key, contract version, provider kind, description                                                                    | Capability key plus contract version is unique. Contracts are immutable after use.                                                                     |
+| `capability_operations` | Opaque operation UUID   | Contract, operation name, input/output/progress schema identifiers and versions, risk class, whether interactive approval is permitted | Contract plus operation name is unique. A schema change creates a new contract/operation version.                                                      |
+| `tool_providers`        | Opaque provider UUID    | Client instance, provider kind, stable local provider key, label, configured/disabled times                                            | Client plus local provider key is unique. Health is observed runtime state, not a durable grant.                                                       |
+| `tool_bindings`         | Opaque binding UUID     | Provider, capability operation, provider-native tool name, discovered schema hash, enabled/disabled times                              | Provider plus native tool name plus discovered schema hash is unique. A changed MCP schema creates a new binding and does not inherit grants silently. |
+| `network_destinations`  | Opaque destination UUID | Canonical hostname, optional port, transport/TLS requirements                                                                          | Canonical destination tuple is unique. Each destination is one row; allowlists are relationships.                                                      |
 
 Built-in operations and discovered MCP tools share the same authorization path.
 The built-in registry may originate in versioned Radius code, while installed
@@ -167,13 +169,13 @@ reference. Credential bytes remain in the operating-system credential store.
 
 ### Policy subjects
 
-| Subject | Primary identity | Required characteristics | Alternate identity and rules |
-| --- | --- | --- | --- |
-| `policy_issuers` | Opaque issuer UUID | Issuer kind (`system`, `organization`, `local_user`), stable external/local key, display label | Kind plus stable key is unique. The row identifies an authority; it contains no signing or connector secret. |
-| `authorization_policies` | Opaque policy UUID | Issuer, stable name, enforcement kind (`ceiling` or `preference`) | Issuer plus stable name is unique. System and organization policies must be ceilings. |
-| `authorization_policy_revisions` | Opaque revision UUID | Policy, positive revision number, optional superseded revision, creation time, optional validity interval, content hash | Policy plus revision number is unique. A revision is immutable after assignment and is superseded, not edited. |
-| `authorization_policy_revision_revocations` | Policy revision UUID | Revoking issuer, revocation time, stable reason code, optional evidence reference | At most one effective revocation per revision. Revocation is append-only and does not edit the revision. |
-| `authorization_rules` | Opaque rule UUID | Policy revision, capability operation, effect (`allow`, `ask`, `deny`), explicit resource mode (`all` or `selected`) | One revision may contain multiple rules only when their typed resource scopes differ. `null` never means all resources. |
+| Subject                                     | Primary identity     | Required characteristics                                                                                                | Alternate identity and rules                                                                                            |
+| ------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `policy_issuers`                            | Opaque issuer UUID   | Issuer kind (`system`, `organization`, `local_user`), stable external/local key, display label                          | Kind plus stable key is unique. The row identifies an authority; it contains no signing or connector secret.            |
+| `authorization_policies`                    | Opaque policy UUID   | Issuer, stable name, enforcement kind (`ceiling` or `preference`)                                                       | Issuer plus stable name is unique. System and organization policies must be ceilings.                                   |
+| `authorization_policy_revisions`            | Opaque revision UUID | Policy, positive revision number, optional superseded revision, creation time, optional validity interval, content hash | Policy plus revision number is unique. A revision is immutable after assignment and is superseded, not edited.          |
+| `authorization_policy_revision_revocations` | Policy revision UUID | Revoking issuer, revocation time, stable reason code, optional evidence reference                                       | At most one effective revocation per revision. Revocation is append-only and does not edit the revision.                |
+| `authorization_rules`                       | Opaque rule UUID     | Policy revision, capability operation, effect (`allow`, `ask`, `deny`), explicit resource mode (`all` or `selected`)    | One revision may contain multiple rules only when their typed resource scopes differ. `null` never means all resources. |
 
 An operation absent from a policy revision means that policy has no opinion. It
 does not mean allow. Unknown contracts, unknown operations, and invalid schemas
@@ -209,12 +211,12 @@ populated dimension must match.
 
 ### Run authorization subjects
 
-| Subject | Primary identity | Required characteristics | Alternate identity and rules |
-| --- | --- | --- | --- |
-| `run_authorization_snapshots` | Opaque snapshot UUID | Agent run, positive snapshot revision, optional superseded snapshot, installation, exact agent release, creation time, canonical resolution hash | Run plus snapshot revision is unique. Revision 1 is initial; a refresh creates the next immutable revision rather than editing the old one. |
-| `run_authorization_policy_revisions` | Snapshot plus policy revision | Contribution kind and assignment specificity | Records every policy revision used by the resolver. |
-| `run_capability_authorizations` | Opaque authorization UUID | Snapshot, exact manifest or probe request, exact tool binding, effect (`allow` or `ask`), capability/resource descriptor evidence | Snapshot plus request plus binding is unique. Only `allow` and `ask` entries are advertised as callable. |
-| `run_capability_denials` | Snapshot plus manifest or probe request | Result (`deny` or `unavailable`) and stable reason code | One summary denial per requested operation when no binding is callable. Human-readable wording is derived for presentation. |
+| Subject                              | Primary identity                        | Required characteristics                                                                                                                         | Alternate identity and rules                                                                                                                |
+| ------------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run_authorization_snapshots`        | Opaque snapshot UUID                    | Agent run, positive snapshot revision, optional superseded snapshot, installation, exact agent release, creation time, canonical resolution hash | Run plus snapshot revision is unique. Revision 1 is initial; a refresh creates the next immutable revision rather than editing the old one. |
+| `run_authorization_policy_revisions` | Snapshot plus policy revision           | Contribution kind and assignment specificity                                                                                                     | Records every policy revision used by the resolver.                                                                                         |
+| `run_capability_authorizations`      | Opaque authorization UUID               | Snapshot, exact manifest or probe request, exact tool binding, effect (`allow` or `ask`), capability/resource descriptor evidence                | Snapshot plus request plus binding is unique. Only `allow` and `ask` entries are advertised as callable.                                    |
+| `run_capability_denials`             | Snapshot plus manifest or probe request | Result (`deny` or `unavailable`) and stable reason code                                                                                          | One summary denial per requested operation when no binding is callable. Human-readable wording is derived for presentation.                 |
 
 Typed child relationships record the local resources included by one run
 authorization, mirroring the policy resource relationships. The snapshot stores
@@ -237,33 +239,36 @@ The existing event subjects remain authoritative for execution history:
 - `tool_progress_events` and `tool_results` record execution progress and the
   final outcome.
 
-If the approval UI offers “Always allow for this project,” the approval decision
-and the durable policy change are two distinct actions in one host-owned
-transaction. The policy action creates and assigns a new immutable policy
-revision; it never mutates the approval event into a reusable grant.
+Allow once remains only an invocation decision. Always allow tool creates a
+grant for one exact tool binding, so a changed schema creates a new binding and
+does not inherit it. Always allow server creates a grant for one exact tool
+provider. That provider-wide grant deliberately covers present and future tool
+bindings on the server until revoked. Grant revocations are separate
+append-only subjects. The approval decision and durable grant remain distinct
+records.
 
 ## Relationships, participation, and deletion
 
-| Parent to child | Participation | Deletion rule |
-| --- | --- | --- |
-| Agent identity to releases | One identity has zero or more releases; every release has exactly one identity | Restrict once a release is installed or referenced; use revocation. |
-| Agent release to revocation | A release has zero or one effective revocation; every revocation identifies exactly one release | Preserve with release history. |
-| Agent release to capability requests | One release has zero or more requests; every request has exactly one release and operation | Cascade only while an uninstalled draft is being imported; otherwise restrict through immutable release history. |
-| Agent release to tool-interface declarations | One release has zero or more declarations; every declaration belongs to one release | Cascade only while importing an uninstalled draft; otherwise restrict through release history. |
-| Tool-interface declaration to accepted versions | One declaration has one or more accepted versions; every version belongs to one declaration | Cascade only while importing an uninstalled draft; otherwise restrict. |
-| Client instance to agent installations | One client has zero or more installations; every installation belongs to exactly one client | Restrict while run or policy history exists; use disabled/uninstalled state. |
-| Agent installation to interface probe reports | One installation has zero or more immutable reports; every report belongs to one installation and exact release | Preserve reports used for availability or run evidence; supersede rather than edit. |
-| Interface probe report to capability requests | One successful report has zero or more requests; every request belongs to one report and operation | Preserve with the report; an unsuccessful report has no requests. |
-| Capability contract to operations | One contract has one or more operations; every operation has exactly one contract | Restrict after any manifest, policy, provider, or run reference exists. |
-| Tool provider to bindings | One provider has zero or more bindings; every binding has exactly one provider | Restrict after policy, run, or tool history; disable the provider/binding. |
-| Policy to revisions | One policy has one or more revisions; every revision has exactly one policy | Restrict assigned revisions; never cascade audit history. |
-| Policy revision to revocation | A revision has zero or one effective revocation; every revocation identifies exactly one revision | Preserve with policy history. |
-| Policy revision to rules | One revision has one or more rules; every rule has exactly one revision | Draft content may be discarded before assignment; an assigned or snapshotted revision is immutable. |
-| Policy revision to typed assignments | One revision may have zero or more assignments; every assignment has one exact context | Revoke the assignment; preserve it while referenced by run evidence. |
-| Agent run to authorization snapshots | A locally initiated run must have a current snapshot before its first brokered tool call; imported or mirrored legacy history may lack one; a run may have later refresh snapshots | Cascade only with deliberate removal of the entire run history; normal product deletion follows run/session retention policy. |
-| Snapshot to run authorizations/denials | One snapshot has one result for every release request evaluated | Preserve with the snapshot. |
-| Tool call to approval request | A call has zero or one approval request | Existing restrictive relationship remains. |
-| Approval request to decision | A request has zero or one final decision | Existing restrictive relationship remains. |
+| Parent to child                                 | Participation                                                                                                                                                                      | Deletion rule                                                                                                                 |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Agent identity to releases                      | One identity has zero or more releases; every release has exactly one identity                                                                                                     | Restrict once a release is installed or referenced; use revocation.                                                           |
+| Agent release to revocation                     | A release has zero or one effective revocation; every revocation identifies exactly one release                                                                                    | Preserve with release history.                                                                                                |
+| Agent release to capability requests            | One release has zero or more requests; every request has exactly one release and operation                                                                                         | Cascade only while an uninstalled draft is being imported; otherwise restrict through immutable release history.              |
+| Agent release to tool-interface declarations    | One release has zero or more declarations; every declaration belongs to one release                                                                                                | Cascade only while importing an uninstalled draft; otherwise restrict through release history.                                |
+| Tool-interface declaration to accepted versions | One declaration has one or more accepted versions; every version belongs to one declaration                                                                                        | Cascade only while importing an uninstalled draft; otherwise restrict.                                                        |
+| Client instance to agent installations          | One client has zero or more installations; every installation belongs to exactly one client                                                                                        | Restrict while run or policy history exists; use disabled/uninstalled state.                                                  |
+| Agent installation to interface probe reports   | One installation has zero or more immutable reports; every report belongs to one installation and exact release                                                                    | Preserve reports used for availability or run evidence; supersede rather than edit.                                           |
+| Interface probe report to capability requests   | One successful report has zero or more requests; every request belongs to one report and operation                                                                                 | Preserve with the report; an unsuccessful report has no requests.                                                             |
+| Capability contract to operations               | One contract has one or more operations; every operation has exactly one contract                                                                                                  | Restrict after any manifest, policy, provider, or run reference exists.                                                       |
+| Tool provider to bindings                       | One provider has zero or more bindings; every binding has exactly one provider                                                                                                     | Restrict after policy, run, or tool history; disable the provider/binding.                                                    |
+| Policy to revisions                             | One policy has one or more revisions; every revision has exactly one policy                                                                                                        | Restrict assigned revisions; never cascade audit history.                                                                     |
+| Policy revision to revocation                   | A revision has zero or one effective revocation; every revocation identifies exactly one revision                                                                                  | Preserve with policy history.                                                                                                 |
+| Policy revision to rules                        | One revision has one or more rules; every rule has exactly one revision                                                                                                            | Draft content may be discarded before assignment; an assigned or snapshotted revision is immutable.                           |
+| Policy revision to typed assignments            | One revision may have zero or more assignments; every assignment has one exact context                                                                                             | Revoke the assignment; preserve it while referenced by run evidence.                                                          |
+| Agent run to authorization snapshots            | A locally initiated run must have a current snapshot before its first brokered tool call; imported or mirrored legacy history may lack one; a run may have later refresh snapshots | Cascade only with deliberate removal of the entire run history; normal product deletion follows run/session retention policy. |
+| Snapshot to run authorizations/denials          | One snapshot has one result for every release request evaluated                                                                                                                    | Preserve with the snapshot.                                                                                                   |
+| Tool call to approval request                   | A call has zero or one approval request                                                                                                                                            | Existing restrictive relationship remains.                                                                                    |
+| Approval request to decision                    | A request has zero or one final decision                                                                                                                                           | Existing restrictive relationship remains.                                                                                    |
 
 ## Effective authorization algorithm
 
@@ -532,8 +537,8 @@ administration, and operated policy services remain Cloud responsibilities.
    the tool remains denied.
 6. Two MCP connections expose the same tool: each gets a distinct provider-
    scoped descriptor and opaque resource handle.
-7. An MCP input schema changes: a new binding/version is created and the old
-   grant does not silently authorize it.
+7. An MCP input schema changes: a new binding/version is created and an exact
+   tool grant does not authorize it. An active provider-wide grant does.
 8. An `ask` call changes one argument after approval: the changed call requires
    a new tool call and approval.
 9. Policy is revoked after the run handshake but before invocation: the broker

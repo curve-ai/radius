@@ -49,7 +49,7 @@ import { cn } from "@renderer/lib/utils";
 const MAX_TEXTAREA_HEIGHT_PX = 160;
 const ATTACHMENT_TRANSITION_EASE = [0.23, 1, 0.32, 1] as const;
 const ATTACHMENT_LAYOUT_EASE = [0.77, 0, 0.175, 1] as const;
-export type ChatAccessMode = "ask" | "full";
+export type ChatAccessMode = "ask" | "project" | "full";
 
 export type ConnectedAgent = {
   id: string;
@@ -88,6 +88,7 @@ export type ChatComposerProps = {
   defaultSelectedAgentId?: string;
   defaultValue?: string;
   disabled?: boolean;
+  focusKey?: string;
   onAccessModeChange?: (mode: ChatAccessMode) => void;
   onAddAttachments?: (files: File[]) => void;
   onRemoveAttachment?: (index: number) => void;
@@ -118,9 +119,16 @@ const ACCESS_OPTIONS: readonly {
     icon: Hand,
   },
   {
-    mode: "full",
+    mode: "project",
     label: "Project access",
-    description: "Use project folders and ask before accessing anything else",
+    description: "Run commands and edit files in project folders automatically",
+    icon: Folder,
+  },
+  {
+    mode: "full",
+    label: "Full access",
+    description:
+      "Run commands and access this computer automatically; MCP permissions still apply",
     icon: ShieldAlert,
   },
 ];
@@ -148,7 +156,7 @@ function AttachmentPreview({
 
   return (
     <div
-      className="group/attachment relative size-20 overflow-hidden rounded-[0.875rem] border border-border bg-muted"
+      className="group/attachment relative size-16 overflow-hidden rounded-md border border-border bg-muted"
       title={file.name}
     >
       {previewUrl && !previewFailed ? (
@@ -160,9 +168,9 @@ function AttachmentPreview({
           onError={() => setPreviewFailed(true)}
         />
       ) : (
-        <div className="flex size-full flex-col items-center justify-center gap-1.5 px-2 text-center text-muted-foreground">
-          <FileText className="size-5" aria-hidden />
-          <span className="w-full truncate text-[0.6875rem] leading-4">
+        <div className="flex size-full flex-col items-center justify-center gap-1 px-1.5 text-center text-muted-foreground">
+          <FileText className="size-4" aria-hidden />
+          <span className="w-full truncate text-[0.625rem] leading-3.5">
             {file.name}
           </span>
         </div>
@@ -173,10 +181,10 @@ function AttachmentPreview({
           size="icon"
           aria-label={`Remove ${file.name}`}
           title={`Remove ${file.name}`}
-          className="absolute right-1 top-1 size-6 bg-foreground text-background shadow-sm hover:bg-foreground/90"
+          className="absolute right-0.5 top-0.5 size-5 bg-foreground text-background shadow-sm hover:bg-foreground/90"
           onClick={onRemove}
         >
-          <X className="size-3.5" aria-hidden />
+          <X className="size-3" aria-hidden />
         </Button>
       ) : null}
     </div>
@@ -193,10 +201,11 @@ export function ChatComposer({
   className,
   connectedAgents = [],
   connectedModels = [],
-  defaultAccessMode = "full",
+  defaultAccessMode = "project",
   defaultSelectedAgentId,
   defaultValue = "",
   disabled = false,
+  focusKey,
   onAccessModeChange,
   onAddAttachments,
   onRemoveAttachment,
@@ -268,6 +277,19 @@ export function ChatComposer({
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
   }, [prompt]);
+
+  useEffect(() => {
+    if (!autoFocus || disabled) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, disabled, focusKey]);
 
   const updatePrompt = (nextValue: string): void => {
     if (value === undefined) setUncontrolledValue(nextValue);
@@ -350,15 +372,15 @@ export function ChatComposer({
 
       <form
         className={cn(
-          "relative flex min-h-24 flex-col rounded-[1.25rem] border border-border bg-background shadow-sm transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-md sm:min-h-[6.5rem]",
+          "relative flex min-h-20 flex-col rounded-[1.25rem] border border-border bg-background shadow-sm transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-md sm:min-h-24",
           hasWorkspaceBrow && "-mt-1",
         )}
         onSubmit={handleSubmit}
       >
         <div
           className={cn(
-            "flex flex-wrap gap-2 px-4",
-            attachments.length > 0 && "pt-4",
+            "flex flex-wrap gap-1.5 px-2",
+            attachments.length > 0 && "pt-2",
           )}
           aria-label="Attached files"
         >
@@ -416,15 +438,16 @@ export function ChatComposer({
           id={promptId}
           rows={1}
           autoFocus={autoFocus}
+          data-route-autofocus={autoFocus ? "true" : undefined}
           value={prompt}
           disabled={disabled}
           placeholder={placeholder}
-          className="min-h-12 w-full resize-none overflow-y-auto bg-transparent px-4 pb-2 pt-3.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/45 disabled:cursor-not-allowed sm:min-h-14"
+          className="min-h-10 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/45 disabled:cursor-not-allowed sm:min-h-12"
           onChange={(event) => updatePrompt(event.target.value)}
           onKeyDown={handleKeyDown}
         />
 
-        <div className="mt-auto flex h-10 shrink-0 items-center gap-1 px-1.5 sm:h-12 sm:px-2">
+        <div className="mt-auto flex h-10 shrink-0 items-center gap-1 px-1.5 sm:h-11 sm:px-2">
           <input
             ref={fileInputRef}
             type="file"

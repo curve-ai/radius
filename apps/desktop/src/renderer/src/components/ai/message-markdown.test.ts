@@ -71,9 +71,56 @@ test("renders deliberate CommonMark, task-list, and definition components", () =
   assert.match(html, /<em[^>]*>Emphasis<\/em>/);
   assert.match(html, /<del[^>]*>removed<\/del>/);
   assert.match(html, /type="checkbox"[^>]*disabled=""[^>]*checked=""/);
+  assert.match(html, /mt-\[0\.3125rem\]/);
   assert.match(html, /<dl[^>]*>/);
   assert.match(html, /<dt[^>]*>Term<\/dt>/);
   assert.match(html, /<dd[^>]*>Definition text\s*<\/dd>/);
+});
+
+test("gives heading levels a clear compact hierarchy", () => {
+  const html = render(
+    [
+      "# One",
+      "",
+      "## Two",
+      "",
+      "### Three",
+      "",
+      "#### Four",
+      "",
+      "##### Five",
+      "",
+      "###### Six",
+    ].join("\n"),
+  );
+
+  assert.match(html, /<h1[^>]*text-2xl/);
+  assert.match(html, /<h2[^>]*text-xl/);
+  assert.match(html, /<h3[^>]*text-lg/);
+  assert.match(html, /<h4[^>]*text-base/);
+  assert.match(html, /<h5[^>]*text-sm/);
+  assert.match(html, /<h6[^>]*text-xs/);
+});
+
+test("uses the shadcn typography recipe for blockquotes", () => {
+  const html = render("> A compact quote.");
+
+  assert.match(html, /<blockquote[^>]*border-l-2[^>]*italic/);
+  assert.match(html, /<p[^>]*>A compact quote\.<\/p>/);
+});
+
+test("renders provider quote groups without inventing section headings", () => {
+  const html = render(
+    ["Sample quotes", "", "│ “Belong anywhere.”", "│ — Airbnb tagline"].join(
+      "\n",
+    ),
+  );
+
+  assert.match(html, /<p[^>]*>Sample quotes<\/p>/);
+  assert.doesNotMatch(html, /<h[1-6][^>]*>Sample quotes<\/h[1-6]>/);
+  assert.equal((html.match(/<blockquote/g) ?? []).length, 1);
+  assert.equal((html.match(/<p/g) ?? []).length, 3);
+  assert.match(html, /Airbnb tagline/);
 });
 
 test("renders code blocks with language, copy, and expand controls", () => {
@@ -90,8 +137,18 @@ test("keeps streaming code readable without unstable controls", () => {
   const html = renderStreaming("```typescript\nconst partial = tr");
 
   assert.match(html, /const partial = tr/);
+  assert.match(html, /data-streaming="true"/);
   assert.doesNotMatch(html, /aria-label="Copy code"/);
   assert.doesNotMatch(html, /aria-label="Expand code"/);
+});
+
+test("keeps streaming Mermaid as plain source until completion", () => {
+  const html = renderStreaming("```mermaid\nflowchart LR\n  Prompt --");
+
+  assert.match(html, /flowchart LR/);
+  assert.match(html, /data-streaming="true"/);
+  assert.doesNotMatch(html, /Rendering diagram/);
+  assert.doesNotMatch(html, /aria-label="Expand diagram"/);
 });
 
 test("renders math without trusting HTML-capable TeX commands", () => {
@@ -100,6 +157,13 @@ test("renders math without trusting HTML-capable TeX commands", () => {
   assert.match(html, /class="katex"/);
   assert.match(html, /class="katex-display"/);
   assert.doesNotMatch(html, /<script/);
+});
+
+test("keeps math literal while the message is streaming", () => {
+  const html = renderStreaming("Inline $E = mc^2$.");
+
+  assert.match(html, /\$E = mc\^2\$/);
+  assert.doesNotMatch(html, /class="katex/);
 });
 
 test("renders Radius callouts and disclosures while preserving unknown directives", () => {
@@ -125,6 +189,13 @@ test("renders Radius callouts and disclosures while preserving unknown directive
   assert.match(html, /<summary[^>]*>More information<\/summary>/);
   assert.match(html, /:::custom/);
   assert.match(html, /Readable body/);
+});
+
+test("keeps ratios and other colon prose out of directive rendering", () => {
+  const html = render("Create a 16:9 PNG image.");
+
+  assert.match(html, /Create a 16:9 PNG image\./);
+  assert.doesNotMatch(html, /:::9/);
 });
 
 test("keeps footnotes message-local and keyboard-targetable", () => {
@@ -154,7 +225,7 @@ test("keeps footnotes message-local and keyboard-targetable", () => {
   assert.doesNotMatch(html, /id="footnote-label"/);
 });
 
-test("offers bounded media and opt-in standalone link previews", () => {
+test("renders bounded media and hover-underlined transcript links", () => {
   const html = render(
     [
       "![Remote image](https://example.com/image.png)",
@@ -164,8 +235,74 @@ test("offers bounded media and opt-in standalone link previews", () => {
   );
 
   assert.match(html, /Remote image/);
-  assert.match(html, /Preview link/);
+  assert.match(html, /no-underline/);
+  assert.match(html, /hover:underline/);
   assert.doesNotMatch(html, /src="https:\/\/example.com\/image.png"/);
+});
+
+test("keeps authored link labels and omits a globe fallback while streaming", () => {
+  const html = renderStreaming("[Google Drive](https://drive.google.com)");
+
+  assert.match(html, />Google Drive<\/span>/);
+  assert.doesNotMatch(html, /<svg/);
+  assert.doesNotMatch(html, /Google Drive -/);
+});
+
+test("defers remote image resolution while streaming", () => {
+  const html = renderStreaming(
+    "![Remote image](https://example.com/image.png)",
+  );
+
+  assert.match(html, /data-image-resolution="deferred"/);
+  assert.doesNotMatch(html, /src="https:\/\/example.com\/image.png"/);
+});
+
+test("does not restyle the current last paragraph during appends", () => {
+  const html = renderStreaming("First paragraph.\n\nSecond paragraph.");
+
+  assert.doesNotMatch(html, /last:mb-0/);
+  assert.equal((html.match(/class="mb-3"/g) ?? []).length, 2);
+});
+
+test("removes trailing paragraph space after a message completes", () => {
+  const html = render("Who are you?");
+
+  assert.match(html, /class="mb-3 last:mb-0"/);
+});
+
+test("renders project file links with their file-type icon", () => {
+  const html = render("[message-markdown.tsx](/tmp/message-markdown.tsx:42)");
+
+  assert.match(html, /data-file-icon="react"/);
+  assert.match(html, /href="\/tmp\/message-markdown.tsx:42"/);
+  assert.doesNotMatch(html, /target="_blank"/);
+});
+
+test("renders an inline image with its Markdown alt text as a caption", () => {
+  const html = render(
+    "![Generated preview](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB)",
+  );
+
+  assert.match(html, /<img[^>]*alt="Generated preview"/);
+  assert.match(html, /<figcaption[^>]*>Generated preview<\/figcaption>/);
+});
+
+test("groups consecutive Markdown images into a wrapping gallery", () => {
+  const source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+  const html = render(`![First](${source})\n![Second](${source})`);
+
+  assert.match(html, /flex-wrap/);
+  assert.equal((html.match(/<figure/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /<p[^>]*>\s*<figure/);
+});
+
+test("renders fx generated-image links as images with their label as alt text", () => {
+  const html = render(
+    "Here it is: [▧ Blue circle](sandbox:/Users/example/.codex/generated_images/circle.png).",
+  );
+
+  assert.doesNotMatch(html, /<a[^>]*>▧/);
+  assert.match(html, /<figcaption[^>]*>Blue circle<\/figcaption>/);
 });
 
 test("keeps Mermaid inert while its bounded renderer loads", () => {
@@ -191,6 +328,11 @@ test("renders GFM tables with the optional full-canvas breakout class", () => {
   assert.match(expanded, /aria-label="Copy table"/);
   assert.match(expanded, /aria-label="Expand table"/);
   assert.match(expanded, /radius-message-table-layout/);
+  assert.match(expanded, /w-fit/);
+  assert.match(expanded, /min-w-full/);
+  assert.match(expanded, /w-max/);
+  assert.match(expanded, /table-auto/);
+  assert.doesNotMatch(expanded, /<table[^>]*class="[^"]*w-full/);
   assert.match(expanded, /pr-8/);
   assert.match(expanded, /size-6/);
   assert.match(expanded, /\[&amp;&gt;svg\]:size-3!/);
@@ -210,6 +352,27 @@ test("normalizes terminal tables before rendering the shadcn table", () => {
   assert.match(html, /<th[^>]*>Country<\/th>/);
   assert.match(html, /<td[^>]*>Canada<\/td>/);
   assert.doesNotMatch(html, /────────/);
+});
+
+test("renders provider bullet glyphs as separate list items", () => {
+  const html = render(
+    "• [TASK-101](https://linear.app/example/TASK-101) — Dropdown. • [TASK-102](https://linear.app/example/TASK-102) — Expansion.",
+  );
+
+  assert.match(html, /<ul/);
+  assert.equal((html.match(/<li/g) ?? []).length, 2);
+  assert.match(html, /gap-0/);
+  assert.match(html, /leading-5/);
+  assert.doesNotMatch(html, />\s*•\s*</);
+});
+
+test("renders an authored heading without exposing its hash markers", () => {
+  const html = render(
+    "### In progress\n\nThese are implemented locally.\n\n• Ready item",
+  );
+
+  assert.match(html, /<h3[^>]*>In progress<\/h3>/);
+  assert.doesNotMatch(html, /### In progress/);
 });
 
 test("does not hydrate raw HTML from agent Markdown", () => {

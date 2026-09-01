@@ -16,19 +16,9 @@ import {
 import { Skeleton } from "@renderer/components/ui/skeleton";
 import { cn } from "@renderer/lib/utils";
 import type { DesktopAgentSummary } from "../../../../radius-api";
+import { agentErrorMessage } from "./agent-errors";
 
 const AGENT_AUTH_STATE_EASE = [0.23, 1, 0.32, 1] as const;
-
-function safeAgentError(cause: unknown): string {
-  if (!(cause instanceof Error)) return "Agent sign-in could not be completed";
-  if (cause.message.includes("FX_LOGIN_TIMEOUT")) {
-    return "Codex sign-in timed out. Try connecting again.";
-  }
-  if (cause.message.includes("FX_BINARY_NOT_INSTALLED")) {
-    return "The fx runtime is not installed in this Radius build.";
-  }
-  return "Agent sign-in could not be completed.";
-}
 
 function authenticationLabel(agent: DesktopAgentSummary): string {
   switch (agent.authentication.state) {
@@ -78,7 +68,12 @@ export function AgentsPage(): ReactNode {
       setAgents(await window.radius.listAgents());
       setError(null);
     } catch (cause) {
-      setError(safeAgentError(cause));
+      setError(
+        agentErrorMessage(
+          cause,
+          "Agents could not be loaded. Restart Radius and try again.",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -102,7 +97,12 @@ export function AgentsPage(): ReactNode {
         current.map((agent) => (agent.id === updated.id ? updated : agent)),
       );
     } catch (cause) {
-      setError(safeAgentError(cause));
+      setError(
+        agentErrorMessage(
+          cause,
+          "Agent sign-in could not be completed. Try again.",
+        ),
+      );
     } finally {
       setPendingAgentId(null);
     }
@@ -118,7 +118,12 @@ export function AgentsPage(): ReactNode {
         current.map((agent) => (agent.id === updated.id ? updated : agent)),
       );
     } catch (cause) {
-      setError(safeAgentError(cause));
+      setError(
+        agentErrorMessage(
+          cause,
+          "Agent sign-out could not be completed. Try again.",
+        ),
+      );
     } finally {
       setPendingAgentId(null);
     }

@@ -20,23 +20,28 @@ import {
   TableHeader,
   TableRow,
 } from "@renderer/components/ui/table";
+import { Separator } from "@renderer/components/ui/separator";
 import { cn } from "@renderer/lib/utils";
 import { MessageCodeBlock } from "./message-code-block";
 import { MessageDiagram } from "./message-diagram";
 import { MessageDirective } from "./message-directive";
-import { MessageImage } from "./message-image";
-import { MessageLinkPreview } from "./message-link-preview";
+import { MessageImage, MessageImageGallery } from "./message-image";
+import { MessageLink } from "./message-link";
 import { normalizeMessageMarkdown } from "./message-markdown-normalize";
 import { remarkRadiusDirectives } from "./message-markdown-plugins";
 import { MessageTable } from "./message-table";
 
-const REMARK_PLUGINS = [
+const STREAMING_REMARK_PLUGINS = [
   remarkGfm,
   remarkDefinitionList,
   remarkDirective,
   remarkRadiusDirectives,
+] satisfies Pluggable[];
+const REMARK_PLUGINS = [
+  ...STREAMING_REMARK_PLUGINS,
   remarkMath,
-];
+] satisfies Pluggable[];
+const STREAMING_REHYPE_PLUGINS: Pluggable[] = [];
 const REHYPE_PLUGINS = [
   [
     rehypeKatex,
@@ -87,16 +92,16 @@ function codeBlock(input: {
   };
 }
 
-function standaloneLink(node: MarkdownNode | undefined): string | null {
-  if (!node || node.children?.length !== 1) return null;
-  const link = node.children[0];
-  if (link?.type !== "element" || link.tagName !== "a") return null;
-  const href = link.properties?.href;
-  if (typeof href !== "string" || !href.startsWith("https://")) return null;
-  const visibleText = (link.children ?? [])
-    .map((child) => (child.type === "text" ? (child.value ?? "") : ""))
-    .join("");
-  return visibleText === href ? href : null;
+function imageOnlyParagraph(node: MarkdownNode | undefined): boolean {
+  const children = node?.children ?? [];
+  return (
+    children.length > 0 &&
+    children.every(
+      (child) =>
+        (child.type === "element" && child.tagName === "img") ||
+        (child.type === "text" && !(child.value ?? "").trim()),
+    )
+  );
 }
 
 function focusFootnoteTarget(href: string): void {
@@ -121,20 +126,27 @@ function radiusUrlTransform(
   if (
     key === "src" &&
     node.tagName === "img" &&
-    (value.startsWith("blob:") || SAFE_INLINE_IMAGE_URL.test(value))
+    (value.startsWith("blob:") ||
+      value.startsWith("sandbox:") ||
+      SAFE_INLINE_IMAGE_URL.test(value))
   ) {
     return value;
   }
+  if (key === "href" && value.startsWith("file:")) return value;
   return defaultUrlTransform(value);
 }
 
 function components({
   footnoteLabelId,
   fullWidthTables,
+  imageSize,
+  sessionId,
   streaming,
 }: {
   footnoteLabelId: string;
   fullWidthTables: boolean;
+  imageSize: "assistant" | "user";
+  sessionId?: string;
   streaming: boolean;
 }): Components {
   return {
@@ -153,23 +165,20 @@ function components({
               event.preventDefault();
               focusFootnoteTarget(href);
             }}
-            className="rounded-sm text-brand underline decoration-brand/35 underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="rounded-sm text-brand no-underline decoration-brand/40 underline-offset-[3px] hover:underline focus-visible:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         );
       }
       return (
-        <a
-          {...props}
-          target="_blank"
-          rel="noreferrer"
-          className="rounded-sm text-brand underline decoration-brand/35 underline-offset-2 transition-colors hover:decoration-brand focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        />
+        <MessageLink href={href} sessionId={sessionId}>
+          {props.children}
+        </MessageLink>
       );
     },
     blockquote: (input) => (
       <blockquote
         {...markdownElementProps(input)}
-        className="my-3 border-l-2 border-border pl-3 text-muted-foreground"
+        className="radius-message-blockquote my-4 border-l-2 border-border pl-4 text-muted-foreground [&>p]:mb-0 [&>p:first-child]:italic [&>p+p]:mt-2 [&>p+p]:text-xs [&>p+p]:not-italic"
       />
     ),
     br: (input) => <br {...markdownElementProps(input)} />,
@@ -179,7 +188,7 @@ function components({
         <code
           {...props}
           className={cn(
-            "radius-message-markdown-code font-mono text-[0.8125rem]",
+            "radius-message-markdown-code font-mono text-[0.8125rem] font-medium",
             className,
           )}
         />
@@ -188,7 +197,7 @@ function components({
     dd: (input) => (
       <dd
         {...markdownElementProps(input)}
-        className="mb-3 ml-4 text-muted-foreground last:mb-0"
+        className="mb-3 ml-4 text-muted-foreground"
       />
     ),
     del: (input) => (
@@ -227,43 +236,41 @@ function components({
     h1: (input) => (
       <h1
         {...markdownElementProps(input)}
-        className="mb-2 mt-5 text-lg font-normal leading-7 first:mt-0"
+        className="mb-3 mt-6 text-2xl font-normal leading-8 tracking-tight text-balance first:mt-0"
       />
     ),
     h2: (input) => (
       <h2
         {...markdownElementProps(input)}
         id={input.id === "footnote-label" ? footnoteLabelId : input.id}
-        className="mb-2 mt-5 text-base font-normal leading-6 first:mt-0"
+        className="mb-2.5 mt-6 text-xl font-normal leading-7 tracking-tight text-balance first:mt-0"
       />
     ),
     h3: (input) => (
       <h3
         {...markdownElementProps(input)}
-        className="mb-1.5 mt-4 text-sm font-medium leading-6 first:mt-0"
+        className="mb-2 mt-5 text-lg font-medium leading-7 tracking-tight first:mt-0"
       />
     ),
     h4: (input) => (
       <h4
         {...markdownElementProps(input)}
-        className="mb-1.5 mt-4 text-sm font-normal leading-6 text-foreground first:mt-0"
+        className="mb-1.5 mt-4 text-base font-medium leading-6 tracking-tight first:mt-0"
       />
     ),
     h5: (input) => (
       <h5
         {...markdownElementProps(input)}
-        className="mb-1 mt-3 text-[0.8125rem] font-medium leading-5 text-foreground first:mt-0"
+        className="mb-1.5 mt-4 text-sm font-medium leading-6 first:mt-0"
       />
     ),
     h6: (input) => (
       <h6
         {...markdownElementProps(input)}
-        className="mb-1 mt-3 text-xs font-medium leading-5 text-muted-foreground first:mt-0"
+        className="mb-1 mt-3 text-xs font-medium leading-5 tracking-tight text-muted-foreground first:mt-0"
       />
     ),
-    hr: (input) => (
-      <hr {...markdownElementProps(input)} className="my-4 border-border" />
-    ),
+    hr: () => <Separator className="my-5" />,
     img: (input) => {
       const props = markdownElementProps(input);
       const src = typeof props.src === "string" ? props.src : "";
@@ -272,6 +279,8 @@ function components({
         <MessageImage
           src={src}
           alt={props.alt ?? ""}
+          resolveEnabled={!streaming}
+          size={imageSize}
           title={props.title ?? undefined}
         />
       );
@@ -282,7 +291,7 @@ function components({
         <input
           {...props}
           disabled
-          className="mt-0.5 size-3.5 shrink-0 accent-brand"
+          className="mt-[0.3125rem] size-3.5 shrink-0 accent-brand"
         />
       );
     },
@@ -293,7 +302,7 @@ function components({
         <li
           {...props}
           className={cn(
-            "my-1 pl-1 marker:text-muted-foreground",
+            "my-0 pl-1 leading-5 marker:text-muted-foreground",
             task && "flex items-start gap-2 pl-0 marker:content-none",
             className,
           )}
@@ -303,18 +312,16 @@ function components({
     ol: (input) => (
       <ol
         {...markdownElementProps(input)}
-        className="my-3 flex list-decimal flex-col gap-1 pl-5 [&_ol]:my-1 [&_ul]:my-1"
+        className="my-3 flex list-decimal flex-col gap-0 pl-5 [&_ol]:my-1 [&_ul]:my-1"
       />
     ),
     p: (input) => {
-      const href = standaloneLink(input.node as MarkdownNode | undefined);
-      if (href && !streaming) return <MessageLinkPreview url={href} />;
-      return (
-        <p
-          {...markdownElementProps(input)}
-          className="mb-3 whitespace-pre-wrap last:mb-0"
-        />
-      );
+      const node = input.node as MarkdownNode | undefined;
+      const props = markdownElementProps(input);
+      if (imageOnlyParagraph(node)) {
+        return <MessageImageGallery>{props.children}</MessageImageGallery>;
+      }
+      return <p {...props} className={cn("mb-3", !streaming && "last:mb-0")} />;
     },
     pre: (input) => {
       const block = codeBlock(input);
@@ -328,7 +335,11 @@ function components({
       }
       if (block.language?.toLowerCase() === "mermaid") {
         return (
-          <MessageDiagram source={block.code} controlsEnabled={!streaming} />
+          <MessageDiagram
+            source={block.code}
+            controlsEnabled={!streaming}
+            renderEnabled={!streaming}
+          />
         );
       }
       return (
@@ -336,6 +347,7 @@ function components({
           code={block.code}
           language={block.language}
           controlsEnabled={!streaming}
+          highlightEnabled={!streaming}
         />
       );
     },
@@ -384,7 +396,7 @@ function components({
         <ul
           {...props}
           className={cn(
-            "my-3 flex list-disc flex-col gap-1 pl-5 [&_ol]:my-1 [&_ul]:my-1",
+            "my-3 flex list-disc flex-col gap-0 pl-5 [&_ol]:my-1 [&_ul]:my-1",
             tasks && "list-none pl-0",
             className,
           )}
@@ -396,11 +408,15 @@ function components({
 
 export const MessageMarkdown = memo(function MessageMarkdown({
   fullWidthTables = false,
+  imageSize = "assistant",
   markdown,
+  sessionId,
   streaming = false,
 }: {
   fullWidthTables?: boolean;
+  imageSize?: "assistant" | "user";
   markdown: string;
+  sessionId?: string;
   streaming?: boolean;
 }): ReactNode {
   const messageId = useId().replace(/[^a-z0-9]/gi, "");
@@ -409,9 +425,11 @@ export const MessageMarkdown = memo(function MessageMarkdown({
       components({
         footnoteLabelId: `radius-${messageId}-footnote-label`,
         fullWidthTables,
+        imageSize,
+        sessionId,
         streaming,
       }),
-    [fullWidthTables, messageId, streaming],
+    [fullWidthTables, imageSize, messageId, sessionId, streaming],
   );
   const remarkRehypeOptions = useMemo(
     () => ({
@@ -424,8 +442,8 @@ export const MessageMarkdown = memo(function MessageMarkdown({
   return (
     <div className="radius-message-markdown min-w-0">
       <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
+        remarkPlugins={streaming ? STREAMING_REMARK_PLUGINS : REMARK_PLUGINS}
+        rehypePlugins={streaming ? STREAMING_REHYPE_PLUGINS : REHYPE_PLUGINS}
         remarkRehypeOptions={remarkRehypeOptions}
         skipHtml
         components={componentMap}

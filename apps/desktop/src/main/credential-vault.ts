@@ -14,7 +14,7 @@ interface StoredCredentialVault {
   publicKeyJwk: JsonWebKey;
   encryptedDatabaseKey: string;
   encryptedPrivateKeyJwk: string;
-  encryptedSecrets?: Record<string, string>;
+  encryptedSecrets: Record<string, string>;
 }
 
 export interface CredentialVault {
@@ -76,7 +76,7 @@ function credentialVaultFromStored(
   stored: StoredCredentialVault,
   vaultPath: string,
 ): CredentialVault {
-  let secrets = { ...(stored.encryptedSecrets ?? {}) };
+  let secrets = { ...stored.encryptedSecrets };
   let mutationTail: Promise<void> = Promise.resolve();
   const mutate = (operation: () => Promise<void>): Promise<void> => {
     const pending = mutationTail.then(operation);
@@ -155,6 +155,13 @@ export async function openCredentialVault(
     const stored = JSON.parse(storedVault) as StoredCredentialVault;
     if (stored.version !== 1)
       throw new Error("Unsupported credential-vault version");
+    if (
+      !stored.encryptedSecrets ||
+      typeof stored.encryptedSecrets !== "object" ||
+      Array.isArray(stored.encryptedSecrets)
+    ) {
+      throw new Error("Credential vault is missing encrypted secrets");
+    }
     return credentialVaultFromStored(stored, vaultPath);
   }
 

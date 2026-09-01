@@ -14,8 +14,9 @@ It currently provides:
 - ACP model discovery and exact session model selection;
 - launch arguments for the signed macOS runtime helper;
 - focused release, process, and ACP behavior tests.
-- a validated bundled-agent index mapping internal Platform projects to
-  release templates and OCI layouts carried by a Radius distribution.
+- a validated bundled-agent index mapping internal Platform projects to OCI
+  layouts whose hashed image configuration embeds the canonical Radius release
+  template.
 
 The Electron main process owns persistence and translates ACP updates into
 canonical Radius events. The sandboxed renderer receives only the narrow

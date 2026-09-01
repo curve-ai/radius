@@ -37,6 +37,10 @@
   states. Attachment, access, and agent selection remain semantic, focusable
   buttons whose effects are supplied by typed callbacks. Effectful submit
   actions stay disabled until their required state and callback are available.
+- MCP approvals use the existing inline approval card. Keep Allow once, Always
+  allow tool, and Always allow server as distinct scopes; never imply that a
+  server grant applies to another connector, shell, files, or browser
+  capabilities the release did not request.
 - Composer footer controls share one vertical center. Below 640px, attachment,
   access, agent, and send remain available as 28px icon-only controls with
   accessible labels and titles. At 640px and above, they return to the 32px
@@ -111,17 +115,33 @@
   collapsible presentation records. Visible reasoning, progress, tool, and error
   rows use one truncated line per action until the user explicitly expands that
   individual row, which reveals its full wrapped detail. The run header controls
-  only whole-group visibility. Every populated group starts collapsed; its open
-  action list is capped at 16rem and scrolls independently. Collapsed traces
-  remove hidden rows from the accessibility tree with `aria-hidden` and `inert`.
+  only whole-group visibility. A populated live group starts expanded and
+  collapses once when the run reaches a terminal state unless the user already
+  chose its disclosure state. Historical terminal groups start collapsed. The
+  open action list is capped at 16rem and scrolls independently. Collapsed
+  traces remove hidden rows from the accessibility tree with `aria-hidden` and
+  `inert`.
 - Session pages may use a submitted user message as a temporary scroll anchor.
   Reserve only the measured space needed to place that turn near the top, shrink
   it as the answer grows, and cancel automatic following on real user scroll
   intent. Removing follow mode must also remove the temporary spacer so the
   response edge remains the true scroll boundary.
 - Show the pixel-grid thinking indicator only for a real non-terminal run.
-  Reduced motion freezes its pixels while elapsed time may continue to update.
-- Completed assistant messages expose the working Copy markdown action. When a
+  Animate its pixels and shimmer only while the run is actively working;
+  approval and user-wait states remain still while elapsed time may continue to
+  update. Derive the compact activity label from canonical safe event
+  categories, never raw commands, paths, or arbitrary provider text. Keep one
+  persistent live-region label while overlapping visual transition copies stay
+  hidden from assistive technology. Reduced motion removes movement and blur.
+- Completed assistant messages expose the working Copy markdown action and the
+  canonical message time in the same quiet hover/focus toolbar. Format the
+  visible value as local time today, weekday plus time earlier in the current
+  Monday-based week, `MMM, DD` plus time earlier in the current year, and
+  `MM/DD/YY` plus time for prior years. Retain the full local date and time as
+  accessible and hover context. When a
+  message required safe provider normalization to render lists, quotes, tables,
+  directives, or images, copy that same completed
+  normalized Markdown rather than the unprocessed provider serialization. When a
   canonical plan completes, place its quiet completion status beside Copy on
   the run summary when one is identified, otherwise on the run's last final
   assistant message. Do not add retry, voting, reaction, or other no-op message
@@ -133,11 +153,28 @@
   unfenced terminal-table separators before parsing and compose table nodes with
   the shared shadcn `Table` primitives rather than parallel table markup. Keep
   transcript tables report-like: plain headers, regular values, roomy cells,
-  quiet single separators, and the documented outer border. Table Expand and
-  Copy actions use 24px targets with 12px icons in a vertical rail outside the
-  table's right border. Reveal the rail on hover or keyboard focus, retain it on
-  coarse pointers, and use the shared Tooltip and Dialog primitives with focus
-  restoration.
+  quiet single separators, and the documented outer border. Keep the bordered
+  table shell at least as wide as the reader/chat measure while sizing columns
+  to intrinsic content; treat the workbench breakout as a maximum width rather
+  than a forced width, and scroll only when the intrinsic columns exceed that
+  bound. Table Expand and Copy actions use 24px
+  targets with 12px icons in a vertical rail outside the table's right border.
+  Reveal the rail on hover or keyboard focus, retain it on coarse pointers, and
+  use the shared Tooltip and Dialog primitives with focus restoration.
+- Keep Markdown typography semantic and compact. Headings use a distinct
+  six-level 24px-to-12px scale with regular/medium weights, blockquotes and
+  inline code adapt the shadcn typography recipes, and thematic breaks use the
+  shared Separator. Normalize provider `│` source runs back into fenced code
+  before rendering them through the existing code surface. Center read-only
+  task checkboxes against the first 24px text line without vertically centering
+  multi-line task copy as a whole. Never infer headings from nearby content:
+  only authored Markdown heading syntax may establish document hierarchy.
+  Normalize non-code `│` runs into one continuous blockquote with separate paragraphs.
+  Normalize provider `•` glyph runs into real Markdown lists, including runs
+  serialized into one soft-wrapped paragraph, so list items retain semantic
+  vertical layout while output is streaming and after it completes. Keep list
+  rows compact with a 20px line box and no added inter-item gap. Preserve every
+  authored heading level without exposing its source hashes.
 - Treat code, math, diagrams, directives, media, and link previews as bounded
   Markdown components, not raw HTML. Code and Mermaid use exact-source Copy and
   the shared near-full-window Expand pattern. Keep plain source available while
@@ -145,18 +182,58 @@
   Mermaid remains strict, rejects embedded configuration, sanitizes SVG, and
   exposes a source disclosure. Typed callouts use the shared Alert composition,
   and details use native disclosure semantics with Escape restoration.
-- Renderer Markdown must not fetch remote media or metadata. Resolve remote
-  HTTPS images and user-triggered standalone-link previews through the typed
+- Renderer Markdown must not fetch remote media or metadata directly. Resolve
+  remote HTTPS images and web-link favicon metadata through the typed
   preload contract. Main owns DNS pinning, private-address rejection,
-  redirects, MIME and byte limits, timeouts, metadata cleanup, in-flight
-  deduplication, and bounded caching. Keep data/blob image exceptions narrow and
-  retain explicit loading, blocked, and unavailable presentation.
+  redirects, bounded HTML-prefix reads for large pages, strict image MIME and
+  byte limits, timeouts, metadata cleanup, in-flight
+  deduplication, and bounded caching. Keep links inline and retain the authored
+  label and destination exactly. Valid favicons may resolve during streaming
+  with a 160ms blur/opacity transition. Honor site-declared light and dark
+  favicon variants when both pass the same bounded image checks, and fall back
+  to the conventional root favicon when page metadata cannot be read. Missing
+  or broken favicons render no generic placeholder. Reveal the underline only
+  on hover or keyboard focus.
+  Project file links use compact
+  Material Icon Theme file-type artwork and may open only canonical files below
+  the current session's source folders. Keep data/blob image exceptions narrow
+  and retain explicit loading, blocked, and unavailable presentation. Collapse
+  broken remote images to one muted inline source link with a 14px broken-image
+  glyph and authored alt text. Blocked URLs and missing local artifacts use the
+  same compact treatment without a destination.
+- Preserve ACP assistant image blocks as canonical image artifacts instead of
+  dropping non-text chunks or embedding base64 in message text. Store bounded,
+  allowlisted image bytes under the content hash, keep the artifact reference
+  on the message, and resolve local bytes through typed preload IPC. Render
+  assistant images within a 240px by 128px preview envelope and user-message
+  images within 160px by 96px; only the shared fullscreen dialog expands them.
+  Group consecutive output images in a compact wrapping row so additional
+  previews flow onto the next line instead of stacking as full-width blocks.
+  Make the thumbnail itself the fullscreen trigger and overlay its 12px Expand
+  glyph in the top-right corner on hover or keyboard focus. Do not use the
+  table component's outside control rail for images.
+  Composer attachments use 64px square tiles. Its attachment strip and prompt
+  share the desktop control row's 8px horizontal inset and use the same 8px
+  vertical step. The empty desktop composer is 96px tall with a 44px footer.
+  Give generated images a screen-reader label without inventing a visible
+  caption; Markdown-authored alt text remains the visible caption when present.
+- Normalize the fx provider's `▧`-prefixed generated-image Markdown links back
+  into image nodes outside fenced code. Import bounded raster targets under the
+  active fx `/opt/data` state share as artifacts before releasing that profile.
+  Accept only HTTPS or `sandbox:` targets. Historical main-process `sandbox:`
+  resolution stays confined to `.codex/generated_images`. Both paths require an
+  allowlisted raster extension, bounded bytes, and a matching file signature.
 - Stream assistant text through one stable ephemeral message event rather than
   persisting token deltas. Replace that event in place for every chunk and use
   the same event ID for the final journal message. Progressive terminal tables
   may pad incomplete rows only while the event is streaming; completed messages
-  retain strict table recognition. Keep per-token cell updates immediate rather
-  than animating high-frequency data changes.
+  retain strict table recognition. While streaming, keep code as plain source
+  without Shiki, Mermaid as source-only, math literal, remote image resolution
+  deferred, and Copy/Expand controls absent. The final event upgrades each
+  bounded component once. Do not use last-child or other forward-looking
+  Markdown spacing selectors that restyle earlier output after an append. Keep
+  per-token cell updates immediate rather than animating high-frequency data
+  changes.
 - While a canonical plan is active, show only its compact current-step status
   above the session composer. Reveal the complete item list on pointer hover or
   keyboard focus; never add code-diff counts or coding-client language.

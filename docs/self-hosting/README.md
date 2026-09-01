@@ -190,13 +190,14 @@ deployments from an agent's deployment inventory. Viewers remain read-only.
 ## Desktop installation reporting
 
 The desktop can register its stable local client identity and append its
-desktop/runtime version at startup. Configure all three variables together in
+desktop/runtime version at startup. Configure all four variables together in
 the desktop process:
 
 ```bash
 RADIUS_PLATFORM_API_URL=https://agents.example.com
 RADIUS_PLATFORM_ACCESS_TOKEN=<token-with-installation.write>
 RADIUS_PLATFORM_ORGANIZATION=acme
+RADIUS_RUNTIME_VERSION=<installed-runtime-version>
 ```
 
 The initial reporter derives a non-secret physical-device fingerprint from the

@@ -64,6 +64,34 @@
       "when": 1788030398937,
       "tag": "0008_project_source_folders",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788198817434,
+      "tag": "0009_composer_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788209083683,
+      "tag": "0010_initial_storage",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788272149551,
+      "tag": "0011_reusable_agent_images",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1788274812349,
+      "tag": "0012_agent_release_integrity",
+      "breakpoints": true
     }
   ]
 }

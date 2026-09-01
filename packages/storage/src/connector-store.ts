@@ -59,6 +59,40 @@ export interface ConnectorEnabledToolSummary {
   providerLabel: string;
 }
 
+export interface ConnectorConnectionTarget {
+  installationId: string;
+  connectorId: string;
+  connectorLabel: string;
+  endpointId: string;
+  endpointKey: string;
+  endpointUrl: string;
+  authentication: "none" | "oauth" | "bearer";
+}
+
+export interface DiscoveredConnectorToolInput {
+  name: string;
+  title: string | null;
+  description: string | null;
+  inputSchemaSha256: string;
+  outputSchemaSha256: string | null;
+}
+
+export interface ReadyMcpToolBinding {
+  bindingId: string;
+  nativeToolName: string;
+  inputSchemaSha256: string;
+  outputSchemaSha256: string | null;
+}
+
+export interface ReadyMcpProvider {
+  providerId: string;
+  providerKey: string;
+  label: string;
+  endpointUrl: string;
+  credentialRef: string | null;
+  bindings: ReadyMcpToolBinding[];
+}
+
 export interface RegisterCapabilityContractInput {
   capabilityKey: string;
   contractVersion: number;
@@ -676,12 +710,220 @@ export async function configureConnectorProvider(
   });
 }
 
+export async function getConnectorConnectionTarget(
+  database: RadiusDatabase,
+  clientInstanceId: string,
+  installationId: string,
+): Promise<ConnectorConnectionTarget> {
+  const target = await database.db
+    .select({
+      installationId: connectorInstallations.id,
+      connectorId: connectorIdentities.id,
+      connectorLabel: connectorIdentities.displayName,
+      endpointId: connectorReleaseEndpoints.id,
+      endpointKey: connectorReleaseEndpoints.endpointKey,
+      endpointUrl: connectorReleaseEndpoints.endpointUrl,
+      authentication: connectorReleaseEndpoints.authentication,
+    })
+    .from(connectorInstallations)
+    .innerJoin(
+      connectorIdentities,
+      eq(connectorIdentities.id, connectorInstallations.connectorId),
+    )
+    .innerJoin(
+      connectorReleaseEndpoints,
+      eq(
+        connectorReleaseEndpoints.releaseId,
+        connectorInstallations.selectedReleaseId,
+      ),
+    )
+    .where(
+      and(
+        eq(connectorInstallations.id, installationId),
+        eq(connectorInstallations.clientInstanceId, clientInstanceId),
+        ne(connectorInstallations.lifecycleState, "deleted"),
+      ),
+    )
+    .orderBy(asc(connectorReleaseEndpoints.endpointKey))
+    .get();
+  if (!target) throw new Error("CONNECTOR_INSTALLATION_NOT_FOUND");
+  return target;
+}
+
+function discoveredOperationName(tool: DiscoveredConnectorToolInput): string {
+  return `${tool.name}@${tool.inputSchemaSha256.slice(0, 16)}`;
+}
+
+export async function saveConnectorDiscovery(
+  database: RadiusDatabase,
+  input: {
+    clientInstanceId: string;
+    installationId: string;
+    credentialRef: string | null;
+    tools: DiscoveredConnectorToolInput[];
+    now?: number;
+  },
+): Promise<string> {
+  const target = await getConnectorConnectionTarget(
+    database,
+    input.clientInstanceId,
+    input.installationId,
+  );
+  const capabilityKey = `mcp.connector.${target.connectorId}`;
+  await registerCapabilityContract(database, {
+    capabilityKey,
+    contractVersion: 1,
+    displayName: target.connectorLabel,
+    description: `Tools discovered from ${target.connectorLabel}.`,
+    operations: input.tools.map((tool) => ({
+      operationName: discoveredOperationName(tool),
+      inputSchemaId: `${capabilityKey}.${tool.name}.${tool.inputSchemaSha256}`,
+      inputSchemaVersion: 1,
+      outputSchemaId: `${capabilityKey}.${tool.name}.${tool.outputSchemaSha256 ?? "untyped"}`,
+      outputSchemaVersion: 1,
+      riskClass: "external_side_effect",
+      approvalEligible: true,
+    })),
+  });
+
+  const now = input.now ?? Date.now();
+  return database.db.transaction(async (transaction) => {
+    const existing = await transaction.query.toolProviders.findFirst({
+      where: and(
+        eq(toolProviders.installationId, target.installationId),
+        eq(toolProviders.endpointId, target.endpointId),
+      ),
+    });
+    const providerId = existing?.id ?? randomUUID();
+    if (existing) {
+      await transaction
+        .update(toolProviders)
+        .set({
+          credentialRef: input.credentialRef,
+          connectionState: "connected",
+          connectedAtMs: now,
+          disconnectedAtMs: null,
+          updatedAtMs: now,
+        })
+        .where(eq(toolProviders.id, providerId));
+    } else {
+      await transaction.insert(toolProviders).values({
+        id: providerId,
+        clientInstanceId: input.clientInstanceId,
+        installationId: target.installationId,
+        endpointId: target.endpointId,
+        profileConnectionId: null,
+        appliedProfileRevision: null,
+        providerKey: `${target.installationId}:${target.endpointKey}`,
+        label: target.connectorLabel,
+        credentialRef: input.credentialRef,
+        connectionState: "connected",
+        connectedAtMs: now,
+        disconnectedAtMs: null,
+        updatedAtMs: now,
+      });
+    }
+
+    await transaction
+      .update(toolBindings)
+      .set({ enabled: false, disabledAtMs: now })
+      .where(eq(toolBindings.providerId, providerId));
+
+    for (const tool of input.tools) {
+      const operationId = await resolveOperation(transaction, {
+        key: capabilityKey,
+        operation: discoveredOperationName(tool),
+        contractVersion: 1,
+      });
+      await transaction
+        .insert(toolBindings)
+        .values({
+          id: randomUUID(),
+          providerId,
+          operationId,
+          nativeToolName: tool.name,
+          inputSchemaSha256: tool.inputSchemaSha256,
+          outputSchemaSha256: tool.outputSchemaSha256,
+          enabled: true,
+          discoveredAtMs: now,
+          disabledAtMs: null,
+        })
+        .onConflictDoUpdate({
+          target: [
+            toolBindings.providerId,
+            toolBindings.nativeToolName,
+            toolBindings.inputSchemaSha256,
+          ],
+          set: {
+            operationId,
+            outputSchemaSha256: tool.outputSchemaSha256,
+            enabled: true,
+            discoveredAtMs: now,
+            disabledAtMs: null,
+          },
+        });
+    }
+    await transaction
+      .update(connectorInstallations)
+      .set({ lifecycleState: "ready", updatedAtMs: now })
+      .where(eq(connectorInstallations.id, target.installationId));
+    return providerId;
+  });
+}
+
+export async function listReadyMcpProviders(
+  database: RadiusDatabase,
+  clientInstanceId: string,
+): Promise<ReadyMcpProvider[]> {
+  const providers = await database.db
+    .select({
+      providerId: toolProviders.id,
+      providerKey: toolProviders.providerKey,
+      label: toolProviders.label,
+      endpointUrl: connectorReleaseEndpoints.endpointUrl,
+      credentialRef: toolProviders.credentialRef,
+    })
+    .from(toolProviders)
+    .innerJoin(
+      connectorReleaseEndpoints,
+      eq(connectorReleaseEndpoints.id, toolProviders.endpointId),
+    )
+    .where(
+      and(
+        eq(toolProviders.clientInstanceId, clientInstanceId),
+        eq(toolProviders.connectionState, "connected"),
+      ),
+    )
+    .orderBy(asc(toolProviders.label));
+
+  return Promise.all(
+    providers.map(async (provider) => ({
+      ...provider,
+      bindings: await database.db
+        .select({
+          bindingId: toolBindings.id,
+          nativeToolName: toolBindings.nativeToolName,
+          inputSchemaSha256: toolBindings.inputSchemaSha256,
+          outputSchemaSha256: toolBindings.outputSchemaSha256,
+        })
+        .from(toolBindings)
+        .where(
+          and(
+            eq(toolBindings.providerId, provider.providerId),
+            eq(toolBindings.enabled, true),
+          ),
+        )
+        .orderBy(asc(toolBindings.nativeToolName)),
+    })),
+  );
+}
+
 export async function disconnectConnectorProvider(
   database: RadiusDatabase,
   providerId: string,
   now = Date.now(),
-): Promise<void> {
-  await database.db.transaction(async (transaction) => {
+): Promise<string | null> {
+  return database.db.transaction(async (transaction) => {
     const provider = await transaction.query.toolProviders.findFirst({
       where: eq(toolProviders.id, providerId),
     });
@@ -699,6 +941,13 @@ export async function disconnectConnectorProvider(
       .update(toolBindings)
       .set({ enabled: false, disabledAtMs: now })
       .where(eq(toolBindings.providerId, providerId));
+    if (provider.installationId) {
+      await transaction
+        .update(connectorInstallations)
+        .set({ lifecycleState: "disconnected", updatedAtMs: now })
+        .where(eq(connectorInstallations.id, provider.installationId));
+    }
+    return provider.credentialRef;
   });
 }
 

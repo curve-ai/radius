@@ -9,15 +9,18 @@ const ACTIVITY_PIXEL_DELAYS = Array.from({ length: 9 }, (_, index) => {
 });
 
 export function ActivityIndicator({
+  active = true,
   className,
   label,
 }: {
+  active?: boolean;
   className?: string;
   label?: string;
 }): React.ReactNode {
   return (
     <span
       data-slot="activity-indicator"
+      data-active={active}
       role={label ? "status" : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}

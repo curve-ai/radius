@@ -183,6 +183,17 @@ test("writes a typed message, artifact, and sync change atomically", async () =>
         messageKind: "final",
         status: "completed",
         text: "Here is the report.",
+        artifacts: [
+          {
+            id: artifactId,
+            name: "report.pdf",
+            artifactType: "document",
+            storageKind: "file",
+            mimeType: "application/pdf",
+            availability: "local",
+            url: null,
+          },
+        ],
       },
     ]);
     assert.equal(
@@ -733,6 +744,15 @@ test("renames a local session with a typed revision and sync change", async () =
       changes.some((change) => change.payloadJson.includes('"title":"After"')),
       true,
     );
+
+    const unchanged = await updateSessionTitle(database, {
+      sessionId: session.id,
+      originClientInstanceId: clientId,
+      title: "After",
+      now: Date.parse("2026-08-22T12:02:00.000Z"),
+    });
+    assert.equal(unchanged.revision, 2);
+    assert.equal((await database.db.select().from(localChanges)).length, 2);
   });
 });
 

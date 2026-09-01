@@ -105,3 +105,30 @@ test("detects message text changes in otherwise stable transcript snapshots", ()
   assert.equal(sameSessionTranscriptSnapshot(first, identical), true);
   assert.equal(sameSessionTranscriptSnapshot(first, changed), false);
 });
+
+test("detects image artifacts added to an otherwise stable message", () => {
+  const first = mergeSessionTranscriptStreamUpdate(
+    [],
+    streamUpdate("Generated an image", undefined, "replace"),
+  );
+  const withImage = first.map((event) =>
+    event.eventType === "message"
+      ? {
+          ...event,
+          artifacts: [
+            {
+              id: "image-1",
+              name: "generated.png",
+              artifactType: "image" as const,
+              storageKind: "file" as const,
+              mimeType: "image/png",
+              availability: "local" as const,
+              url: null,
+            },
+          ],
+        }
+      : event,
+  );
+
+  assert.equal(sameSessionTranscriptSnapshot(first, withImage), false);
+});

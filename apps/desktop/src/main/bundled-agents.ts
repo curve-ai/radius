@@ -1,13 +1,15 @@
 import {
   parseAgentReleaseDescriptor,
   parseBundledAgentIndex,
-  type AgentReleaseDescriptor,
   type BundledAgentIndex,
 } from "@curve-ai/radius-runtime";
 import { app } from "electron";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { readEmbeddedAgentRelease } from "./bundled-agent-layout";
 
 interface ImageLoadReport {
   type: "radius.runtime.images-loaded";
@@ -98,21 +100,17 @@ async function installBundledAgent(
   resourceRoot: string,
   definition: BundledAgentIndex["agents"][number],
 ): Promise<{ agentId: string; releasePath: string }> {
-  const templatePath = bundledResourcePath(
-    resourceRoot,
-    definition.releaseTemplate,
-  );
-  const template = JSON.parse(await readFile(templatePath, "utf8")) as Record<
-    string,
-    unknown
-  >;
-  const unresolvedRelease = parseAgentReleaseDescriptor(template);
   const layoutPath = bundledResourcePath(resourceRoot, definition.imageLayout);
-  const runtimeRoot = path.join(
-    app.getPath("userData"),
-    "runtime",
-    unresolvedRelease.agentId,
-  );
+  const embedded = await readEmbeddedAgentRelease(layoutPath);
+  const unresolvedRelease = parseAgentReleaseDescriptor(embedded.template);
+  const runtimeRoot =
+    !app.isPackaged && unresolvedRelease.agentId === "fx"
+      ? path.join(app.getPath("appData"), "Radius/dev/runtime/fx-image-store")
+      : path.join(
+          app.getPath("userData"),
+          "runtime",
+          unresolvedRelease.agentId,
+        );
   const report = await loadImage(layoutPath, runtimeRoot);
   const loaded = report.images.find(
     (image) => image.reference === unresolvedRelease.image.reference,
@@ -120,12 +118,12 @@ async function installBundledAgent(
   if (!loaded || !/^sha256:[a-f0-9]{64}$/.test(loaded.digest)) {
     throw new Error("BUNDLED_AGENT_IMAGE_IMPORT_MISSING");
   }
-  const image = template.image;
-  if (!image || typeof image !== "object") {
+  const image = embedded.template.image;
+  if (!image || typeof image !== "object" || Array.isArray(image)) {
     throw new Error("BUNDLED_AGENT_RELEASE_TEMPLATE_INVALID");
   }
   (image as Record<string, unknown>).digest = loaded.digest;
-  const release: AgentReleaseDescriptor = parseAgentReleaseDescriptor(template);
+  const release = parseAgentReleaseDescriptor(embedded.template);
 
   const installationRoot = path.join(
     app.getPath("userData"),
@@ -134,6 +132,29 @@ async function installBundledAgent(
   );
   const installedReleasePath = path.join(installationRoot, "release.json");
   const serialized = `${JSON.stringify(release, null, 2)}\n`;
+  const manifestSha256 = createHash("sha256")
+    .update(JSON.stringify(release))
+    .digest("hex");
+  const historicalReleasePath = path.join(
+    installationRoot,
+    "releases",
+    "sha256",
+    `${manifestSha256}.json`,
+  );
+  await mkdir(path.dirname(historicalReleasePath), {
+    recursive: true,
+    mode: 0o700,
+  });
+  const historical = await readOptional(historicalReleasePath);
+  if (historical === null) {
+    await writeFile(historicalReleasePath, serialized, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+  } else if (historical !== serialized) {
+    throw new Error("BUNDLED_AGENT_RELEASE_HISTORY_CONFLICT");
+  }
   if ((await readOptional(installedReleasePath)) !== serialized) {
     await mkdir(installationRoot, { recursive: true, mode: 0o700 });
     const temporaryPath = `${installedReleasePath}.tmp-${process.pid}`;
@@ -146,15 +167,38 @@ async function installBundledAgent(
   return { agentId: release.agentId, releasePath: installedReleasePath };
 }
 
-async function installPackagedBundledAgents(): Promise<string[]> {
-  if (!app.isPackaged) return [];
-  const resourceRoot = path.join(process.resourcesPath, "agents");
-  const index = parseBundledAgentIndex(
-    JSON.parse(await readFile(path.join(resourceRoot, "index.json"), "utf8")),
-  );
+function installedReleasePath(project: string): string {
+  return path.join(app.getPath("userData"), "agents", project, "release.json");
+}
+
+async function lastValidReleasePath(project: string): Promise<string | null> {
+  const releasePath = installedReleasePath(project);
+  const raw = await readOptional(releasePath);
+  if (raw === null) return null;
+  parseAgentReleaseDescriptor(JSON.parse(raw));
+  return releasePath;
+}
+
+async function installBundledAgents(resourceRoot: string): Promise<string[]> {
+  const indexJson = await readOptional(path.join(resourceRoot, "index.json"));
+  if (indexJson === null) return [];
+  const index = parseBundledAgentIndex(JSON.parse(indexJson));
   const installed: Array<{ agentId: string; releasePath: string }> = [];
   for (const definition of index.agents) {
-    installed.push(await installBundledAgent(resourceRoot, definition));
+    try {
+      installed.push(await installBundledAgent(resourceRoot, definition));
+    } catch (error) {
+      const fallback = await lastValidReleasePath(definition.project);
+      if (!fallback) throw error;
+      console.error(
+        `[agents] Bundled update for ${definition.project} was rejected; keeping the last valid release`,
+        error instanceof Error ? error.message : "BUNDLED_AGENT_UPDATE_INVALID",
+      );
+      const release = parseAgentReleaseDescriptor(
+        JSON.parse(await readFile(fallback, "utf8")),
+      );
+      installed.push({ agentId: release.agentId, releasePath: fallback });
+    }
   }
   if (
     new Set(installed.map((entry) => entry.agentId)).size !== installed.length
@@ -168,6 +212,19 @@ export async function resolveAgentReleasePaths(): Promise<string[]> {
   const configured = process.env.RADIUS_AGENT_RELEASE_PATH?.trim();
   if (configured) return [path.resolve(configured)];
 
+  const resourceRoot = app.isPackaged
+    ? path.join(process.resourcesPath, "agents")
+    : path.resolve(
+        app.getAppPath(),
+        "../runtime-host-macos/.build/provider-assets",
+      );
+  installationPromise ??= installBundledAgents(resourceRoot).catch((error) => {
+    installationPromise = null;
+    throw error;
+  });
+  const bundled = await installationPromise;
+  if (bundled.length > 0) return bundled;
+
   const developmentRelease = path.join(
     app.getPath("appData"),
     "Radius/dev/fx/release.json",
@@ -175,12 +232,7 @@ export async function resolveAgentReleasePaths(): Promise<string[]> {
   if (!app.isPackaged && (await readOptional(developmentRelease))) {
     return [developmentRelease];
   }
-
-  installationPromise ??= installPackagedBundledAgents().catch((error) => {
-    installationPromise = null;
-    throw error;
-  });
-  return installationPromise;
+  return [];
 }
 
 export async function initializeBundledAgents(): Promise<void> {

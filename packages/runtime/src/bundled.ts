@@ -23,7 +23,6 @@ export const BundledAgentIndexSchema = z
       .array(
         z.object({
           project: projectRef,
-          releaseTemplate: relativeResourcePath,
           imageLayout: relativeResourcePath,
         }),
       )
@@ -32,7 +31,6 @@ export const BundledAgentIndexSchema = z
   })
   .superRefine((index, context) => {
     const projects = new Set<string>();
-    const releaseTemplates = new Set<string>();
     for (const [position, agent] of index.agents.entries()) {
       if (projects.has(agent.project)) {
         context.addIssue({
@@ -42,14 +40,6 @@ export const BundledAgentIndexSchema = z
         });
       }
       projects.add(agent.project);
-      if (releaseTemplates.has(agent.releaseTemplate)) {
-        context.addIssue({
-          code: "custom",
-          path: ["agents", position, "releaseTemplate"],
-          message: "Bundled release templates must be unique",
-        });
-      }
-      releaseTemplates.add(agent.releaseTemplate);
     }
   });
 

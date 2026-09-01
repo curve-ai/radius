@@ -22,17 +22,18 @@ import {
 
 let mermaidRenderQueue = Promise.resolve();
 
-function useDarkTheme(): boolean {
+function useDarkTheme(enabled: boolean): boolean {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     const root = document.documentElement;
     const update = (): void => setDark(root.classList.contains("dark"));
     update();
     const observer = new MutationObserver(update);
     observer.observe(root, { attributeFilter: ["class"], attributes: true });
     return () => observer.disconnect();
-  }, []);
+  }, [enabled]);
 
   return dark;
 }
@@ -104,13 +105,15 @@ function DiagramSvg({
 
 export function MessageDiagram({
   controlsEnabled = true,
+  renderEnabled = true,
   source,
 }: {
   controlsEnabled?: boolean;
+  renderEnabled?: boolean;
   source: string;
 }): ReactNode {
   const diagramId = `radius-mermaid-${useId().replace(/[^a-z0-9]/gi, "")}`;
-  const dark = useDarkTheme();
+  const dark = useDarkTheme(renderEnabled);
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [rendered, setRendered] = useState<{
@@ -122,6 +125,7 @@ export function MessageDiagram({
   const { copied, copyText } = useCopyFeedback();
 
   useEffect(() => {
+    if (!renderEnabled) return undefined;
     let active = true;
     void renderMermaid(diagramId, source, dark).then(
       (result) => {
@@ -144,7 +148,18 @@ export function MessageDiagram({
     return () => {
       active = false;
     };
-  }, [dark, diagramId, source]);
+  }, [dark, diagramId, renderEnabled, source]);
+
+  if (!renderEnabled) {
+    return (
+      <MessageCodeBlock
+        code={source}
+        language="mermaid"
+        controlsEnabled={false}
+        highlightEnabled={false}
+      />
+    );
+  }
 
   const current =
     rendered?.dark === dark && rendered.source === source ? rendered : null;

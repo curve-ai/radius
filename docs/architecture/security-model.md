@@ -20,14 +20,15 @@ Developer builds may expose Full Access for local testing. Distributed builds de
 
 ### Current local-alpha enforcement
 
-The first ACP desktop integration exposes Ask for approval and Project access
-in the existing composer while the complete policy resolver is still under
-review. Ask for approval currently cancels general agent-originated permission
-requests, so they fail closed rather than simulating an approval. Host terminal
-and file operations use Radius's exact approval flow. Project access may select
-only an ACP `allow_once` option for other requested operations. It never selects
-`allow_always`, persists a remembered grant, or bypasses the future capability
-broker. Distributed defaults remain governed by the policy above.
+The ACP desktop integration exposes Ask for approval, Project access, and Full
+access in the existing composer while the complete policy resolver is still
+under review. Host terminal and file operations use Radius's exact approval
+flow. MCP permission requests are separate from the composer access profile and
+offer Allow once, Always allow tool when ACP supports it, and Always allow
+server. Tool-level persistence uses ACP's exact tool option. A server grant is
+stored locally against one host-owned tool provider and bypasses later
+tool-call prompts only for that server. Distributed defaults remain governed by
+the policy above.
 
 The macOS desktop now implements the first project-scoped host-capability
 slice. ACP terminals and text-file requests are advertised only for operations
@@ -39,6 +40,20 @@ one-file approval for exact paths outside those folders. Approvals are durable
 session events, but the granted external path is ephemeral and applies only to
 that operation. Durable project grants and organization policy remain later
 physical-model work.
+
+Full access runs host commands without Seatbelt and automatically permits host
+file operations outside project folders. Command validation, bounded output,
+environment filtering, and declared agent capabilities still apply. Full
+access does not bypass MCP approval unless an explicit tool or server grant
+exists.
+
+Remote MCP setup and invocation stay in Electron main. OAuth PKCE client state
+and tokens are encrypted in the device vault, while libSQL stores only an
+opaque credential reference plus provider and exact-schema binding state. The
+agent VM receives a short-lived bearer credential for a Radius-owned local MCP
+broker endpoint. It never receives the remote server URL or reusable OAuth
+material. Runtime discovery must still match the stored tool name and schema
+hash before Radius exposes a tool to the ACP session.
 
 ## Reference-product lesson
 

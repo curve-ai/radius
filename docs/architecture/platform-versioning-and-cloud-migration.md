@@ -45,9 +45,9 @@ may use contract-defined defaults; unknown security or authorization fields
 fail closed.
 
 The desktop now has an optional initial reporter for self-host and managed-stack
-integration. When `RADIUS_PLATFORM_API_URL`,
-`RADIUS_PLATFORM_ACCESS_TOKEN`, and `RADIUS_PLATFORM_ORGANIZATION` are all
-configured, startup registers the stable local client instance, derives a
+integration. When `RADIUS_PLATFORM_API_URL`, `RADIUS_PLATFORM_ACCESS_TOKEN`,
+`RADIUS_PLATFORM_ORGANIZATION`, and `RADIUS_RUNTIME_VERSION` are all configured,
+startup registers the stable local client instance, derives a
 non-secret physical-device fingerprint from its existing OS-protected public
 device key, and appends a desktop/runtime version observation. The access token
 is neither logged nor written to Platform product tables. This environment

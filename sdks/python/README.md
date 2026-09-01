@@ -19,8 +19,11 @@ if __name__ == "__main__":
     serve_stdio(agent)
 ```
 
-The SDK streams text through ACP, tracks per-session cancellation, and never
-contains deployment credentials, registry logic, or a model-provider loop.
+The SDK streams text and generated session titles through ACP, tracks
+per-session cancellation, and never contains deployment credentials, registry
+logic, or a model-provider loop. Agents may call
+`await context.set_session_title("Generated title")` during a run; Radius then
+persists that title and projects it into the session list.
 
 Development checks:
 

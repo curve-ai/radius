@@ -16,8 +16,11 @@ test("renders the nine-pixel activity pattern with an accessible label", () => {
 });
 
 test("stays decorative when a nearby status already owns the announcement", () => {
-  const html = renderToStaticMarkup(createElement(ActivityIndicator));
+  const html = renderToStaticMarkup(
+    createElement(ActivityIndicator, { active: false }),
+  );
 
   assert.match(html, /aria-hidden="true"/);
+  assert.match(html, /data-active="false"/);
   assert.doesNotMatch(html, /role="status"/);
 });

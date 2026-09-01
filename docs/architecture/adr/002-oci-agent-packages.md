@@ -81,15 +81,20 @@ Example manifest:
     }
   ],
   "capabilities": [
-    { "key": "workspace.files", "operation": "read", "requirement": "required" },
-    { "key": "workspace.files", "operation": "write", "requirement": "required" },
+    {
+      "key": "workspace.files",
+      "operation": "read",
+      "requirement": "required"
+    },
+    {
+      "key": "workspace.files",
+      "operation": "write",
+      "requirement": "required"
+    },
     { "key": "shell", "operation": "execute", "requirement": "required" },
     { "key": "presentations", "operation": "create", "requirement": "optional" }
   ],
-  "networkAllowlist": [
-    "api.vendor.example",
-    "api.openai.com"
-  ],
+  "networkAllowlist": ["api.vendor.example", "api.openai.com"],
   "resources": {
     "cpu": 2,
     "memoryMb": 4096,
@@ -159,18 +164,27 @@ platform release is installed.
 A managed or white-label Radius distribution may include one or more internal
 agent releases as bootstrap desired state. The application bundle contains a
 validated `agents/index.json`; each entry maps one stable Platform project to a
-relative release template and OCI layout inside the signed application
-resources.
+relative OCI layout inside the signed application resources. The OCI image
+configuration carries the canonical Radius release template as hashed metadata;
+the external index cannot assign a different version or capability manifest to
+the same image.
 
 On launch, Radius:
 
 1. validates the index and rejects duplicate project identities or escaping
    resource paths;
-2. validates each release template through the public runtime contract;
-3. imports the packaged OCI layout into Radius-owned image storage;
-4. replaces the template digest with the exact imported descriptor digest;
-5. atomically records the installed release under the project identity; and
+2. verifies the OCI manifest and configuration blobs by size and SHA-256;
+3. reads the embedded release template and requires its version and image
+   reference to match the hashed OCI configuration;
+4. imports the packaged OCI layout into Radius-owned image storage and resolves
+   its exact manifest digest;
+5. stores the complete verified descriptor under its content hash, then
+   atomically selects it under the project identity; and
 6. exposes the delivered agent before any optional or required account sign-in.
+
+One image digest identifies one release. A candidate that claims different
+release metadata for an already-known digest is rejected, and Radius retains
+the last valid installed descriptor rather than making the agent unavailable.
 
 Authentication requirements belong to the signed release. A Sign in action
 satisfies one requirement for an already-delivered agent; it does not install,
@@ -241,14 +255,14 @@ catalog.
 
 ### Embedded Containerization with one microVM per agent
 
-| Dimension | Assessment |
-| --- | --- |
-| External installation | None |
-| Python/TypeScript compatibility | High through OCI images |
-| macOS isolation | Strong per-agent VM boundary |
+| Dimension                         | Assessment                            |
+| --------------------------------- | ------------------------------------- |
+| External installation             | None                                  |
+| Python/TypeScript compatibility   | High through OCI images               |
+| macOS isolation                   | Strong per-agent VM boundary          |
 | Provider-controlled agent updates | Supported through signed OCI releases |
-| Initial platform coverage | Apple Silicon macOS 26 only |
-| Host implementation complexity | High |
+| Initial platform coverage         | Apple Silicon macOS 26 only           |
+| Host implementation complexity    | High                                  |
 
 Selected because installation, updates, trust, filesystem exposure, and
 recovery remain inside the Radius product boundary.

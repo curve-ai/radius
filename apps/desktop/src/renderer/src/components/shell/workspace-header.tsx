@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import { useProjects } from "@renderer/components/shell/project-context-value";
@@ -7,6 +13,18 @@ import { useSidebar } from "@renderer/components/ui/sidebar";
 import { cn } from "@renderer/lib/utils";
 import { WorkspaceSessionHeader } from "./workspace-session-header";
 import { WorkspaceToolPanelTrigger } from "./workspace-tool-panel";
+
+const WINDOW_CONTROL_SELECTOR = [
+  ".electron-window-no-drag",
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "label",
+  '[role="button"]',
+  '[contenteditable="true"]',
+].join(",");
 
 export function WorkspaceHeader({
   collapsingTitle = false,
@@ -46,6 +64,18 @@ export function WorkspaceHeader({
     return () => observer.disconnect();
   }, []);
 
+  const handleDoubleClick = (event: MouseEvent<HTMLElement>): void => {
+    if (event.button !== 0 || window.radius.platform !== "darwin") return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest(WINDOW_CONTROL_SELECTOR)
+    ) {
+      return;
+    }
+
+    void window.radius.handleTitlebarDoubleClick();
+  };
+
   return (
     <>
       <div
@@ -55,21 +85,16 @@ export function WorkspaceHeader({
       />
       <header
         data-scrolled={scrolled ? "true" : "false"}
+        onDoubleClick={handleDoubleClick}
         className={cn(
-          "sticky top-0 z-40 flex h-12 shrink-0 items-center border-b border-transparent bg-background px-3 data-[scrolled=true]:border-border sm:px-4",
+          "electron-window-drag sticky top-0 z-40 flex h-12 shrink-0 items-center border-b bg-background px-3 sm:px-4",
+          minimal
+            ? "border-transparent data-[scrolled=true]:border-border"
+            : "border-border",
           titlebarControlsOverlapHeader &&
             "radius-workspace-header-content-offset",
         )}
       >
-        <div
-          aria-hidden="true"
-          className={cn(
-            "electron-window-drag pointer-events-none absolute inset-y-0 left-0 right-0",
-            titlebarControlsOverlapHeader &&
-              "radius-workspace-header-drag-offset",
-            !minimal && toolPanelAvailable && "right-12",
-          )}
-        />
         {minimal ? (
           <span className="sr-only">
             {title ?? WORKSPACE_TITLES[activeView]}

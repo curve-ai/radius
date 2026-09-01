@@ -140,6 +140,53 @@ export const sessions = sqliteTable(
   ],
 );
 
+export const composerDrafts = sqliteTable(
+  "composer_drafts",
+  {
+    id: text("id").primaryKey(),
+    clientInstanceId: id("client_instance_id").references(
+      () => clientInstances.id,
+      { onDelete: "cascade" },
+    ),
+    kind: text("kind", { enum: ["new_chat", "session"] }).notNull(),
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    sessionId: text("session_id").references(() => sessions.id, {
+      onDelete: "cascade",
+    }),
+    content: text("content").notNull(),
+    createdAtMs: integer("created_at_ms").notNull(),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+  },
+  (table) => [
+    uniqueIndex("composer_drafts_session_uq")
+      .on(table.clientInstanceId, table.sessionId)
+      .where(sql`${table.kind} = 'session'`),
+    uniqueIndex("composer_drafts_project_new_chat_uq")
+      .on(table.clientInstanceId, table.projectId)
+      .where(
+        sql`${table.kind} = 'new_chat' and ${table.projectId} is not null`,
+      ),
+    uniqueIndex("composer_drafts_standalone_new_chat_uq")
+      .on(table.clientInstanceId, table.kind)
+      .where(sql`${table.kind} = 'new_chat' and ${table.projectId} is null`),
+    check(
+      "composer_drafts_context_valid",
+      sql`(${table.kind} = 'new_chat' and ${table.sessionId} is null) or (${table.kind} = 'session' and ${table.projectId} is null and ${table.sessionId} is not null)`,
+    ),
+    check(
+      "composer_drafts_content_length_valid",
+      sql`length(${table.content}) between 1 and 100000`,
+    ),
+    check(
+      "composer_drafts_updated_after_created",
+      sql`${table.updatedAtMs} >= ${table.createdAtMs}`,
+    ),
+    index("composer_drafts_updated_at_idx").on(table.updatedAtMs),
+  ],
+);
+
 export const sessionPins = sqliteTable(
   "session_pins",
   {

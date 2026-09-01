@@ -8,16 +8,20 @@ import {
   AGENTS_CHANGED_CHANNEL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
   type RadiusApi,
+  type ComposerDraftContext,
+  type SaveComposerDraftInput,
   type SessionTranscriptStreamUpdate,
 } from "../radius-api";
 import type { BrowserConnectionStatus } from "../radius-api";
 import type { DesktopConnectorCatalogQuery } from "../radius-api";
 import type { NativeControlMenuInput } from "../radius-api";
 import type { StartAgentPromptInput } from "../radius-api";
-import type { ResolveTerminalApprovalInput } from "../radius-api";
+import type { ResolveToolApprovalInput } from "../radius-api";
 
 const radiusApi = {
   platform: process.platform,
+  handleTitlebarDoubleClick: () =>
+    ipcRenderer.invoke("radius:handle-titlebar-double-click"),
   setNativeTheme: (preference: "system" | "light" | "dark") =>
     ipcRenderer.invoke("radius:set-native-theme", preference),
   showNativeControlMenu: (input: NativeControlMenuInput) =>
@@ -29,6 +33,12 @@ const radiusApi = {
   listRecentSessions: () => ipcRenderer.invoke("radius:list-recent-sessions"),
   listSessionTranscript: (sessionId: string) =>
     ipcRenderer.invoke("radius:list-session-transcript", sessionId),
+  getComposerDraft: (context: ComposerDraftContext) =>
+    ipcRenderer.invoke("radius:get-composer-draft", context),
+  saveComposerDraft: (input: SaveComposerDraftInput) =>
+    ipcRenderer.invoke("radius:save-composer-draft", input),
+  clearComposerDraft: (context: ComposerDraftContext) =>
+    ipcRenderer.invoke("radius:clear-composer-draft", context),
   onSessionTranscriptStream: (
     listener: (update: SessionTranscriptStreamUpdate) => void,
   ) => {
@@ -68,6 +78,8 @@ const radiusApi = {
     ipcRenderer.invoke("radius:install-catalog-connector", id),
   installConnector: (input: { name: string; url: string }) =>
     ipcRenderer.invoke("radius:install-connector", input),
+  connectConnector: (installationId: string) =>
+    ipcRenderer.invoke("radius:connect-connector", installationId),
   disconnectConnector: (providerId: string) =>
     ipcRenderer.invoke("radius:disconnect-connector", providerId),
   deleteConnector: (installationId: string) =>
@@ -97,12 +109,22 @@ const radiusApi = {
   },
   startAgentPrompt: (input: StartAgentPromptInput) =>
     ipcRenderer.invoke("radius:start-agent-prompt", input),
-  resolveTerminalApproval: (input: ResolveTerminalApprovalInput) =>
-    ipcRenderer.invoke("radius:resolve-terminal-approval", input),
+  resolveToolApproval: (input: ResolveToolApprovalInput) =>
+    ipcRenderer.invoke("radius:resolve-tool-approval", input),
+  listMcpApprovalGrants: () =>
+    ipcRenderer.invoke("radius:list-mcp-approval-grants"),
+  revokeMcpApproval: (input: { grantId: string; scope: "server" | "tool" }) =>
+    ipcRenderer.invoke("radius:revoke-mcp-approval", input),
   resolveMarkdownMedia: (url: string) =>
     ipcRenderer.invoke("radius:resolve-markdown-media", url),
   resolveMarkdownLinkPreview: (url: string) =>
     ipcRenderer.invoke("radius:resolve-markdown-link-preview", url),
+  openSessionFile: (input: { href: string; sessionId: string }) =>
+    ipcRenderer.invoke("radius:open-session-file", input),
+  resolveSessionArtifactImage: (input: {
+    sessionId: string;
+    artifactId: string;
+  }) => ipcRenderer.invoke("radius:resolve-session-artifact-image", input),
   cancelAgentSession: (sessionId: string) =>
     ipcRenderer.invoke("radius:cancel-agent-session", sessionId),
   syncStatus: () => ipcRenderer.invoke("radius:sync-status"),

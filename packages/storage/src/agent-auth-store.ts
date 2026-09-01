@@ -19,7 +19,9 @@ import {
 } from "./schema.js";
 
 export type AuthenticationPurpose =
-  "vendor_identity" | "model_provider" | "router";
+  | "vendor_identity"
+  | "model_provider"
+  | "router";
 export type AuthenticationFlowKind =
   | "oidc_pkce"
   | "oauth_pkce"
@@ -28,7 +30,10 @@ export type AuthenticationFlowKind =
   | "vendor_token_exchange"
   | "provider_native_oauth";
 export type CredentialCustodyKind =
-  "os_vault" | "encrypted_agent_state" | "managed_exchange" | "none";
+  | "os_vault"
+  | "encrypted_agent_state"
+  | "managed_exchange"
+  | "none";
 export type AuthenticationConnectionState =
   | "needs_authentication"
   | "connected"
@@ -82,6 +87,21 @@ export interface InstalledAgentRelease {
   installationId: string;
 }
 
+export type AgentReleaseInstallErrorCode =
+  | "AGENT_AUTH_CONFIGURATION_CONFLICT"
+  | "AGENT_RELEASE_IMAGE_CONFLICT"
+  | "AGENT_RELEASE_IMMUTABLE_CONFLICT";
+
+export class AgentReleaseInstallError extends Error {
+  constructor(
+    readonly code: AgentReleaseInstallErrorCode,
+    readonly field: string,
+  ) {
+    super(code);
+    this.name = "AgentReleaseInstallError";
+  }
+}
+
 export interface AgentAuthenticationRequirementSummary {
   requirementId: string;
   requirementKey: string;
@@ -121,9 +141,13 @@ export interface DisconnectAgentAuthenticationResult {
   credentialUnused: boolean;
 }
 
-function assertSame<T>(actual: T, expected: T, label: string): void {
-  if (actual !== expected)
-    throw new Error(`${label} changed for immutable release`);
+function assertSame<T>(
+  actual: T,
+  expected: T,
+  code: AgentReleaseInstallErrorCode,
+  field: string,
+): void {
+  if (actual !== expected) throw new AgentReleaseInstallError(code, field);
 }
 
 function isoToMs(value: string | null | undefined): number | null {
@@ -194,7 +218,19 @@ export async function installAgentRelease(
         ),
       )
       .limit(1);
+    const releaseAlreadyExists = Boolean(release);
     if (!release) {
+      const [releaseWithImage] = await tx
+        .select({ id: agentReleases.id })
+        .from(agentReleases)
+        .where(eq(agentReleases.imageDigest, input.imageDigest))
+        .limit(1);
+      if (releaseWithImage) {
+        throw new AgentReleaseInstallError(
+          "AGENT_RELEASE_IMAGE_CONFLICT",
+          "image_digest",
+        );
+      }
       [release] = await tx
         .insert(agentReleases)
         .values({
@@ -209,17 +245,29 @@ export async function installAgentRelease(
         })
         .returning();
     } else {
-      assertSame(release.imageDigest, input.imageDigest, "Image digest");
+      assertSame(
+        release.imageDigest,
+        input.imageDigest,
+        "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+        "image_digest",
+      );
       assertSame(
         release.manifestSha256,
         input.manifestSha256,
-        "Manifest digest",
+        "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+        "manifest_sha256",
       );
-      assertSame(release.protocolKind, input.protocolKind, "Protocol kind");
+      assertSame(
+        release.protocolKind,
+        input.protocolKind,
+        "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+        "protocol_kind",
+      );
       assertSame(
         release.protocolVersion,
         input.protocolVersion,
-        "Protocol version",
+        "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+        "protocol_version",
       );
     }
     if (!release) throw new Error("Agent release could not be recorded");
@@ -229,11 +277,12 @@ export async function installAgentRelease(
       .from(agentReleaseAuthRequirements)
       .where(eq(agentReleaseAuthRequirements.releaseId, release.id));
     if (
-      existingRequirements.length > 0 &&
+      releaseAlreadyExists &&
       existingRequirements.length !== input.authRequirements.length
     ) {
-      throw new Error(
-        "Authentication requirements changed for immutable release",
+      throw new AgentReleaseInstallError(
+        "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+        "auth_requirements",
       );
     }
 
@@ -266,12 +315,14 @@ export async function installAgentRelease(
         assertSame(
           authority.purpose,
           requirementInput.authority.purpose,
-          "Authority purpose",
+          "AGENT_AUTH_CONFIGURATION_CONFLICT",
+          "authority_purpose",
         );
         assertSame(
           authority.canonicalIssuer,
           requirementInput.authority.issuer,
-          "Authority issuer",
+          "AGENT_AUTH_CONFIGURATION_CONFLICT",
+          "authority_issuer",
         );
       }
       if (!authority)
@@ -305,17 +356,20 @@ export async function installAgentRelease(
         assertSame(
           flow.flowKind,
           requirementInput.flow.kind,
-          "Authentication flow kind",
+          "AGENT_AUTH_CONFIGURATION_CONFLICT",
+          "flow_kind",
         );
         assertSame(
           flow.publicClientId,
           requirementInput.flow.publicClientId,
-          "OAuth client ID",
+          "AGENT_AUTH_CONFIGURATION_CONFLICT",
+          "public_client_id",
         );
         assertSame(
           flow.tokenAudience,
           requirementInput.flow.audience,
-          "Token audience",
+          "AGENT_AUTH_CONFIGURATION_CONFLICT",
+          "token_audience",
         );
       }
       if (!flow) throw new Error("Authentication flow could not be recorded");
@@ -358,27 +412,32 @@ export async function installAgentRelease(
         assertSame(
           requirement.authorityFlowId,
           flow.id,
-          "Authentication authority flow",
+          "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+          "authority_flow_id",
         );
         assertSame(
           requirement.requirement,
           requirementInput.requirement,
-          "Authentication requirement",
+          "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+          "auth_requirement",
         );
         assertSame(
           requirement.portability,
           requirementInput.portability,
-          "Authentication portability",
+          "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+          "auth_portability",
         );
         assertSame(
           requirement.runtimeDelivery,
           requirementInput.runtimeDelivery,
-          "Runtime credential delivery",
+          "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+          "runtime_delivery",
         );
         assertSame(
           requirement.manifestPosition,
           position,
-          "Authentication manifest position",
+          "AGENT_RELEASE_IMMUTABLE_CONFLICT",
+          "manifest_position",
         );
       }
     }
@@ -407,6 +466,17 @@ export async function installAgentRelease(
         })
         .returning();
     } else {
+      if (installation.selectedReleaseId !== release.id) {
+        await tx
+          .update(agentAuthenticationBindings)
+          .set({ unboundAtMs: now, unboundReason: "release_replaced" })
+          .where(
+            and(
+              eq(agentAuthenticationBindings.installationId, installation.id),
+              isNull(agentAuthenticationBindings.unboundAtMs),
+            ),
+          );
+      }
       [installation] = await tx
         .update(agentInstallations)
         .set({
@@ -632,15 +702,13 @@ export async function connectAgentAuthenticationAccount(
       .where(eq(authenticationAccountGrantedScopes.accountId, account.id));
     const scopes = [...new Set(input.grantedScopes ?? [])];
     if (scopes.length > 0) {
-      await tx
-        .insert(authenticationAccountGrantedScopes)
-        .values(
-          scopes.map((scope) => ({
-            accountId: account!.id,
-            scope,
-            observedAtMs: now,
-          })),
-        );
+      await tx.insert(authenticationAccountGrantedScopes).values(
+        scopes.map((scope) => ({
+          accountId: account!.id,
+          scope,
+          observedAtMs: now,
+        })),
+      );
     }
     await tx
       .update(agentAuthenticationBindings)

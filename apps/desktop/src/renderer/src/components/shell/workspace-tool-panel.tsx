@@ -3,6 +3,7 @@ import { Database, HardDrive, List } from "lucide-react";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import type { WorkspaceView } from "@renderer/components/shell/types";
+import { useWorkspaceWindowResizing } from "@renderer/components/shell/window-resize-context";
 import {
   ActionToolPanelButton,
   ActionToolPanelContent,
@@ -94,6 +95,7 @@ export function WorkspaceToolPanel({
   overlay?: boolean;
 }): ReactNode {
   const { activeView, navigate } = useWorkspaceNavigation();
+  const windowResizing = useWorkspaceWindowResizing();
 
   return (
     <ActionToolPanelShell
@@ -101,6 +103,7 @@ export function WorkspaceToolPanel({
       aria-label="Workspace tools"
       surface="desktop"
       sharedLayoutId={WORKSPACE_TOOL_PANEL_LAYOUT_ID}
+      transitionBehavior={windowResizing ? "instant" : "animate"}
       className={cn("!top-0", overlay && "pointer-events-none")}
       panelClassName={overlay ? "pointer-events-auto" : undefined}
     >

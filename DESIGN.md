@@ -211,15 +211,20 @@ The shell is one coordinated workspace, not a collection of independent pages.
   retained locally and no permanently visible resize handle. At compact window
   sizes, the maximum sidebar width contracts to preserve at least 224px for the
   workspace canvas.
-- The footer account/settings row is single-line. A circular brand-colored
-  download action appears at its trailing edge only when the packaged client
-  confirms a newer Radius release; downloading and restart-to-install states
-  retain the same compact footprint. Both visible circles are 16px beside the
-  14px label; the download action retains a larger invisible pointer target.
+- The footer account/settings row is single-line. Its packaged-client update
+  affordance stays at the trailing edge without changing account navigation.
+  The exact state presentation and actions are defined in
+  [`docs/design/desktop-update-states.md`](docs/design/desktop-update-states.md).
 - The window title area owns sidebar collapse and in-app Back and Forward
   history. When the sidebar is collapsed it also exposes a quick New chat
   action. These controls remain separate from the draggable region and share
-  the renderer navigation context.
+  the renderer navigation context. Workspace headers with visible content use
+  a quiet bottom hairline. Their non-interactive surface is the native window
+  drag region, including the operating system's standard titlebar click and
+  double-click behavior. On macOS, the renderer forwards that double-click to
+  the owning native window so Radius respects the user's titlebar preference
+  and falls back to maximize or restore. Buttons, links, inputs, and editable
+  titles remain non-draggable.
 - The workspace sidebar keeps search plus the New chat, Scheduled, and Connectors
   destinations, followed by local projects and their recent sessions.
   Choosing a project selects its durable chat context; choosing New chat
@@ -289,6 +294,14 @@ The shell is one coordinated workspace, not a collection of independent pages.
   48px shell header, the compact `type-base` title follows the scroll position
   with a 24-72px opacity/translate transition. Scrolling back reverses the same
   path. Reduced motion keeps the opacity cue and removes positional movement.
+  Installing a remote connector leaves it in the existing Needs setup rows.
+  Finish setup is a real compact row action: it may open the system browser for
+  authorization, stays disabled with a Connecting label while the IPC request
+  is active, and reports cancellation, timeout, verification, and connection
+  errors in the page's existing inline alert. Successful discovery replaces
+  the staged state with the connected account and exact enabled-tool count.
+  Connection detail rows provide a direct Disconnect action. Custom connectors
+  use the same setup states and actions rather than a parallel flow.
 - New chat is the deliberate exception: it uses a quiet, title-free header and
   does not expose the right tool-panel trigger or rail. Its page owns a centered
   invitation and reusable bottom composer so the first action is writing. The
@@ -350,9 +363,11 @@ The shell is one coordinated workspace, not a collection of independent pages.
   uses `shadow-sm`, focus raises it to `shadow-md`, and the contextual menu uses
   `shadow-md` above both. Project selection is optional; prompt, attachment,
   access, and agent controls remain available for standalone sessions. The
-  paperclip opens a multi-file picker, and the full new-chat canvas accepts
-  file drops. Attached images appear as removable thumbnail tiles while other
-  files use removable filename tiles; previews remain local and ephemeral.
+  paperclip opens a multi-file picker. Opening a new or existing chat focuses
+  its prompt, and the full chat canvas accepts file drops plus file-bearing
+  clipboard pastes. Attached images appear as removable thumbnail tiles while
+  other files use removable filename tiles; previews remain local and
+  ephemeral.
 - Selecting a session restores the standard titled header and contextual tool
   panel, then presents its canonical local transcript at the shared
   `max-w-reader` measure. The transcript and composer share the same outer
@@ -361,13 +376,24 @@ The shell is one coordinated workspace, not a collection of independent pages.
   on the canvas so long exchanges remain readable. The session composer is a
   measured bottom overlay rather than a separate footer band: transcript
   content scrolls behind it, while matching bottom padding keeps the latest
-  message visible at rest. Opening a session positions its transcript at the
+  message visible at rest. A transparent backdrop-blur gradient begins almost
+  clear at the composer's top edge and increases toward the bottom edge, where
+  it reaches the full 10px blur. Scrolling transcript text therefore
+  softens beneath the control without clouding the content above it. Reduced
+  transparency replaces the blur with an opaque surface.
+  Composer submission,
+  agent-loading, and draft errors use the 12px inline-notice surface directly
+  above the input; long diagnostic text stays contained and scrollable. Opening
+  a session positions its transcript at the
   latest message immediately after the initial load. Later polling and composer
   resizing do not override the user's scroll position unless it was already at
   the bottom. The chat scroller always spans the full workbench, placing its
   quiet translucent scrollbar at the far window edge. When the desktop tool
   panel is visible, it overlays that scroller while a shared content inset keeps
-  the transcript and composer out from beneath the panel. After submission, the
+  the transcript and composer out from beneath the panel. During native window
+  or continuous shell resizing, Radius holds the last settled conversation and
+  breakout-table measures, pauses layout motion and automatic scroll
+  correction, then commits the final geometry once resizing stops. After submission, the
   outgoing prompt becomes a temporary turn anchor 24px below the transcript
   top through a smooth spatial scroll; reduced motion moves there immediately.
   Measured trailing space lets it arrive before the response, then contracts as
@@ -375,15 +401,22 @@ The shell is one coordinated workspace, not a collection of independent pages.
   the user has not started scrolling; wheel, touch, scrollbar drag, or scroll
   keys cancel following and remove the temporary space. The real response edge
   retains 24px above the composer, with only the platform's contained elastic
-  overscroll beyond it. Message bodies render safe GFM Markdown while preserving
+  overscroll beyond it. On macOS, the Electron window enables native scroll
+  bounce while the transcript's contained overscroll prevents momentum from
+  chaining into the workspace shell. Reduce Motion disables the elastic
+  boundary. Message bodies render safe GFM Markdown while preserving
   the compact Radius type and spacing system. Prose, lists, quotes, headings,
   links, and code remain inside `max-w-reader`; assistant tables alone may break
   out to the padded workbench edge or the desktop tool-panel boundary. Common
   terminal tables using `│`, `─`, and `┼` are normalized outside fenced code and
   rendered through the shared shadcn `Table` primitives. Transcript tables use
   a plain header, regular 14px values, 12px horizontal and 10px vertical cell
-  padding, a 44px header, and quiet single row separators. Retain the outer
-  border until the surrounding message treatment no longer needs it. A compact
+  padding, a 44px header, and quiet single row separators. Columns and the
+  bordered table shell stays at least as wide as the reader/chat measure while
+  its columns retain intrinsic content sizing. The workbench edge is the
+  maximum rather than a forced width, with horizontal scrolling reserved for
+  genuinely wider data. Retain the outer border until the surrounding message
+  treatment no longer needs it. A compact
   24px Expand table and Copy table controls use 12px icons in a vertical rail
   outside the table's right border. The rail appears on table hover or keyboard
   focus and remains visible on coarse pointers. Expanded tables use
@@ -392,7 +425,12 @@ The shell is one coordinated workspace, not a collection of independent pages.
   are exposed as one stable, ephemeral assistant event and replaced by the
   canonical persisted final event. Once a streamed table rule is complete,
   partial rows are padded to the known column count so cells fill in as chunks
-  arrive without per-token animation or remounting. Raw HTML is never hydrated.
+  arrive without per-token animation or remounting. Streaming code remains
+  plain source without Shiki work, Mermaid remains source-only, math remains
+  literal, and remote image resolution stays deferred. The final event upgrades
+  those bounded components once, enables their controls, and starts permitted
+  remote resolution. Markdown flow never uses forward-looking last-child
+  spacing that would restyle an earlier block after an append. Raw HTML is never hydrated.
   Fenced code uses a labeled Radius block with exact-source Copy and the shared
   near-full-window Expand treatment. Syntax highlighting loads after the plain
   source and falls back without blocking the transcript for unknown or large
@@ -402,33 +440,98 @@ The shell is one coordinated workspace, not a collection of independent pages.
   lazily with strict configuration, bounded source, sanitized inert SVG, a
   readable source disclosure, and matching Copy/Expand controls. Raw Mermaid
   configuration directives and HTML labels remain disabled.
-  Remote Markdown images and user-triggered standalone-link previews resolve
-  only through the main process. That resolver pins public DNS results, rejects
+  Markdown headings use a clear compact six-level scale from 24px through 12px
+  with restrained regular/medium weights and tighter tracking. Blockquotes and
+  inline code follow the shadcn typography recipes at Radius density; thematic
+  breaks use the shared Separator. Provider-rendered `│` source runs normalize
+  back into fenced code so the existing shadcn-composed code surface retains
+  syntax highlighting and Copy/Expand controls. Read-only task checkboxes align
+  to the center of the first 24px text line while wrapped task copy remains
+  top-aligned. Plain labels remain plain text regardless of the structures that
+  follow them; only authored Markdown heading syntax establishes hierarchy.
+  Non-code `│` runs normalize into one continuous blockquote with separated attribution.
+  Provider `•` glyph runs normalize into semantic vertical Markdown lists even
+  when the provider serializes several items into one soft-wrapped paragraph;
+  list rows use a compact 20px line box without extra inter-item spacing.
+  Explicit Markdown headings retain their authored level and source markers
+  never appear in rendered heading text. Copy markdown uses this same completed
+  normalization so repaired provider lists remain semantic when pasted
+  elsewhere without inventing heading syntax.
+  Remote Markdown images and web-link favicon metadata resolve only
+  through the main process. That resolver pins public DNS results, rejects
   credentials and private or reserved addresses, follows at most three safe
-  HTTPS redirects, caps time and bytes, allowlists image MIME types, sends no
+  HTTPS redirects, reads only a bounded HTML prefix for metadata even when a
+  page is large, caps all image bytes, allowlists image MIME types, sends no
   cookies or referrer, deduplicates in-flight work, and stores results in a
-  bounded process cache. The renderer receives data URLs or typed metadata and
-  never broadens `connect-src` or `img-src` to arbitrary hosts. Broken or
-  blocked images retain their alt text and a stable unavailable surface.
+  bounded process cache. Web links retain exactly the label and destination the
+  agent authored. Valid favicons may resolve during streaming and enter with a
+  160ms blur/opacity transition. Site-declared light and dark variants follow
+  the active color scheme, while an independently bounded root-favicon lookup
+  survives unavailable page metadata; missing or broken favicons leave no placeholder
+  glyph. Link underlines appear only on hover or keyboard focus. Project file
+  links use 14px Material Icon Theme file-type artwork and
+  may open only canonical files beneath that session's source folders. The
+  renderer receives data URLs or typed metadata and never broadens `connect-src`
+  or `img-src` to arbitrary hosts. Broken remote images collapse to a compact
+  muted source link with a 14px broken-image glyph and authored alt text;
+  blocked URLs and missing local artifacts use the same treatment without an
+  unsafe destination.
+  Assistant ACP image blocks are not flattened into message text. Radius
+  validates and stores each bounded image as a content-addressed local image
+  artifact and references it from the canonical message. Transcript images are
+  compact previews: assistant images fit within a
+  240px by 128px envelope, while user-message images fit within 160px by 96px.
+  Consecutive output images form a compact wrapping row and continue on the
+  next line when the available conversation width is exhausted.
+  The thumbnail itself is the fullscreen trigger, with its 12px Expand glyph
+  overlaid in the top-right corner on hover or keyboard focus. Image controls
+  never reuse the table's outside rail. The shared fullscreen dialog is the
+  only expanded treatment. Composer image
+  attachments use 64px square tiles so several files remain scannable in one
+  row. The attachment strip and prompt use the same 8px horizontal inset as the
+  desktop control row, aligning their edges while keeping both sides compact.
+  Their top and bottom insets follow that same 8px step; the empty desktop
+  composer is 96px tall and its footer is 44px.
+  Generated image artifacts use a screen-reader label without inventing a
+  visible caption. Markdown images show their authored alt text as the quiet
+  caption when one was supplied.
+  The fx provider may serialize an image as a `▧`-prefixed Markdown link.
+  Radius promotes that known form back into an image block. Before the fx state
+  lease closes, bounded raster files beneath its `/opt/data` share are imported
+  into the same content-addressed artifact store and the link is removed from
+  final prose. HTTPS targets use the remote resolver. Historical provider
+  `sandbox:` targets may read only beneath `.codex/generated_images`. Every path
+  requires an allowlisted raster MIME, bounded bytes, and a matching signature.
   Agent-run activity is grouped separately from final messages and follows the
   provider-owned inline or collapsible presentation record. While a run is
-  non-terminal, its compact 3x3 pixel wave and elapsed timer communicate real
-  work in progress. Visible reasoning, progress, tool, and error rows use one
+  actively working, its compact 3x3 pixel wave, event-derived activity label,
+  and elapsed timer communicate real work in progress. The label uses safe
+  activity categories from canonical host and ACP events rather than raw
+  command, path, or provider text. Approval and user-wait states interrupt
+  immediately, keep the elapsed timer, and freeze the wave and text shimmer so
+  Radius does not imply continued work. Visible reasoning, progress, tool, and error rows use one
   quiet truncated line per action until the user explicitly expands that
   individual row, which reveals its full wrapped detail. The run header controls
-  only the visibility of the whole group, which starts collapsed and limits its
-  open action list to 16rem with contained vertical scrolling. Completed runs
-  settle to a static status.
-  Reduced motion freezes the wave without stopping the timer. Reasoning rows
+  only the visibility of the whole group. A populated live group starts expanded
+  so current activity remains visible, then collapses once when the run reaches a
+  terminal state unless the user already chose its disclosure state. Historical
+  terminal groups start collapsed. An open action list is limited to 16rem with
+  contained vertical scrolling. Completed runs settle to a static status.
+  Reduced motion freezes the wave, removes label movement and blur, and does
+  not stop the timer. Reasoning rows
   contain only stored concise summaries, never raw chain-of-thought. Transcript
   loading, empty, refresh-error, and stale-content states remain explicit. The
   session composer shows its fixed canonical project when one was selected at creation;
   standalone sessions omit the project brow rather than offering project
   reassignment from inside an existing conversation.
-  Completed assistant messages expose one quiet Copy markdown action below the
-  response. A completed canonical plan adds a quiet Plan completed status beside
-  Copy on the run summary when supplied, otherwise on the run's last final
-  assistant message. While a plan is active, a compact current-step chip sits
+  Completed assistant messages expose one quiet Copy markdown action plus their
+  local timestamp below the response. Today shows time; earlier in the current
+  Monday-based week shows weekday and time; older messages in the current year
+  show `MMM, DD` plus time; prior years show `MM/DD/YY` plus time. The full local
+  date and time remains available as hover and accessible context. A completed
+  canonical plan adds a quiet Plan completed status beside Copy on the run summary
+  when supplied, otherwise on the run's last final assistant message. While a plan
+  is active, a compact current-step chip sits
   above the session composer; pointer hover or keyboard focus reveals the full
   plan item list in one elevated popover. Radius shows plan items only and does
   not borrow code-diff counters from coding-agent clients. Retry, voting,
@@ -517,10 +620,19 @@ designed and approved.
   quiet Deny and Allow once actions. The surface reuses existing card,
   muted-code, button, focus, and semantic-state tokens. Resolved approvals
   collapse into ordinary trace history rather than leaving a permanent card.
+- A pending MCP approval reuses the same inline surface and offers Deny, Allow
+  once, Always allow tool when ACP advertises it, and Always allow server. The
+  last choice is explicitly server-scoped, not a global Radius bypass.
+  Remembered grants are listed as compact Settings rows with direct Revoke
+  actions and complete loading, empty, and error states.
 - Preserve accessible names, keyboard behavior, focus rings, and minimum target
   sizes.
 - Every asynchronous surface needs an intentional loading, empty, success, and
   error state where those states are possible.
+- User-facing agent errors use allowlisted, actionable Radius copy. Never show
+  Electron IPC wrappers, database queries, SQL parameters, stack traces, or
+  unrecognized provider diagnostics; fall back to a plain retry or restart
+  message while retaining technical detail outside the renderer.
 - Labels sit above form controls. Placeholder text is not a label.
 - Destructive actions must be visually and verbally distinct from ordinary
   actions.

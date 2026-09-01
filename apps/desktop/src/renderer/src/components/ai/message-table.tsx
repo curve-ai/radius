@@ -47,19 +47,22 @@ export function MessageTable({
     await copyText(tableRowsAsMarkdown(tableRows(table)));
   };
 
-  const tableClassName = cn("min-w-max text-left text-sm", className);
+  const tableClassName = cn(
+    "w-max max-w-none table-auto text-left text-sm",
+    className,
+  );
 
   return (
     <Dialog open={expanded} onOpenChange={setExpanded}>
       <div
         className={cn(
-          "radius-message-table-layout group/table relative my-5 pr-8",
+          "radius-message-table-layout group/table relative my-5 w-fit min-w-full max-w-full pr-8",
           fullWidth && "radius-message-table-breakout",
         )}
       >
         <div
           ref={containerRef}
-          className="radius-message-table overflow-hidden rounded-md border border-border bg-background"
+          className="radius-message-table w-fit min-w-full max-w-full overflow-hidden rounded-md border border-border bg-background [&>[data-slot=table-container]]:w-fit [&>[data-slot=table-container]]:min-w-full [&>[data-slot=table-container]]:max-w-full"
         >
           <Table {...props} className={tableClassName} />
         </div>
@@ -120,7 +123,7 @@ export function MessageTable({
         >
           <DialogTitle className="sr-only">Expanded table</DialogTitle>
           <div className="min-h-0 overflow-auto px-6 pb-6 pt-12">
-            <div className="overflow-hidden rounded-md border border-border bg-background">
+            <div className="w-fit max-w-none overflow-hidden rounded-md border border-border bg-background [&>[data-slot=table-container]]:w-fit">
               <Table {...props} className={tableClassName} />
             </div>
           </div>

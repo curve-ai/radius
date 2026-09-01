@@ -54,6 +54,7 @@ export interface TerminalExecutionResult {
 }
 
 export interface MacOsTerminalManagerOptions {
+  fullAccess?: boolean;
   projectRoots: readonly string[];
   authorize(
     request: TerminalAuthorizationRequest,
@@ -259,18 +260,20 @@ export class MacOsTerminalManager implements AcpTerminalHandlers {
     const temporaryRoot = await realpath(
       await mkdtemp(path.join(tmpdir(), "radius-terminal-")),
     );
-
-    const writableRoots = outsideProjectRoots
+    const sandboxRoots = outsideProjectRoots
       ? [...this.#projectRoots, cwd, temporaryRoot]
       : [...this.#projectRoots, temporaryRoot];
-    const sandbox = createSeatbeltCommand({
-      command: request.command,
-      args: request.args ?? [],
-      cwd,
-      readableRoots: writableRoots,
-      writableRoots,
-    });
-    const child = spawn(sandbox.program, sandbox.args, {
+
+    const command = this.options.fullAccess
+      ? { program: request.command, args: request.args ?? [] }
+      : createSeatbeltCommand({
+          command: request.command,
+          args: request.args ?? [],
+          cwd,
+          readableRoots: sandboxRoots,
+          writableRoots: sandboxRoots,
+        });
+    const child = spawn(command.program, command.args, {
       cwd,
       detached: true,
       env: commandEnvironment(environment, temporaryRoot),

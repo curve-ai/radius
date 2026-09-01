@@ -1,7 +1,8 @@
 # Radius Platform API
 
 This is the first open control-plane API for Cloud and self-hosted Radius. The
-Hono application owns public compatibility, bearer authentication, identity,
+Hono application reports the current public contract capabilities and owns
+bearer authentication, identity,
 deployment preparation/finalization, revision-checked promotion/rollback,
 deployment inventory, append-only environment history, client and agent
 installation observations, and owner-controlled organization membership routes.

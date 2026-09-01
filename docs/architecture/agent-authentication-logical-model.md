@@ -142,6 +142,13 @@ account field on a placeholder binding row. Readiness is derived by comparing
 the active installation release's requirements with active bindings and account
 state.
 
+Selecting a newer release unbinds the prior release's active bindings with a
+stable replacement reason but preserves those rows as history. Each historical
+binding continues to reference the exact release requirement it satisfied; it
+is not constrained to equal the installation's later selected release. A
+compatible device-local account may then be bound to the matching requirement
+of the new release without rewriting the old binding.
+
 A binding can reuse an account only when all are true:
 
 1. authority and flow match the release requirement;
