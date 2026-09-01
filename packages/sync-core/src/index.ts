@@ -1,4 +1,8 @@
-export { SyncEngine, type SyncRunResult } from "./engine.js";
+export {
+  resolveLocalArtifactPath,
+  SyncEngine,
+  type SyncRunResult,
+} from "./engine.js";
 export {
   HttpSyncProvider,
   type HttpProviderIdentity,

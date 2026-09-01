@@ -37,7 +37,12 @@ function RouteSurface({
     if (!isPresent) return;
 
     const frame = window.requestAnimationFrame(() => {
-      surfaceRef.current?.querySelector<HTMLElement>("#main-content")?.focus();
+      const mainContent =
+        surfaceRef.current?.querySelector<HTMLElement>("#main-content");
+      const focusTarget =
+        mainContent?.querySelector<HTMLElement>("[data-route-autofocus]") ??
+        mainContent;
+      focusTarget?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [isPresent]);

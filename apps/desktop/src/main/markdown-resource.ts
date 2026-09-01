@@ -1,24 +1,34 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import path from "node:path";
 
+import { resolveLocalArtifactPath } from "@curve-ai/radius-sync-core";
+import { app } from "electron";
 import type {
   MarkdownLinkPreviewResolution,
   MarkdownMediaResolution,
 } from "../radius-api";
+import { BoundedLru } from "./bounded-lru";
+import {
+  MAX_LOCAL_IMAGE_BYTES,
+  readBoundedImageFile,
+  radiusImageMatchesSignature,
+  radiusImageMimeTypeForPath,
+  RADIUS_IMAGE_CONTENT_TYPES,
+} from "./image-content";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REDIRECTS = 3;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_FAVICON_BYTES = 256 * 1024;
 const MAX_HTML_BYTES = 256 * 1024;
 const MAX_CACHE_ENTRIES = 64;
 const MAX_CACHE_BYTES = 16 * 1024 * 1024;
-const IMAGE_CONTENT_TYPES = new Set([
-  "image/avif",
-  "image/gif",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
+const FAVICON_CONTENT_TYPES = new Set([
+  ...RADIUS_IMAGE_CONTENT_TYPES,
+  "image/vnd.microsoft.icon",
+  "image/x-icon",
 ]);
 
 interface BoundedResponse {
@@ -27,46 +37,14 @@ interface BoundedResponse {
   finalUrl: string;
 }
 
-interface CacheEntry<Value> {
-  bytes: number;
-  value: Value;
-}
-
-class BoundedLru<Value> {
-  private readonly entries = new Map<string, CacheEntry<Value>>();
-  private totalBytes = 0;
-
-  get(key: string): Value | undefined {
-    const entry = this.entries.get(key);
-    if (!entry) return undefined;
-    this.entries.delete(key);
-    this.entries.set(key, entry);
-    return entry.value;
-  }
-
-  set(key: string, value: Value, bytes: number): void {
-    const existing = this.entries.get(key);
-    if (existing) {
-      this.totalBytes -= existing.bytes;
-      this.entries.delete(key);
-    }
-    this.entries.set(key, { bytes, value });
-    this.totalBytes += bytes;
-    while (
-      this.entries.size > MAX_CACHE_ENTRIES ||
-      this.totalBytes > MAX_CACHE_BYTES
-    ) {
-      const oldestKey = this.entries.keys().next().value as string | undefined;
-      if (!oldestKey) break;
-      const oldest = this.entries.get(oldestKey);
-      this.entries.delete(oldestKey);
-      this.totalBytes -= oldest?.bytes ?? 0;
-    }
-  }
-}
-
-const mediaCache = new BoundedLru<MarkdownMediaResolution>();
-const previewCache = new BoundedLru<MarkdownLinkPreviewResolution>();
+const mediaCache = new BoundedLru<MarkdownMediaResolution>(
+  MAX_CACHE_ENTRIES,
+  MAX_CACHE_BYTES,
+);
+const previewCache = new BoundedLru<MarkdownLinkPreviewResolution>(
+  MAX_CACHE_ENTRIES,
+  MAX_CACHE_BYTES,
+);
 const mediaInflight = new Map<string, Promise<MarkdownMediaResolution>>();
 const previewInflight = new Map<
   string,
@@ -197,6 +175,7 @@ async function requestBounded(
   options: {
     acceptedContentTypes: ReadonlySet<string>;
     maxBytes: number;
+    truncate?: boolean;
   },
   redirectCount = 0,
 ): Promise<BoundedResponse> {
@@ -259,7 +238,7 @@ async function requestBounded(
           return;
         }
         const declaredLength = Number(response.headers["content-length"] ?? 0);
-        if (declaredLength > options.maxBytes) {
+        if (declaredLength > options.maxBytes && !options.truncate) {
           response.resume();
           reject(new Error("MARKDOWN_RESOURCE_TOO_LARGE"));
           return;
@@ -268,6 +247,18 @@ async function requestBounded(
         const chunks: Buffer[] = [];
         let bytes = 0;
         response.on("data", (chunk: Buffer) => {
+          if (options.truncate && bytes + chunk.length > options.maxBytes) {
+            const remaining = options.maxBytes - bytes;
+            if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+            bytes = options.maxBytes;
+            resolve({
+              body: Buffer.concat(chunks, bytes),
+              contentType,
+              finalUrl: initialUrl.toString(),
+            });
+            response.destroy();
+            return;
+          }
           bytes += chunk.length;
           if (bytes > options.maxBytes) {
             request.destroy(new Error("MARKDOWN_RESOURCE_TOO_LARGE"));
@@ -339,8 +330,27 @@ function tagAttributes(tag: string): Map<string, string> {
   return attributes;
 }
 
+function iconPreference(
+  attributes: ReadonlyMap<string, string>,
+  relations: readonly string[],
+  href: string,
+): number {
+  const type = (attributes.get("type") ?? "").toLowerCase();
+  const pathname = href.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+  const raster =
+    RADIUS_IMAGE_CONTENT_TYPES.has(type) ||
+    /\.(?:avif|gif|jpe?g|png|webp)$/.test(pathname);
+  if (raster && relations.includes("icon")) return 4;
+  if (raster && relations.includes("apple-touch-icon")) return 3;
+  if (relations.includes("icon")) return 2;
+  return 1;
+}
+
 export function extractLinkMetadata(html: string): {
   description: string | null;
+  iconDarkUrl: string | null;
+  iconLightUrl: string | null;
+  iconUrl: string | null;
   imageUrl: string | null;
   siteName: string | null;
   title: string | null;
@@ -354,6 +364,43 @@ export function extractLinkMetadata(html: string): {
     const content = attributes.get("content");
     if (key && content && !metadata.has(key)) metadata.set(key, content);
   }
+  let iconUrl: string | null = null;
+  let iconDarkUrl: string | null = null;
+  let iconLightUrl: string | null = null;
+  let iconRank = 0;
+  let iconDarkRank = 0;
+  let iconLightRank = 0;
+  for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
+    const attributes = tagAttributes(match[0]);
+    const relations = (attributes.get("rel") ?? "").toLowerCase().split(/\s+/);
+    const href = attributes.get("href");
+    if (
+      href &&
+      relations.some(
+        (relation) => relation === "icon" || relation.endsWith("-icon"),
+      )
+    ) {
+      const media = (attributes.get("media") ?? "").toLowerCase();
+      const rank = iconPreference(attributes, relations, href);
+      if (media.includes("prefers-color-scheme") && media.includes("dark")) {
+        if (rank > iconDarkRank) {
+          iconDarkUrl = href;
+          iconDarkRank = rank;
+        }
+      } else if (
+        media.includes("prefers-color-scheme") &&
+        media.includes("light")
+      ) {
+        if (rank > iconLightRank) {
+          iconLightUrl = href;
+          iconLightRank = rank;
+        }
+      } else if (rank > iconRank) {
+        iconUrl = href;
+        iconRank = rank;
+      }
+    }
+  }
   const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
   return {
     title: cleanMetadataText(metadata.get("og:title") ?? titleMatch?.[1], 200),
@@ -361,9 +408,43 @@ export function extractLinkMetadata(html: string): {
       metadata.get("og:description") ?? metadata.get("description"),
       500,
     ),
+    iconDarkUrl,
+    iconLightUrl,
+    iconUrl,
     siteName: cleanMetadataText(metadata.get("og:site_name"), 100),
     imageUrl: cleanMetadataText(metadata.get("og:image"), 2_000),
   };
+}
+
+async function resolveFavicon(
+  pageUrl: string,
+  iconUrl: string | null,
+  includeConventionalFallback = true,
+): Promise<string | null> {
+  const candidates = includeConventionalFallback
+    ? [new URL("/favicon.ico", pageUrl).toString()]
+    : [];
+  if (iconUrl) {
+    try {
+      candidates.unshift(new URL(iconUrl, pageUrl).toString());
+    } catch {
+      // Ignore malformed icon metadata and retain the conventional fallback.
+    }
+  }
+  for (const candidate of new Set(candidates)) {
+    const url = parsePublicHttpsUrl(candidate);
+    if (!url) continue;
+    try {
+      const response = await requestBounded(url, {
+        acceptedContentTypes: FAVICON_CONTENT_TYPES,
+        maxBytes: MAX_FAVICON_BYTES,
+      });
+      return `data:${response.contentType};base64,${response.body.toString("base64")}`;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 async function resolveMediaUncached(
@@ -371,7 +452,7 @@ async function resolveMediaUncached(
 ): Promise<MarkdownMediaResolution> {
   try {
     const response = await requestBounded(url, {
-      acceptedContentTypes: IMAGE_CONTENT_TYPES,
+      acceptedContentTypes: RADIUS_IMAGE_CONTENT_TYPES,
       maxBytes: MAX_IMAGE_BYTES,
     });
     return {
@@ -403,23 +484,66 @@ async function resolveMediaUncached(
   }
 }
 
+async function resolveGeneratedImageUncached(
+  value: string,
+): Promise<MarkdownMediaResolution> {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "sandbox:" || url.hostname) {
+      return blockedReason("unsafe_url");
+    }
+    const absolutePath = decodeURIComponent(url.pathname);
+    const generatedImageRoot = path.join(
+      app.getPath("home"),
+      ".codex",
+      "generated_images",
+    );
+    const relativePath = path.relative(generatedImageRoot, absolutePath);
+    const filePath = await resolveLocalArtifactPath(
+      generatedImageRoot,
+      relativePath,
+    );
+    const mimeType = radiusImageMimeTypeForPath(filePath);
+    if (!mimeType) return blockedReason("unsupported_type");
+    const bytes = await readBoundedImageFile(filePath, MAX_LOCAL_IMAGE_BYTES);
+    if (!radiusImageMatchesSignature(mimeType, bytes)) {
+      return blockedReason("unsupported_type");
+    }
+    return {
+      state: "ready",
+      contentType: mimeType,
+      dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`,
+      finalUrl: value,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message === "RADIUS_IMAGE_TOO_LARGE") {
+      return blockedReason("too_large");
+    }
+    return { state: "unavailable" };
+  }
+}
+
 export async function resolveMarkdownMedia(
   value: unknown,
 ): Promise<MarkdownMediaResolution> {
   if (typeof value !== "string") return blockedReason("unsafe_url");
   const url = parsePublicHttpsUrl(value);
-  if (!url) return blockedReason("unsafe_url");
-  const key = url.toString();
+  const generatedImage = value.startsWith("sandbox:");
+  if (!url && !generatedImage) return blockedReason("unsafe_url");
+  const key = url?.toString() ?? value;
   const cached = mediaCache.get(key);
   if (cached) return cached;
   const pending = mediaInflight.get(key);
   if (pending) return pending;
-  const promise = resolveMediaUncached(url).then((result) => {
-    const bytes = result.state === "ready" ? result.dataUrl.length : 64;
-    mediaCache.set(key, result, bytes);
-    mediaInflight.delete(key);
-    return result;
-  });
+  const promise = (
+    url ? resolveMediaUncached(url) : resolveGeneratedImageUncached(value)
+  )
+    .then((result) => {
+      const bytes = result.state === "ready" ? result.dataUrl.length : 64;
+      mediaCache.set(key, result, bytes);
+      return result;
+    })
+    .finally(() => mediaInflight.delete(key));
   mediaInflight.set(key, promise);
   return promise;
 }
@@ -427,34 +551,13 @@ export async function resolveMarkdownMedia(
 async function resolvePreviewUncached(
   url: URL,
 ): Promise<MarkdownLinkPreviewResolution> {
+  let response: BoundedResponse;
   try {
-    const response = await requestBounded(url, {
+    response = await requestBounded(url, {
       acceptedContentTypes: new Set(["application/xhtml+xml", "text/html"]),
       maxBytes: MAX_HTML_BYTES,
+      truncate: true,
     });
-    const metadata = extractLinkMetadata(response.body.toString("utf8"));
-    let imageDataUrl: string | null = null;
-    if (metadata.imageUrl) {
-      try {
-        const imageUrl = new URL(
-          metadata.imageUrl,
-          response.finalUrl,
-        ).toString();
-        const image = await resolveMarkdownMedia(imageUrl);
-        if (image.state === "ready") imageDataUrl = image.dataUrl;
-      } catch {
-        imageDataUrl = null;
-      }
-    }
-    const finalUrl = new URL(response.finalUrl);
-    return {
-      state: "ready",
-      description: metadata.description,
-      finalUrl: response.finalUrl,
-      imageDataUrl,
-      siteName: metadata.siteName ?? finalUrl.hostname,
-      title: metadata.title ?? finalUrl.hostname,
-    };
   } catch (error) {
     if (
       error instanceof Error &&
@@ -463,8 +566,27 @@ async function resolvePreviewUncached(
     ) {
       return { state: "blocked", reason: "unsafe_url" };
     }
-    return { state: "unavailable" };
+    const faviconDataUrl = await resolveFavicon(url.toString(), null);
+    return faviconDataUrl
+      ? { state: "ready", faviconDataUrl, faviconDarkDataUrl: null }
+      : { state: "unavailable" };
   }
+
+  const metadata = extractLinkMetadata(response.body.toString("utf8"));
+  const [faviconDataUrl, faviconDarkDataUrl] = await Promise.all([
+    resolveFavicon(
+      response.finalUrl,
+      metadata.iconLightUrl ?? metadata.iconUrl,
+    ),
+    metadata.iconDarkUrl
+      ? resolveFavicon(response.finalUrl, metadata.iconDarkUrl, false)
+      : null,
+  ]);
+  return {
+    state: "ready",
+    faviconDataUrl,
+    faviconDarkDataUrl,
+  };
 }
 
 export async function resolveMarkdownLinkPreview(
@@ -480,14 +602,13 @@ export async function resolveMarkdownLinkPreview(
   if (cached) return cached;
   const pending = previewInflight.get(key);
   if (pending) return pending;
-  const promise = resolvePreviewUncached(url).then((result) => {
-    const bytes =
-      JSON.stringify(result).length +
-      (result.state === "ready" ? (result.imageDataUrl?.length ?? 0) : 0);
-    previewCache.set(key, result, bytes);
-    previewInflight.delete(key);
-    return result;
-  });
+  const promise = resolvePreviewUncached(url)
+    .then((result) => {
+      const bytes = JSON.stringify(result).length;
+      previewCache.set(key, result, bytes);
+      return result;
+    })
+    .finally(() => previewInflight.delete(key));
   previewInflight.set(key, promise);
   return promise;
 }

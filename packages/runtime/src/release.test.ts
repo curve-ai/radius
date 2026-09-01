@@ -46,6 +46,21 @@ test("accepts a digest-pinned translated amd64 release", () => {
   );
 });
 
+test("treats backend and first-party release versions as opaque labels", () => {
+  for (const releaseVersion of [
+    "2026.09.01",
+    "backend/release-42",
+    "0.0.5-radius.2-dev+arm64",
+    "sha-397a37fd25b0",
+  ]) {
+    assert.equal(
+      parseAgentReleaseDescriptor({ ...descriptor, releaseVersion })
+        .releaseVersion,
+      releaseVersion,
+    );
+  }
+});
+
 test("rejects amd64 without explicit Rosetta", () => {
   assert.throws(() =>
     parseAgentReleaseDescriptor({

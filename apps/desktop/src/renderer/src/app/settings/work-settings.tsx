@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { BrowserConnectionStatus } from "../../../../radius-api";
+import type {
+  BrowserConnectionStatus,
+  McpApprovalGrantSummary,
+} from "../../../../radius-api";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import { Button } from "@renderer/components/ui/button";
@@ -152,13 +155,103 @@ export function AppConnectionSettings(): ReactNode {
           Manage
         </Button>
       </SettingsRow>
+      <ConnectionPermissionSettings />
+    </SettingsCard>
+  );
+}
+
+function ConnectionPermissionSettings(): ReactNode {
+  const [grants, setGrants] = useState<McpApprovalGrantSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void window.radius
+      .listMcpApprovalGrants()
+      .then((next) => {
+        if (active) setGrants(next);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Radius could not load connection permissions",
+        );
+        setGrants([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const revoke = async (grant: McpApprovalGrantSummary): Promise<void> => {
+    setRevokingGrantId(grant.grantId);
+    setError(null);
+    try {
+      await window.radius.revokeMcpApproval({
+        grantId: grant.grantId,
+        scope: grant.scope,
+      });
+      setGrants(
+        (current) =>
+          current?.filter((item) => item.grantId !== grant.grantId) ?? [],
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Radius could not revoke this permission",
+      );
+    } finally {
+      setRevokingGrantId(null);
+    }
+  };
+
+  const description = error
+    ? error
+    : grants === null
+      ? "Loading remembered MCP permissions."
+      : grants.length === 0
+        ? "No MCP tools or servers are always allowed."
+        : `${grants.length} remembered MCP ${grants.length === 1 ? "permission" : "permissions"}.`;
+
+  return (
+    <>
       <SettingsRow
         label="Connection permissions"
-        description="Review the scopes granted to connected work applications."
-      >
-        <UnavailableSetting reason="Connection scope management is not wired yet" />
-      </SettingsRow>
-    </SettingsCard>
+        description={description}
+        descriptionLive
+      />
+      {grants?.map((grant) => (
+        <SettingsRow
+          key={grant.grantId}
+          label={
+            grant.scope === "server"
+              ? grant.providerLabel
+              : grant.toolName || grant.providerLabel
+          }
+          description={
+            grant.scope === "server"
+              ? "All tools on this MCP server are always allowed."
+              : `Always allowed on ${grant.providerLabel}.`
+          }
+          className="min-h-[4.25rem]"
+        >
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="shrink-0"
+            disabled={revokingGrantId !== null}
+            onClick={() => void revoke(grant)}
+          >
+            {revokingGrantId === grant.grantId ? "Revoking" : "Revoke"}
+          </Button>
+        </SettingsRow>
+      ))}
+    </>
   );
 }
 

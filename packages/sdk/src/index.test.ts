@@ -11,10 +11,12 @@ import { serveDevelopmentAgent } from "./development.js";
 
 test("serves a TypeScript agent through the real ACP client", async () => {
   const observed: Array<{ cwd: string; text: string }> = [];
+  let generatedTitle: string | null = null;
   const agent = defineAgent({
     name: "test-agent",
     run: async (context) => {
       observed.push({ cwd: context.cwd, text: context.text });
+      await context.setSessionTitle("SDK generated title");
       await context.sendText("Hello ");
       return { text: "from Radius" };
     },
@@ -24,6 +26,11 @@ test("serves a TypeScript agent through the real ACP client", async () => {
     cwd: "/tmp/radius-sdk-test",
     handlers: {
       onPermissionRequest: async () => ({ outcome: "cancelled" }),
+      onUpdate: ({ update }) => {
+        if (update.sessionUpdate === "session_info_update") {
+          generatedTitle = update.title ?? null;
+        }
+      },
     },
   });
 
@@ -34,6 +41,7 @@ test("serves a TypeScript agent through the real ACP client", async () => {
     assert.deepEqual(observed, [
       { cwd: "/tmp/radius-sdk-test", text: "test prompt" },
     ]);
+    assert.equal(generatedTitle, "SDK generated title");
   } finally {
     runtime.close();
   }

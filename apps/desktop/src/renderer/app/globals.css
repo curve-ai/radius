@@ -563,7 +563,25 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .radius-thinking-pixel {
+  @keyframes radius-message-favicon-in {
+    from {
+      opacity: 0;
+      filter: blur(3px);
+      transform: scale(0.92);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+      transform: scale(1);
+    }
+  }
+
+  .radius-message-favicon {
+    animation: radius-message-favicon-in 160ms cubic-bezier(0.23, 1, 0.32, 1)
+      both;
+  }
+
+  [data-slot="activity-indicator"][data-active="true"] .radius-thinking-pixel {
     animation: radius-thinking-pixel-on 650ms ease-in-out
       var(--thinking-delay, 0ms) infinite;
   }
@@ -835,6 +853,49 @@
     padding-inline-end: 1rem;
   }
 
+  .radius-chat-stable-width {
+    width: 100%;
+    max-width: var(--container-reader);
+  }
+
+  .radius-chat-composer-underlay {
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+  }
+
+  .radius-chat-composer-underlay::before {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    background: transparent;
+    backdrop-filter: blur(10px);
+    content: "";
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(0 0 0 / 0.08) 30%,
+      rgb(0 0 0 / 0.28) 68%,
+      black 100%
+    );
+    pointer-events: none;
+  }
+
+  .radius-chat-composer-underlay > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .radius-chat-composer-underlay {
+      background: var(--background);
+    }
+
+    .radius-chat-composer-underlay::before {
+      display: none;
+    }
+  }
+
   .radius-chat-scrollbar {
     scrollbar-color: color-mix(
         in oklab,
@@ -867,6 +928,106 @@
 
   .radius-message-markdown {
     overflow-wrap: anywhere;
+  }
+
+  .radius-message-file-icon {
+    display: inline-block;
+    width: 0.875rem;
+    height: 0.875rem;
+    flex: none;
+    align-self: center;
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/file.svg");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+  }
+
+  .radius-message-file-icon[data-file-icon="archive"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/zip.svg");
+  }
+  .radius-message-file-icon[data-file-icon="astro"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/astro.svg");
+  }
+  .radius-message-file-icon[data-file-icon="c"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/c.svg");
+  }
+  .radius-message-file-icon[data-file-icon="cpp"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/cpp.svg");
+  }
+  .radius-message-file-icon[data-file-icon="csharp"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/csharp.svg");
+  }
+  .radius-message-file-icon[data-file-icon="database"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/database.svg");
+  }
+  .radius-message-file-icon[data-file-icon="docker"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/docker.svg");
+  }
+  .radius-message-file-icon[data-file-icon="document"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/document.svg");
+  }
+  .radius-message-file-icon[data-file-icon="go"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/go.svg");
+  }
+  .radius-message-file-icon[data-file-icon="html"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/html.svg");
+  }
+  .radius-message-file-icon[data-file-icon="image"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/image.svg");
+  }
+  .radius-message-file-icon[data-file-icon="java"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/java.svg");
+  }
+  .radius-message-file-icon[data-file-icon="javascript"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/javascript.svg");
+  }
+  .radius-message-file-icon[data-file-icon="json"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/json.svg");
+  }
+  .radius-message-file-icon[data-file-icon="markdown"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/markdown.svg");
+  }
+  .radius-message-file-icon[data-file-icon="npm"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/npm.svg");
+  }
+  .radius-message-file-icon[data-file-icon="pdf"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/pdf.svg");
+  }
+  .radius-message-file-icon[data-file-icon="python"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/python.svg");
+  }
+  .radius-message-file-icon[data-file-icon="react"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/react_ts.svg");
+  }
+  .radius-message-file-icon[data-file-icon="rust"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/rust.svg");
+  }
+  .radius-message-file-icon[data-file-icon="shell"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/console.svg");
+  }
+  .radius-message-file-icon[data-file-icon="stylesheet"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/css.svg");
+  }
+  .radius-message-file-icon[data-file-icon="table"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/table.svg");
+  }
+  .radius-message-file-icon[data-file-icon="toml"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/toml.svg");
+  }
+  .radius-message-file-icon[data-file-icon="tsconfig"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/tsconfig.svg");
+  }
+  .radius-message-file-icon[data-file-icon="typescript"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/typescript.svg");
+  }
+  .radius-message-file-icon[data-file-icon="vue"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/vue.svg");
+  }
+  .radius-message-file-icon[data-file-icon="xml"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/xml.svg");
+  }
+  .radius-message-file-icon[data-file-icon="yaml"] {
+    background-image: url("../../../../../node_modules/material-icon-theme/icons/yaml.svg");
   }
 
   .radius-message-markdown-code {
@@ -928,7 +1089,8 @@
   }
 
   .radius-message-table-breakout {
-    width: calc(100cqw - 2rem);
+    width: max-content;
+    max-width: calc(100cqw - 2rem);
     margin-inline-start: 50%;
     transform: translateX(-50%);
   }
@@ -948,7 +1110,27 @@
     }
 
     .radius-message-table-breakout {
-      width: calc(100cqw - var(--workspace-chat-tool-panel-width, 0px) - 3rem);
+      max-width: calc(
+        100cqw - var(--workspace-chat-tool-panel-width, 0px) - 3rem
+      );
+    }
+
+    html[data-window-resizing="true"] .radius-chat-stable-width {
+      width: min(
+        var(--container-reader),
+        calc(
+          var(--workspace-stable-workbench-width, 100cqw) -
+            var(--workspace-chat-tool-panel-width, 0px) - 3rem
+        )
+      );
+      max-width: none;
+    }
+
+    html[data-window-resizing="true"] .radius-message-table-breakout {
+      max-width: calc(
+        var(--workspace-stable-workbench-width, 100cqw) -
+          var(--workspace-chat-tool-panel-width, 0px) - 3rem
+      );
     }
   }
 

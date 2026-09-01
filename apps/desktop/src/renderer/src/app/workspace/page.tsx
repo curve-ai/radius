@@ -16,11 +16,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type ReactNode,
 } from "react";
 
-import { appendAttachmentFiles } from "@renderer/components/ai/attachment-files";
+import {
+  appendAttachmentFiles,
+  attachmentFilesFromDataTransfer,
+  dataTransferContainsFiles,
+} from "@renderer/components/ai/attachment-files";
 import {
   CHAT_RESPONSE_EDGE_GAP_PX,
   isChatFollowCancelKey,
@@ -30,6 +35,7 @@ import {
   ChatComposer,
   type ChatAccessMode,
 } from "@renderer/components/ai/chat-composer";
+import { useComposerDraft } from "@renderer/components/ai/use-composer-draft";
 import { SessionThread } from "@renderer/components/ai/session-thread";
 import { PlanProgress } from "@renderer/components/ai/plan-progress";
 import { buildSessionPlanPresentation } from "@renderer/components/ai/session-transcript";
@@ -42,6 +48,7 @@ import {
   useProjects,
   type ActiveProjectSession,
 } from "@renderer/components/shell/project-context-value";
+import { useWorkspaceWindowResizing } from "@renderer/components/shell/window-resize-context";
 import type { WorkspaceView } from "@renderer/components/shell/types";
 import {
   Card,
@@ -49,6 +56,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@renderer/components/ui/card";
+import { Alert, AlertDescription } from "@renderer/components/ui/alert";
 import { InlineFeedbackTransition } from "@renderer/components/ui/inline-feedback-transition";
 import {
   AnimatePresence,
@@ -58,12 +66,15 @@ import {
 import { Skeleton } from "@renderer/components/ui/skeleton";
 import { cloudPageUrl } from "@renderer/lib/cloud-links";
 import type {
+  ComposerDraftContext,
   DesktopAgentSummary,
   SessionTranscriptEvent,
   SessionTranscriptStreamUpdate,
+  ToolApprovalSelection,
 } from "../../../../radius-api";
 import { ConnectorsPage } from "./connectors-page";
 import { AgentsPage } from "./agents-page";
+import { agentErrorMessage } from "./agent-errors";
 
 type ContentView = Exclude<WorkspaceView, "settings">;
 type EmptyStateView = Exclude<ContentView, "workspace" | "connectors">;
@@ -74,6 +85,24 @@ const WORKSPACE_FEEDBACK_EASE = [0.23, 1, 0.32, 1] as const;
 interface PendingOutgoingTurn {
   eventId: string;
   sessionId: string;
+}
+
+function ComposerError({ message }: { message: string | null }): ReactNode {
+  return (
+    <InlineFeedbackTransition>
+      {message ? (
+        <Alert
+          variant="destructive"
+          className="mb-2 max-h-24 overflow-y-auto overscroll-contain rounded-md border-negative/20 bg-card px-3 py-2 text-xs"
+        >
+          <CircleAlert className="size-3.5" aria-hidden />
+          <AlertDescription className="min-w-0 text-xs leading-5 [overflow-wrap:anywhere]">
+            <p>{message}</p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </InlineFeedbackTransition>
+  );
 }
 
 const viewContent: Record<
@@ -111,8 +140,99 @@ const viewContent: Record<
   },
 };
 
-function dataTransferContainsFiles(dataTransfer: DataTransfer): boolean {
-  return Array.from(dataTransfer.types).includes("Files");
+function useChatFileIngress(onAddFiles: (files: readonly File[]) => void): {
+  fileDragActive: boolean;
+  onDragEnter(event: ReactDragEvent<HTMLElement>): void;
+  onDragLeave(event: ReactDragEvent<HTMLElement>): void;
+  onDragOver(event: ReactDragEvent<HTMLElement>): void;
+  onDrop(event: ReactDragEvent<HTMLElement>): void;
+  onPaste(event: ReactClipboardEvent<HTMLElement>): void;
+} {
+  const dragDepthRef = useRef(0);
+  const [fileDragActive, setFileDragActive] = useState(false);
+
+  const onDragEnter = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!dataTransferContainsFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setFileDragActive(true);
+  };
+
+  const onDragOver = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!dataTransferContainsFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const onDragLeave = (event: ReactDragEvent<HTMLElement>): void => {
+    if (dragDepthRef.current === 0) return;
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setFileDragActive(false);
+  };
+
+  const onDrop = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!dataTransferContainsFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setFileDragActive(false);
+    onAddFiles(attachmentFilesFromDataTransfer(event.dataTransfer));
+  };
+
+  const onPaste = (event: ReactClipboardEvent<HTMLElement>): void => {
+    const files = attachmentFilesFromDataTransfer(event.clipboardData);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    onAddFiles(files);
+  };
+
+  return {
+    fileDragActive,
+    onDragEnter,
+    onDragLeave,
+    onDragOver,
+    onDrop,
+    onPaste,
+  };
+}
+
+function ChatFileDropOverlay({ active }: { active: boolean }): ReactNode {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <AnimatePresence initial={false}>
+      {active ? (
+        <motion.div
+          key="file-drop-overlay"
+          role="status"
+          initial={{
+            opacity: 0,
+            transform: reduceMotion === true ? "scale(1)" : "scale(0.99)",
+          }}
+          animate={{ opacity: 1, transform: "scale(1)" }}
+          exit={{
+            opacity: 0,
+            transform: reduceMotion === true ? "scale(1)" : "scale(0.99)",
+            transition: {
+              duration: 0.1,
+              ease: WORKSPACE_FEEDBACK_EASE,
+            },
+          }}
+          transition={{
+            duration: reduceMotion === true ? 0.1 : 0.125,
+            ease: WORKSPACE_FEEDBACK_EASE,
+          }}
+          className="pointer-events-none absolute inset-4 z-50 flex items-center justify-center rounded-[1.25rem] border-2 border-dashed border-brand/40 bg-background/95 text-foreground shadow-sm"
+        >
+          <div className="flex items-center gap-2 text-sm">
+            <Paperclip className="size-4 text-muted-foreground" aria-hidden />
+            Drop files to attach
+          </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
 }
 
 let cachedDesktopAgents: DesktopAgentSummary[] = [];
@@ -186,9 +306,10 @@ function useDesktopAgents(): {
         .catch((cause) => {
           if (disposed) return;
           setError(
-            cause instanceof Error
-              ? cause.message
-              : "Local agents could not be loaded",
+            agentErrorMessage(
+              cause,
+              "Agents could not be loaded. Restart Radius and try again.",
+            ),
           );
         });
     };
@@ -232,12 +353,8 @@ function NewChatPage({
 }: {
   onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
 }): ReactNode {
-  const dragDepthRef = useRef(0);
-  const reduceMotion = useReducedMotion();
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [accessMode, setAccessMode] = useState<ChatAccessMode>("full");
-  const [fileDragActive, setFileDragActive] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [accessMode, setAccessMode] = useState<ChatAccessMode>("project");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const {
@@ -252,40 +369,18 @@ function NewChatPage({
     setSelectedThinkingEffortId,
   } = useDesktopAgents();
   const { activateSession, activeProject } = useProjects();
+  const draftContext = useMemo<ComposerDraftContext>(
+    () => ({ kind: "new_chat", projectId: activeProject?.id ?? null }),
+    [activeProject?.id],
+  );
+  const draft = useComposerDraft(draftContext);
 
-  const addAttachments = (files: readonly File[]): void => {
+  const addAttachments = useCallback((files: readonly File[]): void => {
     if (files.length === 0) return;
 
     setAttachments((current) => appendAttachmentFiles(current, files));
-  };
-
-  const handleDragEnter = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!dataTransferContainsFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    dragDepthRef.current += 1;
-    setFileDragActive(true);
-  };
-
-  const handleDragOver = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!dataTransferContainsFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  };
-
-  const handleDragLeave = (event: ReactDragEvent<HTMLElement>): void => {
-    if (dragDepthRef.current === 0) return;
-    event.preventDefault();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setFileDragActive(false);
-  };
-
-  const handleDrop = (event: ReactDragEvent<HTMLElement>): void => {
-    if (!dataTransferContainsFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    dragDepthRef.current = 0;
-    setFileDragActive(false);
-    addAttachments(Array.from(event.dataTransfer.files));
-  };
+  }, []);
+  const fileIngress = useChatFileIngress(addAttachments);
 
   const handleSubmit = async (submittedPrompt: string): Promise<void> => {
     if (!selectedAgentId || submitting) return;
@@ -298,6 +393,7 @@ function NewChatPage({
     setSubmitting(true);
     setSubmitError(null);
     try {
+      await draft.flush();
       const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
@@ -306,7 +402,7 @@ function NewChatPage({
         projectId: activeProject?.id ?? null,
         thinkingEffortId: selectedThinkingEffortId,
       });
-      setPrompt("");
+      draft.reset();
       setAttachments([]);
       onPendingOutgoingTurnChange({
         eventId: result.userMessageEventId,
@@ -315,9 +411,10 @@ function NewChatPage({
       await activateSession(result.sessionId);
     } catch (cause) {
       setSubmitError(
-        cause instanceof Error
-          ? cause.message
-          : "The local agent could not be started",
+        agentErrorMessage(
+          cause,
+          "The local agent could not be started. Restart Radius and try again.",
+        ),
       );
     } finally {
       setSubmitting(false);
@@ -328,42 +425,13 @@ function NewChatPage({
     <section
       aria-labelledby="new-chat-heading"
       className="relative h-full min-h-0"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      onDragEnter={fileIngress.onDragEnter}
+      onDragLeave={fileIngress.onDragLeave}
+      onDragOver={fileIngress.onDragOver}
+      onDrop={fileIngress.onDrop}
+      onPaste={fileIngress.onPaste}
     >
-      <AnimatePresence initial={false}>
-        {fileDragActive ? (
-          <motion.div
-            key="file-drop-overlay"
-            role="status"
-            initial={{
-              opacity: 0,
-              transform: reduceMotion === true ? "scale(1)" : "scale(0.99)",
-            }}
-            animate={{ opacity: 1, transform: "scale(1)" }}
-            exit={{
-              opacity: 0,
-              transform: reduceMotion === true ? "scale(1)" : "scale(0.99)",
-              transition: {
-                duration: 0.1,
-                ease: WORKSPACE_FEEDBACK_EASE,
-              },
-            }}
-            transition={{
-              duration: reduceMotion === true ? 0.1 : 0.125,
-              ease: WORKSPACE_FEEDBACK_EASE,
-            }}
-            className="pointer-events-none absolute inset-4 z-50 flex items-center justify-center rounded-[1.25rem] border-2 border-dashed border-brand/40 bg-background/95 text-foreground shadow-sm"
-          >
-            <div className="flex items-center gap-2 text-sm">
-              <Paperclip className="size-4 text-muted-foreground" aria-hidden />
-              Drop files to attach
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      <ChatFileDropOverlay active={fileIngress.fileDragActive} />
       <div className="mx-auto flex h-full w-full max-w-page flex-col px-4 pb-3 sm:px-6">
         <div className="flex min-h-0 flex-1 items-center justify-center pb-8">
           <h1
@@ -375,18 +443,20 @@ function NewChatPage({
         </div>
 
         <div className="mx-auto w-full max-w-reader shrink-0">
+          <ComposerError message={submitError ?? agentsError ?? draft.error} />
           <ChatComposer
             accessLearnMoreHref={CLOUD_PERMISSIONS_URL}
             accessMode={accessMode}
             autoFocus
             attachments={attachments}
+            focusKey="new-chat"
             connectedAgents={agents}
             connectedModels={models}
             disabled={submitting}
             selectedAgentId={selectedAgentId ?? undefined}
             selectedModelId={selectedModelId ?? undefined}
             selectedThinkingEffortId={selectedThinkingEffortId ?? undefined}
-            value={prompt}
+            value={draft.value}
             workspaceLabel={activeProject?.name ?? "Select a project"}
             workspaceMenu={<ProjectComposerMenu />}
             onAccessModeChange={setAccessMode}
@@ -405,15 +475,8 @@ function NewChatPage({
                     void handleSubmit(submittedPrompt)
                 : undefined
             }
-            onValueChange={setPrompt}
+            onValueChange={draft.setValue}
           />
-          <InlineFeedbackTransition>
-            {submitError || agentsError ? (
-              <p role="alert" className="mt-2 px-4 text-xs text-negative">
-                {submitError ?? agentsError}
-              </p>
-            ) : null}
-          </InlineFeedbackTransition>
         </div>
       </div>
     </section>
@@ -430,11 +493,10 @@ function SessionPage({
   pendingOutgoingTurn: PendingOutgoingTurn | null;
 }): ReactNode {
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [accessMode, setAccessMode] = useState<ChatAccessMode>("full");
+  const [accessMode, setAccessMode] = useState<ChatAccessMode>("project");
   const [events, setEvents] = useState<SessionTranscriptEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [prompt, setPrompt] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -465,21 +527,33 @@ function SessionPage({
     setSelectedThinkingEffortId,
   } = useDesktopAgents();
   const { project, session } = activeSession;
+  const draftContext = useMemo<ComposerDraftContext>(
+    () => ({ kind: "session", sessionId: session.id }),
+    [session.id],
+  );
+  const draft = useComposerDraft(draftContext);
   const planPresentation = useMemo(
     () => buildSessionPlanPresentation(events),
     [events],
   );
   const activePlan = planPresentation.activePlan;
   const reduceMotion = useReducedMotion();
+  const windowResizing = useWorkspaceWindowResizing();
 
-  const resolveTerminalApproval = useCallback(
+  const addAttachments = useCallback((files: readonly File[]): void => {
+    if (files.length === 0) return;
+    setAttachments((current) => appendAttachmentFiles(current, files));
+  }, []);
+  const fileIngress = useChatFileIngress(addAttachments);
+
+  const resolveToolApproval = useCallback(
     async (
       approvalRequestEventId: string,
-      decision: "approved" | "denied",
+      selection: ToolApprovalSelection,
     ): Promise<void> => {
-      await window.radius.resolveTerminalApproval({
+      await window.radius.resolveToolApproval({
         approvalRequestEventId,
-        decision,
+        selection,
         sessionId: session.id,
       });
       setRefreshKey((current) => current + 1);
@@ -488,7 +562,13 @@ function SessionPage({
   );
 
   const updateFollowingTurn = useCallback((): void => {
-    if (!followingTurnEventId || !autoFollowingTurnRef.current) return;
+    if (
+      windowResizing ||
+      !followingTurnEventId ||
+      !autoFollowingTurnRef.current
+    ) {
+      return;
+    }
 
     const scroller = transcriptScrollRef.current;
     const content = transcriptContentRef.current;
@@ -535,6 +615,7 @@ function SessionPage({
     followingTurnEventId,
     reduceMotion,
     turnSpacerHeight,
+    windowResizing,
   ]);
 
   useEffect(() => {
@@ -666,6 +747,7 @@ function SessionPage({
     const scroller = transcriptScrollRef.current;
     if (
       loading ||
+      windowResizing ||
       composerOverlayHeight === 0 ||
       !scroller ||
       autoFollowingTurnRef.current
@@ -680,7 +762,7 @@ function SessionPage({
     scroller.scrollTop = scroller.scrollHeight;
     if (initialScrollPending) pendingInitialScrollSessionIdRef.current = null;
     composerResizeShouldStickRef.current = false;
-  }, [composerOverlayHeight, events, loading, session.id]);
+  }, [composerOverlayHeight, events, loading, session.id, windowResizing]);
 
   useEffect(() => {
     const scroller = transcriptScrollRef.current;
@@ -733,7 +815,7 @@ function SessionPage({
   }, []);
 
   useLayoutEffect(() => {
-    if (!followingTurnEventId) return;
+    if (!followingTurnEventId || windowResizing) return;
     const scroller = transcriptScrollRef.current;
     const content = transcriptContentRef.current;
     if (!scroller || !content) return;
@@ -753,16 +835,11 @@ function SessionPage({
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [followingTurnEventId, updateFollowingTurn]);
+  }, [followingTurnEventId, updateFollowingTurn, windowResizing]);
 
   useLayoutEffect(() => {
     updateFollowingTurn();
   }, [events, session.id, updateFollowingTurn]);
-
-  const addAttachments = (files: readonly File[]): void => {
-    if (files.length === 0) return;
-    setAttachments((current) => appendAttachmentFiles(current, files));
-  };
 
   const handleSubmit = async (submittedPrompt: string): Promise<void> => {
     if (!selectedAgentId || submitting) return;
@@ -775,6 +852,7 @@ function SessionPage({
     setSubmitting(true);
     setSubmitError(null);
     try {
+      await draft.flush();
       const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
@@ -784,7 +862,7 @@ function SessionPage({
         sessionId: session.id,
         thinkingEffortId: selectedThinkingEffortId,
       });
-      setPrompt("");
+      draft.reset();
       setAttachments([]);
       onPendingOutgoingTurnChange({
         eventId: result.userMessageEventId,
@@ -793,9 +871,10 @@ function SessionPage({
       setRefreshKey((current) => current + 1);
     } catch (cause) {
       setSubmitError(
-        cause instanceof Error
-          ? cause.message
-          : "The local agent could not be started",
+        agentErrorMessage(
+          cause,
+          "The local agent could not be started. Restart Radius and try again.",
+        ),
       );
     } finally {
       setSubmitting(false);
@@ -806,14 +885,20 @@ function SessionPage({
     <section
       aria-label={session.title}
       className="relative flex h-full min-h-0 flex-col"
+      onDragEnter={fileIngress.onDragEnter}
+      onDragLeave={fileIngress.onDragLeave}
+      onDragOver={fileIngress.onDragOver}
+      onDrop={fileIngress.onDrop}
+      onPaste={fileIngress.onPaste}
     >
+      <ChatFileDropOverlay active={fileIngress.fileDragActive} />
       <div
         ref={transcriptScrollRef}
         className="radius-chat-panel-inset radius-chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain pl-4 sm:pl-6"
       >
         <div
           ref={transcriptContentRef}
-          className="mx-auto flex w-full max-w-reader flex-col pt-8 sm:pt-10"
+          className="radius-chat-stable-width mx-auto flex flex-col pt-8 sm:pt-10"
           style={{
             paddingBottom:
               composerOverlayHeight +
@@ -868,8 +953,9 @@ function SessionPage({
           ) : (
             <SessionThread
               events={events}
-              onResolveTerminalApproval={resolveTerminalApproval}
+              onResolveTerminalApproval={resolveToolApproval}
               planPresentation={planPresentation}
+              sessionId={session.id}
             />
           )}
 
@@ -891,51 +977,55 @@ function SessionPage({
 
       <div
         ref={composerOverlayRef}
-        className="radius-chat-panel-inset pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-3 pl-4 sm:pl-6"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
       >
-        <div className="pointer-events-auto mx-auto w-full max-w-reader">
-          {activePlan ? (
-            <div className="mb-2 flex justify-center">
-              <PlanProgress plan={activePlan} />
-            </div>
-          ) : null}
-          <ChatComposer
-            accessLearnMoreHref={CLOUD_PERMISSIONS_URL}
-            accessMode={accessMode}
-            attachments={attachments}
-            connectedAgents={agents}
-            connectedModels={models}
-            disabled={submitting}
-            selectedAgentId={selectedAgentId ?? undefined}
-            selectedModelId={selectedModelId ?? undefined}
-            selectedThinkingEffortId={selectedThinkingEffortId ?? undefined}
-            value={prompt}
-            workspaceLabel={project?.name}
-            onAccessModeChange={setAccessMode}
-            onAddAttachments={addAttachments}
-            onRemoveAttachment={(index) =>
-              setAttachments((current) =>
-                current.filter((_, currentIndex) => currentIndex !== index),
-              )
-            }
-            onSelectedAgentChange={setSelectedAgentId}
-            onSelectedModelChange={setSelectedModelId}
-            onSelectedThinkingEffortChange={setSelectedThinkingEffortId}
-            onSubmit={
-              selectedAgentId
-                ? ({ prompt: submittedPrompt }) =>
-                    void handleSubmit(submittedPrompt)
-                : undefined
-            }
-            onValueChange={setPrompt}
-          />
-          <InlineFeedbackTransition>
-            {submitError || agentsError ? (
-              <p role="alert" className="mt-2 px-4 text-xs text-negative">
-                {submitError ?? agentsError}
-              </p>
+        <div className="radius-chat-panel-inset pl-4 sm:pl-6">
+          <div className="radius-chat-stable-width pointer-events-auto mx-auto">
+            {activePlan ? (
+              <div className="mb-2 flex justify-center">
+                <PlanProgress plan={activePlan} />
+              </div>
             ) : null}
-          </InlineFeedbackTransition>
+            <ComposerError
+              message={submitError ?? agentsError ?? draft.error}
+            />
+          </div>
+        </div>
+        <div className="radius-chat-composer-underlay radius-chat-panel-inset pb-3 pl-4 sm:pl-6">
+          <div className="radius-chat-stable-width pointer-events-auto mx-auto">
+            <ChatComposer
+              accessLearnMoreHref={CLOUD_PERMISSIONS_URL}
+              accessMode={accessMode}
+              autoFocus
+              attachments={attachments}
+              connectedAgents={agents}
+              connectedModels={models}
+              disabled={submitting}
+              focusKey={session.id}
+              selectedAgentId={selectedAgentId ?? undefined}
+              selectedModelId={selectedModelId ?? undefined}
+              selectedThinkingEffortId={selectedThinkingEffortId ?? undefined}
+              value={draft.value}
+              workspaceLabel={project?.name}
+              onAccessModeChange={setAccessMode}
+              onAddAttachments={addAttachments}
+              onRemoveAttachment={(index) =>
+                setAttachments((current) =>
+                  current.filter((_, currentIndex) => currentIndex !== index),
+                )
+              }
+              onSelectedAgentChange={setSelectedAgentId}
+              onSelectedModelChange={setSelectedModelId}
+              onSelectedThinkingEffortChange={setSelectedThinkingEffortId}
+              onSubmit={
+                selectedAgentId
+                  ? ({ prompt: submittedPrompt }) =>
+                      void handleSubmit(submittedPrompt)
+                  : undefined
+              }
+              onValueChange={draft.setValue}
+            />
+          </div>
         </div>
       </div>
     </section>

@@ -12,6 +12,7 @@ interface PlatformReportingConfig {
   apiUrl: string;
   accessToken: string;
   organization: string;
+  runtimeVersion: string;
   allowInsecureHttp: boolean;
 }
 
@@ -45,8 +46,7 @@ export async function reportPlatformClientInstallation(
         clientEventId,
         schemaVersion: 1,
         desktopVersion,
-        runtimeVersion:
-          process.env.RADIUS_RUNTIME_VERSION?.trim() || desktopVersion,
+        runtimeVersion: config.runtimeVersion,
         runtimeProtocolVersion: 1,
         state: "ready",
         errorCode: null,
@@ -64,17 +64,21 @@ export function platformReportingConfig(
   const apiUrl = environment.RADIUS_PLATFORM_API_URL?.trim();
   const accessToken = environment.RADIUS_PLATFORM_ACCESS_TOKEN?.trim();
   const organization = environment.RADIUS_PLATFORM_ORGANIZATION?.trim();
-  const configured = [apiUrl, accessToken, organization].filter(Boolean).length;
+  const runtimeVersion = environment.RADIUS_RUNTIME_VERSION?.trim();
+  const configured = [apiUrl, accessToken, organization, runtimeVersion].filter(
+    Boolean,
+  ).length;
   if (configured === 0) return null;
-  if (configured !== 3) {
+  if (configured !== 4) {
     throw new Error(
-      "RADIUS_PLATFORM_API_URL, RADIUS_PLATFORM_ACCESS_TOKEN, and RADIUS_PLATFORM_ORGANIZATION must be configured together",
+      "RADIUS_PLATFORM_API_URL, RADIUS_PLATFORM_ACCESS_TOKEN, RADIUS_PLATFORM_ORGANIZATION, and RADIUS_RUNTIME_VERSION must be configured together",
     );
   }
   return {
     apiUrl: apiUrl!,
     accessToken: accessToken!,
     organization: organization!,
+    runtimeVersion: runtimeVersion!,
     allowInsecureHttp:
       environment.RADIUS_PLATFORM_ALLOW_INSECURE_API === "true",
   };

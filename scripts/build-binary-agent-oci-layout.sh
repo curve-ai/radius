@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 4 || $# -gt 5 ]]; then
-  echo "usage: $0 BINARY OUTPUT_DIR IMAGE_REFERENCE VERSION [CA_BUNDLE]" >&2
+if [[ $# -lt 4 || $# -gt 6 ]]; then
+  echo "usage: $0 BINARY OUTPUT_DIR IMAGE_REFERENCE VERSION [CA_BUNDLE] [RELEASE_TEMPLATE]" >&2
   exit 64
 fi
 
@@ -11,6 +11,7 @@ output_dir=$2
 image_reference=$3
 release_version=$4
 ca_bundle=${5:-}
+release_template=${6:-}
 
 if [[ ! -f "$binary_path" || ! -x "$binary_path" ]]; then
   echo "binary must be an existing executable file" >&2
@@ -26,6 +27,10 @@ if [[ "$image_reference" != *:* ]]; then
 fi
 if [[ -n "$ca_bundle" && ! -f "$ca_bundle" ]]; then
   echo "CA bundle must be an existing file" >&2
+  exit 66
+fi
+if [[ -n "$release_template" && ! -f "$release_template" ]]; then
+  echo "release template must be an existing file" >&2
   exit 66
 fi
 
@@ -54,7 +59,7 @@ find "$rootfs_dir" -exec touch -h -t 197001010000 {} +
 
 layer_tar="$stage_dir/layer.tar"
 COPYFILE_DISABLE=1 tar \
-  --format pax \
+  --format ustar \
   --no-xattrs \
   --uid 10000 \
   --gid 10000 \
@@ -70,10 +75,15 @@ layer_size=$(stat -f '%z' "$layer_blob")
 mv "$layer_blob" "$blob_dir/$layer_digest"
 
 binary_digest=$(shasum -a 256 "$binary_path" | awk '{print $1}')
+release_template_base64=""
+if [[ -n "$release_template" ]]; then
+  release_template_base64=$(jq -cS . "$release_template" | base64 | tr -d '\n')
+fi
 config_json="$stage_dir/config.json"
 jq -cn \
   --arg version "$release_version" \
   --arg binary_digest "$binary_digest" \
+  --arg release_template_base64 "$release_template_base64" \
   --arg diff_id "sha256:$layer_diff_id" \
   '{
     architecture: "arm64",
@@ -84,10 +94,12 @@ jq -cn \
       Env: ["HOME=/opt/data", "PATH=/usr/local/bin:/usr/bin:/bin"],
       Entrypoint: ["/usr/local/bin/agent", "acp"],
       WorkingDir: "/opt/data",
-      Labels: {
+      Labels: ({
         "org.opencontainers.image.version": $version,
         "ai.curve.radius.source-binary-sha256": $binary_digest
-      }
+      } + (if $release_template_base64 == "" then {} else {
+        "ai.curve.radius.release-template.v1": $release_template_base64
+      } end))
     },
     rootfs: {type: "layers", diff_ids: [$diff_id]},
     history: [{created: "1970-01-01T00:00:00Z", created_by: "Radius verified binary release"}]

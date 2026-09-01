@@ -96,3 +96,49 @@ test("shows an exact external file request", () => {
   assert.match(html, /permission to read a file outside/);
   assert.match(html, /Volumes\/Shared\/report\.txt/);
 });
+
+test("shows one-call, tool, and server MCP approval choices", () => {
+  const toolCall: Extract<SessionTranscriptEvent, { eventType: "tool_call" }> =
+    {
+      ...base,
+      eventId: "mcp-call",
+      eventType: "tool_call",
+      capability: "mcp.radius-browser",
+      operation: "browser_snapshot",
+      inputSchemaId: "radius.mcp.tool-call",
+      inputSchemaVersion: 1,
+      input: {
+        approvalKind: "mcp",
+        allowAlwaysAvailable: true,
+        allowServerAvailable: true,
+        pendingLocally: true,
+        serverLabel: "Chrome browser",
+        toolName: "browser_snapshot",
+      },
+    };
+  const request: Extract<
+    SessionTranscriptEvent,
+    { eventType: "approval_request" }
+  > = {
+    ...base,
+    eventId: "mcp-approval",
+    eventType: "approval_request",
+    toolCallEventId: toolCall.eventId,
+    reason: "Allow browser_snapshot on Chrome browser",
+    expiresAt: null,
+  };
+
+  const html = renderToStaticMarkup(
+    createElement(TerminalApproval, {
+      request,
+      toolCall,
+      onResolve: async () => undefined,
+    }),
+  );
+  assert.match(html, /MCP approval required/);
+  assert.match(html, /browser_snapshot wants to use Chrome browser/);
+  assert.match(html, /Allow once/);
+  assert.match(html, /Always allow tool/);
+  assert.match(html, /Always allow server/);
+  assert.match(html, /Deny/);
+});

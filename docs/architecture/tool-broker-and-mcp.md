@@ -63,6 +63,28 @@ system or the transport for Radius's local shell. The host:
 - Returns structured results without exposing credentials.
 - Preserves provenance and audit history.
 
+MCP invocation approval is independent from filesystem and command access.
+Users can allow one call, remember one exact tool binding, or remember one
+entire provider. A provider-wide grant bypasses later tool-call prompts for all
+present and future tools on only that MCP server. Organization and system
+denials remain ceilings, and users can revoke remembered local grants from
+Connection permissions.
+
+The desktop connection flow is host-owned end to end. Installing a remote
+Streamable HTTP connector creates portable non-secret intent. Finishing setup
+then connects from Electron main, performs OAuth PKCE only when the server
+challenges, stores OAuth client and token state under one encrypted vault
+reference, discovers a bounded tool list, and enables bindings keyed by the
+exact input and output schema hashes observed on this device.
+
+At agent-run startup, Radius reconnects only providers that are locally marked
+connected and whose currently advertised schemas still match an enabled
+binding. Each provider is exposed to the fx ACP session as a separate
+token-protected guest-to-host MCP endpoint. The endpoint forwards calls through
+the host tool broker. Remote URLs, OAuth tokens, refresh tokens, client secrets,
+and vault references never enter the agent VM. An unavailable or schema-changed
+connector is omitted from that run rather than being exposed with stale tools.
+
 ## Credential boundaries
 
 - Agent packages receive only short-lived, scoped credentials required for approved services.
@@ -80,7 +102,6 @@ system or the transport for Radius's local shell. The host:
 
 ## Deferred work
 
-- Generic connector installation and discovery.
 - Publisher trust and connector verification.
 - Organization-managed connector catalogs.
 - Automatic connector updates and rollback.

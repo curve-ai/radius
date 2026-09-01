@@ -25,11 +25,20 @@ function nodeText(node: MarkdownNode): string {
 }
 
 function visitDirectives(node: MarkdownNode): void {
-  if (
-    node.type === "containerDirective" ||
-    node.type === "leafDirective" ||
-    node.type === "textDirective"
-  ) {
+  if (node.type === "textDirective") {
+    const name = node.name ?? "";
+    const firstChild = node.children?.[0];
+    const title = firstChild?.data?.directiveLabel
+      ? nodeText(firstChild).trim()
+      : "";
+    node.type = "text";
+    node.value = `:${name}${title ? `[${title}]` : ""}`;
+    delete node.name;
+    delete node.children;
+    delete node.data;
+    return;
+  }
+  if (node.type === "containerDirective" || node.type === "leafDirective") {
     const name = node.name?.toLowerCase() || "unknown";
     const firstChild = node.children?.[0];
     const title = firstChild?.data?.directiveLabel

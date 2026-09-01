@@ -27,6 +27,7 @@ import { WorkspaceHeader } from "./workspace-header";
 import { WorkspaceHistoryControls } from "./workspace-history-controls";
 import { WorkspaceSearchDialog } from "./workspace-search-dialog";
 import { WorkspaceSidebar } from "./workspace-sidebar";
+import { WorkspaceWindowResizeContext } from "./window-resize-context";
 import {
   clampWorkspaceSidebarWidth,
   getWorkspaceSidebarMaxWidth,
@@ -36,6 +37,12 @@ import { WorkspaceToolPanel } from "./workspace-tool-panel";
 
 const TOOL_PANEL_STORAGE_KEY = "radius:workspace-tool-panel";
 const SIDEBAR_WIDTH_STORAGE_KEY = "radius:workspace-sidebar-width";
+const WINDOW_RESIZE_SETTLE_DELAY_MS = 120;
+
+type WorkspaceDimensions = {
+  viewportWidth: number;
+  workbenchWidth: number | null;
+};
 
 function getInitialSidebarWidth(): number {
   const storedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
@@ -63,14 +70,18 @@ export function WorkspaceShell({
     () => localStorage.getItem("sidebar_state") !== "false",
   );
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
-  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [dimensions, setDimensions] = useState<WorkspaceDimensions>(() => ({
+    viewportWidth: Math.round(window.innerWidth),
+    workbenchWidth: null,
+  }));
+  const [windowResizing, setWindowResizing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolPanelOpen, setToolPanelOpen] = useState(
     () => localStorage.getItem(TOOL_PANEL_STORAGE_KEY) !== "false",
   );
-  const [workbenchWidth, setWorkbenchWidth] = useState<number | null>(null);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const reduceMotion = useReducedMotion();
+  const { viewportWidth, workbenchWidth } = dimensions;
   const desktopToolPanelVisible = actionToolPanelDesktopFits(
     workbenchWidth,
     false,
@@ -87,43 +98,70 @@ export function WorkspaceShell({
       : "0px";
   const animateToolPanelGeometry = actionToolPanelShouldAnimate(
     reduceMotion,
-    "animate",
+    windowResizing ? "instant" : "animate",
   );
   const sidebarMaxWidth = getWorkspaceSidebarMaxWidth(viewportWidth);
   const effectiveSidebarWidth = clampWorkspaceSidebarWidth(
     sidebarWidth,
     sidebarMaxWidth,
   );
+  const stableWorkbenchWidth =
+    workbenchWidth ??
+    Math.max(0, viewportWidth - (sidebarOpen ? effectiveSidebarWidth : 0));
 
   useEffect(() => {
     document.title = `${headerTitle} · Radius`;
   }, [headerTitle]);
 
   useLayoutEffect(() => {
-    const updateViewportWidth = (): void => {
-      setViewportWidth(Math.round(window.innerWidth));
-    };
-    window.addEventListener("resize", updateViewportWidth);
-    updateViewportWidth();
-
-    return () => window.removeEventListener("resize", updateViewportWidth);
-  }, []);
-
-  useLayoutEffect(() => {
     const workbench = workbenchRef.current;
     if (!workbench) return;
 
-    const updateWidth = (width: number): void => {
-      setWorkbenchWidth(Math.round(width));
+    let settleTimer: number | null = null;
+    let latestDimensions: WorkspaceDimensions = {
+      viewportWidth: Math.round(window.innerWidth),
+      workbenchWidth: Math.round(workbench.getBoundingClientRect().width),
     };
-    updateWidth(workbench.getBoundingClientRect().width);
+    let lastObservedDimensions = latestDimensions;
+    let resizeActive = false;
+    setDimensions(latestDimensions);
 
     const observer = new ResizeObserver(([entry]) => {
-      updateWidth(entry.contentRect.width);
+      const nextDimensions = {
+        viewportWidth: Math.round(window.innerWidth),
+        workbenchWidth: Math.round(entry.contentRect.width),
+      };
+      if (
+        nextDimensions.viewportWidth === lastObservedDimensions.viewportWidth &&
+        nextDimensions.workbenchWidth === lastObservedDimensions.workbenchWidth
+      ) {
+        return;
+      }
+
+      lastObservedDimensions = nextDimensions;
+      latestDimensions = nextDimensions;
+      if (!resizeActive) {
+        resizeActive = true;
+        document.documentElement.dataset.windowResizing = "true";
+        setWindowResizing(true);
+      }
+
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => {
+        settleTimer = null;
+        resizeActive = false;
+        setDimensions(latestDimensions);
+        setWindowResizing(false);
+        delete document.documentElement.dataset.windowResizing;
+      }, WINDOW_RESIZE_SETTLE_DELAY_MS);
     });
     observer.observe(workbench);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      delete document.documentElement.dataset.windowResizing;
+    };
   }, []);
 
   const handleSidebarOpenChange = useCallback((open: boolean) => {
@@ -167,70 +205,71 @@ export function WorkspaceShell({
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
       <WorkspaceHistoryControls />
       <div className="radius-workspace-timeline-scope relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <LayoutGroup id="workspace-tool-panel-layout">
-          <WorkspaceHeader
-            collapsingTitle={hasCollapsingTitle}
-            minimal={isNewChat}
-            title={headerTitle}
-            toolPanelAvailable={toolPanelAvailable}
-            toolPanelOpen={toolPanelOpen}
-            desktopToolPanelVisible={desktopToolPanelVisible}
-            onToolPanelOpenChange={handleToolPanelOpenChange}
-          />
+        <WorkspaceWindowResizeContext.Provider value={windowResizing}>
+          <LayoutGroup id="workspace-tool-panel-layout">
+            <WorkspaceHeader
+              collapsingTitle={hasCollapsingTitle}
+              minimal={isNewChat}
+              title={headerTitle}
+              toolPanelAvailable={toolPanelAvailable}
+              toolPanelOpen={toolPanelOpen}
+              desktopToolPanelVisible={desktopToolPanelVisible}
+              onToolPanelOpenChange={handleToolPanelOpenChange}
+            />
 
-          <div
-            ref={workbenchRef}
-            className="@container/workspace-workbench relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
-            style={
-              {
-                "--workspace-chat-tool-panel-width": chatToolPanelWidth,
-              } as CSSProperties
-            }
-          >
-            <main
-              id="main-content"
-              className={cn(
-                "h-full min-h-0 min-w-0 flex-1 outline-none focus:outline-none focus-visible:outline-none",
-                activeView === "workspace"
-                  ? "overflow-hidden"
-                  : "overflow-x-hidden overflow-y-auto overscroll-contain",
-                hasCollapsingTitle && "radius-workspace-scroll-timeline",
-              )}
-              tabIndex={-1}
+            <div
+              ref={workbenchRef}
+              className="@container/workspace-workbench relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+              style={
+                {
+                  "--workspace-chat-tool-panel-width": chatToolPanelWidth,
+                  "--workspace-stable-workbench-width": `${stableWorkbenchWidth}px`,
+                } as CSSProperties
+              }
             >
-              {children}
-            </main>
-            <AnimatePresence initial={false} mode="popLayout">
-              {desktopToolPanelRendered && (
-                <motion.div
-                  key="workspace-tool-panel-rail"
-                  initial={
-                    animateToolPanelGeometry
-                      ? { opacity: 0, x: 8 }
-                      : { opacity: 0 }
-                  }
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={
-                    animateToolPanelGeometry
-                      ? { opacity: 0, x: 8 }
-                      : { opacity: 0 }
-                  }
-                  transition={{
-                    duration: reduceMotion ? 0.08 : 0.16,
-                    ease: [0.23, 1, 0.32, 1],
-                  }}
-                  className={cn(
-                    "shrink-0",
-                    toolPanelOverlaysChat &&
-                      "pointer-events-none absolute inset-y-0 right-0 z-30 w-fit",
-                  )}
-                >
-                  <WorkspaceToolPanel overlay={toolPanelOverlaysChat} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </LayoutGroup>
+              <main
+                id="main-content"
+                className={cn(
+                  "h-full min-h-0 min-w-0 flex-1 outline-none focus:outline-none focus-visible:outline-none",
+                  activeView === "workspace"
+                    ? "overflow-hidden"
+                    : "overflow-x-hidden overflow-y-auto overscroll-contain",
+                  hasCollapsingTitle && "radius-workspace-scroll-timeline",
+                )}
+                tabIndex={-1}
+              >
+                {children}
+              </main>
+              <AnimatePresence initial={false} mode="popLayout">
+                {desktopToolPanelRendered && (
+                  <motion.div
+                    key="workspace-tool-panel-rail"
+                    initial={
+                      animateToolPanelGeometry ? { opacity: 0, x: 8 } : false
+                    }
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={
+                      animateToolPanelGeometry
+                        ? { opacity: 0, x: 8 }
+                        : { opacity: 0 }
+                    }
+                    transition={{
+                      duration: animateToolPanelGeometry ? 0.16 : 0,
+                      ease: [0.23, 1, 0.32, 1],
+                    }}
+                    className={cn(
+                      "shrink-0",
+                      toolPanelOverlaysChat &&
+                        "pointer-events-none absolute inset-y-0 right-0 z-30 w-fit",
+                    )}
+                  >
+                    <WorkspaceToolPanel overlay={toolPanelOverlaysChat} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </LayoutGroup>
+        </WorkspaceWindowResizeContext.Provider>
       </div>
     </SidebarProvider>
   );

@@ -53,6 +53,12 @@ type ConnectorViewMotionContext = {
   direction: ConnectorViewDirection;
   reduceMotion: boolean;
 };
+type PendingConnectorAction =
+  | { kind: "custom" }
+  | { kind: "install"; catalogId: string }
+  | { kind: "connect"; installationId: string }
+  | { kind: "disconnect" }
+  | { kind: "delete" };
 
 const CONNECTOR_VIEW_EASE = [0.23, 1, 0.32, 1] as const;
 const CONNECTOR_VIEW_VARIANTS: Variants = {
@@ -168,17 +174,21 @@ function ConnectorLogo({
 }
 
 function CatalogRow({
+  disabled,
   entry,
   installed,
   pending,
   onOpen,
   onInstall,
+  onConnect,
 }: {
+  disabled: boolean;
   entry: DesktopConnectorCatalogEntry;
   installed: DesktopConnector | null;
   pending: boolean;
   onOpen: (id: string) => void;
   onInstall: (id: string) => void;
+  onConnect: (installationId: string) => void;
 }): ReactNode {
   const installable = entry.transport === "streamable_http" && entry.remoteUrl;
   const needsSetup =
@@ -209,10 +219,10 @@ function CatalogRow({
             type="button"
             size="xs"
             variant="secondary"
-            disabled
-            title="Authentication setup is not available for this connector yet"
+            disabled={disabled}
+            onClick={() => onConnect(installed.id)}
           >
-            Finish setup
+            {pending ? "Connecting" : "Finish setup"}
           </Button>
         ) : (
           <span className="px-2 text-xs text-muted-foreground">Installed</span>
@@ -222,7 +232,7 @@ function CatalogRow({
           type="button"
           size="xs"
           variant="secondary"
-          disabled={pending}
+          disabled={disabled}
           onClick={() => onInstall(entry.id)}
         >
           Install
@@ -258,6 +268,8 @@ function ConnectorDetailView({
   pending,
   onBack,
   onInstall,
+  onConnect,
+  onDisconnect,
 }: {
   backLabel: string;
   entry: DesktopConnectorCatalogEntry;
@@ -268,6 +280,8 @@ function ConnectorDetailView({
   pending: boolean;
   onBack: () => void;
   onInstall: (id: string) => void;
+  onConnect: (installationId: string) => void;
+  onDisconnect: (providerId: string) => void;
 }): ReactNode {
   const installable = entry.transport === "streamable_http" && entry.remoteUrl;
   const published = entry.publishedAt
@@ -299,6 +313,15 @@ function ConnectorDetailView({
             onClick={() => onInstall(entry.id)}
           >
             Install
+          </Button>
+        ) : installed && installStatus(installed) === "Needs setup" ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={pending}
+            onClick={() => onConnect(installed.id)}
+          >
+            {pending ? "Connecting" : "Finish setup"}
           </Button>
         ) : null}
       </div>
@@ -361,12 +384,25 @@ function ConnectorDetailView({
           </h3>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {installed.providers.map((provider) => (
-              <div key={provider.id}>
-                <p className="text-sm text-foreground">{provider.label}</p>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  {connectionLabel(provider.connectionState)},{" "}
-                  {provider.toolCount} enabled tools
-                </p>
+              <div key={provider.id} className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-foreground">{provider.label}</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {connectionLabel(provider.connectionState)},{" "}
+                    {provider.toolCount} enabled tools
+                  </p>
+                </div>
+                {provider.connectionState === "connected" ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="secondary"
+                    disabled={pending}
+                    onClick={() => onDisconnect(provider.id)}
+                  >
+                    Disconnect
+                  </Button>
+                ) : null}
               </div>
             ))}
           </div>
@@ -467,7 +503,8 @@ export function ConnectorsPage(): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingConnectorAction | null>(null);
   const [query, setQuery] = useState("");
   const [catalogNextCursor, setCatalogNextCursor] = useState<string | null>(
     null,
@@ -488,6 +525,17 @@ export function ConnectorsPage(): ReactNode {
   const catalogSentinelRef = useRef<HTMLDivElement>(null);
   const loadRequestRef = useRef(0);
   const loadingMoreRef = useRef(false);
+  const pendingConnectionId =
+    pendingAction?.kind === "connect" ? pendingAction.installationId : null;
+  const customInstallPending = pendingAction?.kind === "custom";
+  const isCatalogEntryPending = (
+    entry: DesktopConnectorCatalogEntry,
+    installed: DesktopConnector | null,
+  ): boolean =>
+    (pendingAction?.kind === "install" &&
+      pendingAction.catalogId === entry.id) ||
+    (pendingAction?.kind === "connect" &&
+      pendingAction.installationId === installed?.id);
 
   const loadConnectors = useCallback(async (): Promise<void> => {
     try {
@@ -718,7 +766,7 @@ export function ConnectorsPage(): ReactNode {
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
     event.preventDefault();
-    setPendingAction("custom");
+    setPendingAction({ kind: "custom" });
     setAddError(null);
     try {
       await window.radius.installConnector({ name: addName, url: addUrl });
@@ -742,7 +790,7 @@ export function ConnectorsPage(): ReactNode {
   };
 
   const installCatalogEntry = async (id: string): Promise<void> => {
-    setPendingAction(id);
+    setPendingAction({ kind: "install", catalogId: id });
     try {
       await window.radius.installCatalogConnector(id);
       await loadConnectors();
@@ -757,9 +805,48 @@ export function ConnectorsPage(): ReactNode {
     }
   };
 
+  const connectConnector = async (installationId: string): Promise<void> => {
+    setPendingAction({ kind: "connect", installationId });
+    setError(null);
+    try {
+      await window.radius.connectConnector(installationId);
+      await loadConnectors();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "";
+      setError(
+        message.includes("MCP_OAUTH_CANCELLED")
+          ? "Connector authorization was cancelled."
+          : message.includes("MCP_OAUTH_TIMEOUT")
+            ? "Connector authorization timed out. Try again."
+            : message.includes("MCP_OAUTH_STATE_MISMATCH")
+              ? "Connector authorization could not be verified."
+              : message.includes("MCP_OAUTH_AUTHORIZATION_FAILED")
+                ? "Connector authorization was not completed."
+                : message || "Connector setup failed",
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const disconnectConnector = async (providerId: string): Promise<void> => {
+    setPendingAction({ kind: "disconnect" });
+    setError(null);
+    try {
+      await window.radius.disconnectConnector(providerId);
+      await loadConnectors();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Connector disconnect failed",
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
   const remove = async (): Promise<void> => {
     if (!deleteTarget) return;
-    setPendingAction(deleteTarget.id);
+    setPendingAction({ kind: "delete" });
     try {
       await window.radius.deleteConnector(deleteTarget.id);
       setDeleteTarget(null);
@@ -801,6 +888,8 @@ export function ConnectorsPage(): ReactNode {
           pending={pendingAction !== null}
           onBack={closeConnector}
           onInstall={(id) => void installCatalogEntry(id)}
+          onConnect={(installationId) => void connectConnector(installationId)}
+          onDisconnect={(providerId) => void disconnectConnector(providerId)}
         />
       </section>
     );
@@ -854,18 +943,22 @@ export function ConnectorsPage(): ReactNode {
         ) : catalog.length > 0 ? (
           <>
             <div className="mt-8 grid border-t border-border pt-1 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-              {catalog.map((entry) => (
-                <CatalogRow
-                  key={entry.id}
-                  entry={entry}
-                  installed={
-                    installedByCatalogId.get(entry.sourceServerName) ?? null
-                  }
-                  pending={pendingAction !== null}
-                  onOpen={openConnector}
-                  onInstall={(id) => void installCatalogEntry(id)}
-                />
-              ))}
+              {catalog.map((entry) => {
+                const installed =
+                  installedByCatalogId.get(entry.sourceServerName) ?? null;
+                return (
+                  <CatalogRow
+                    key={entry.id}
+                    disabled={pendingAction !== null}
+                    entry={entry}
+                    installed={installed}
+                    pending={isCatalogEntryPending(entry, installed)}
+                    onOpen={openConnector}
+                    onInstall={(id) => void installCatalogEntry(id)}
+                    onConnect={(id) => void connectConnector(id)}
+                  />
+                );
+              })}
             </div>
             {catalogNextCursor ? (
               <div
@@ -1000,12 +1093,24 @@ export function ConnectorsPage(): ReactNode {
         {scope === "custom" ? (
           <CustomConnectorSection
             connectors={customConnectors}
+            disabled={pendingAction !== null}
+            pendingId={pendingConnectionId}
+            onConnect={(id) => void connectConnector(id)}
             onDelete={setDeleteTarget}
           />
         ) : (
           <>
-            {needsSetup.length > 0 ? (
-              <NeedsSetupSection connectors={needsSetup} />
+            {needsSetup.some(
+              (connector) => connector.catalogSource !== null,
+            ) ? (
+              <NeedsSetupSection
+                connectors={needsSetup.filter(
+                  (connector) => connector.catalogSource !== null,
+                )}
+                disabled={pendingAction !== null}
+                pendingId={pendingConnectionId}
+                onConnect={(id) => void connectConnector(id)}
+              />
             ) : null}
 
             {catalogError ? (
@@ -1037,18 +1142,22 @@ export function ConnectorsPage(): ReactNode {
                   Search results
                 </h3>
                 <div className="mt-3 grid border-t border-border pt-1 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-                  {catalog.map((entry) => (
-                    <CatalogRow
-                      key={entry.id}
-                      entry={entry}
-                      installed={
-                        installedByCatalogId.get(entry.sourceServerName) ?? null
-                      }
-                      pending={pendingAction !== null}
-                      onOpen={openConnector}
-                      onInstall={(id) => void installCatalogEntry(id)}
-                    />
-                  ))}
+                  {catalog.map((entry) => {
+                    const installed =
+                      installedByCatalogId.get(entry.sourceServerName) ?? null;
+                    return (
+                      <CatalogRow
+                        key={entry.id}
+                        disabled={pendingAction !== null}
+                        entry={entry}
+                        installed={installed}
+                        pending={isCatalogEntryPending(entry, installed)}
+                        onOpen={openConnector}
+                        onInstall={(id) => void installCatalogEntry(id)}
+                        onConnect={(id) => void connectConnector(id)}
+                      />
+                    );
+                  })}
                 </div>
                 {catalogNextCursor ? (
                   <div
@@ -1099,20 +1208,23 @@ export function ConnectorsPage(): ReactNode {
                         </Button>
                       </div>
                       <div className="mt-3 grid border-t border-border pt-1 min-[900px]:grid-cols-2 min-[900px]:gap-x-8">
-                        {preview.connectors.map((entry) => (
-                          <CatalogRow
-                            key={entry.id}
-                            entry={entry}
-                            installed={
-                              installedByCatalogId.get(
-                                entry.sourceServerName,
-                              ) ?? null
-                            }
-                            pending={pendingAction !== null}
-                            onOpen={openConnector}
-                            onInstall={(id) => void installCatalogEntry(id)}
-                          />
-                        ))}
+                        {preview.connectors.map((entry) => {
+                          const installed =
+                            installedByCatalogId.get(entry.sourceServerName) ??
+                            null;
+                          return (
+                            <CatalogRow
+                              key={entry.id}
+                              disabled={pendingAction !== null}
+                              entry={entry}
+                              installed={installed}
+                              pending={isCatalogEntryPending(entry, installed)}
+                              onOpen={openConnector}
+                              onInstall={(id) => void installCatalogEntry(id)}
+                              onConnect={(id) => void connectConnector(id)}
+                            />
+                          );
+                        })}
                       </div>
                     </section>
                   );
@@ -1194,7 +1306,7 @@ export function ConnectorsPage(): ReactNode {
       <Dialog
         open={addOpen}
         onOpenChange={(open) => {
-          if (pendingAction !== "custom") {
+          if (!customInstallPending) {
             setAddOpen(open);
             if (!open) setAddError(null);
           }
@@ -1221,9 +1333,9 @@ export function ConnectorsPage(): ReactNode {
                   autoFocus
                   autoComplete="off"
                   value={addName}
-                  placeholder="openbudget.sh"
+                  placeholder="tools.example"
                   maxLength={120}
-                  disabled={pendingAction === "custom"}
+                  disabled={customInstallPending}
                   onChange={(event) => setAddName(event.target.value)}
                 />
               </label>
@@ -1233,8 +1345,8 @@ export function ConnectorsPage(): ReactNode {
                   type="url"
                   autoComplete="url"
                   value={addUrl}
-                  placeholder="https://api.openbudget.sh/mcp"
-                  disabled={pendingAction === "custom"}
+                  placeholder="https://mcp.tools.example/mcp"
+                  disabled={customInstallPending}
                   onChange={(event) => setAddUrl(event.target.value)}
                 />
               </label>
@@ -1260,7 +1372,7 @@ export function ConnectorsPage(): ReactNode {
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={pendingAction === "custom"}
+                  disabled={customInstallPending}
                 >
                   Cancel
                 </Button>
@@ -1268,9 +1380,7 @@ export function ConnectorsPage(): ReactNode {
               <Button
                 type="submit"
                 disabled={
-                  pendingAction === "custom" ||
-                  !addName.trim() ||
-                  !addUrl.trim()
+                  customInstallPending || !addName.trim() || !addUrl.trim()
                 }
               >
                 Add
@@ -1319,8 +1429,14 @@ export function ConnectorsPage(): ReactNode {
 
 function NeedsSetupSection({
   connectors,
+  disabled,
+  pendingId,
+  onConnect,
 }: {
   connectors: DesktopConnector[];
+  disabled: boolean;
+  pendingId: string | null;
+  onConnect: (installationId: string) => void;
 }): ReactNode {
   return (
     <section className="mt-9" aria-labelledby="needs-setup-heading">
@@ -1352,10 +1468,10 @@ function NeedsSetupSection({
               type="button"
               size="xs"
               variant="secondary"
-              disabled
-              title="Authentication setup is not available for this connector yet"
+              disabled={disabled}
+              onClick={() => onConnect(connector.id)}
             >
-              Finish setup
+              {pendingId === connector.id ? "Connecting" : "Finish setup"}
             </Button>
           </div>
         ))}
@@ -1366,9 +1482,15 @@ function NeedsSetupSection({
 
 function CustomConnectorSection({
   connectors,
+  disabled,
+  pendingId,
+  onConnect,
   onDelete,
 }: {
   connectors: DesktopConnector[];
+  disabled: boolean;
+  pendingId: string | null;
+  onConnect: (installationId: string) => void;
   onDelete: (connector: DesktopConnector) => void;
 }): ReactNode {
   return (
@@ -1399,10 +1521,29 @@ function CustomConnectorSection({
                 <p className="text-sm font-medium text-foreground">
                   {connector.displayName}
                 </p>
-                <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {connector.providers[0]
+                    ? `${connectionLabel(connector.providers[0].connectionState)}, ${connector.providers[0].toolCount} enabled ${connector.providers[0].toolCount === 1 ? "tool" : "tools"}`
+                    : "Needs setup"}
+                </p>
+                <p
+                  className="mt-0.5 line-clamp-1 text-xs text-muted-foreground"
+                  title={connector.description}
+                >
                   {connector.description}
                 </p>
               </div>
+              {installStatus(connector) === "Needs setup" ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="secondary"
+                  disabled={disabled}
+                  onClick={() => onConnect(connector.id)}
+                >
+                  {pendingId === connector.id ? "Connecting" : "Finish setup"}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 size="xs"

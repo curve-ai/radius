@@ -24,12 +24,15 @@ function plainCode(code: string): ReactNode {
 
 function HighlightedCode({
   code,
+  enabled,
   language,
 }: {
   code: string;
+  enabled: boolean;
   language: string | null;
 }): ReactNode {
   const highlightable =
+    enabled &&
     Boolean(language) &&
     code.length <= MAX_HIGHLIGHT_CHARACTERS &&
     code.split("\n", MAX_HIGHLIGHT_LINES + 1).length <= MAX_HIGHLIGHT_LINES;
@@ -41,7 +44,7 @@ function HighlightedCode({
 
   useEffect(() => {
     let active = true;
-    if (!language || !highlightable) return undefined;
+    if (!enabled || !language || !highlightable) return undefined;
 
     void import("shiki/bundle/web")
       .then(({ codeToHtml }) =>
@@ -58,7 +61,7 @@ function HighlightedCode({
     return () => {
       active = false;
     };
-  }, [code, highlightable, language]);
+  }, [code, enabled, highlightable, language]);
 
   if (
     !highlightable ||
@@ -79,10 +82,12 @@ function HighlightedCode({
 export function MessageCodeBlock({
   code,
   controlsEnabled = true,
+  highlightEnabled = true,
   language,
 }: {
   code: string;
   controlsEnabled?: boolean;
+  highlightEnabled?: boolean;
   language: string | null;
 }): ReactNode {
   const labelId = useId();
@@ -98,13 +103,20 @@ export function MessageCodeBlock({
         expandedView ? "h-full p-6 pt-12" : "max-h-[32rem] p-3",
       )}
     >
-      <HighlightedCode code={code} language={language} />
+      <HighlightedCode
+        code={code}
+        enabled={highlightEnabled}
+        language={language}
+      />
     </div>
   );
 
   return (
     <Dialog open={expanded} onOpenChange={setExpanded}>
-      <div className="group/code relative my-4 pr-8">
+      <div
+        className="group/code relative my-4 pr-8"
+        data-streaming={highlightEnabled ? undefined : true}
+      >
         <div className="overflow-hidden rounded-md border border-border bg-background">
           <div className="flex min-h-8 items-center border-b border-border/70 px-3 text-xs text-muted-foreground">
             <span id={labelId}>{languageLabel}</span>

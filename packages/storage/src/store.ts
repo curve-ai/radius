@@ -6,6 +6,7 @@ import {
   SessionRecordSchema,
   SyncChangeEnvelopeSchema,
   type JsonValue,
+  type ArtifactRecord,
   type PushChangeResult,
   type ProjectRecord,
   type SessionEventRecord,
@@ -38,6 +39,7 @@ import {
   artifactTransfers,
   artifacts,
   clientInstances,
+  composerDrafts,
   errors,
   eventArtifacts,
   eventRuns,
@@ -152,6 +154,29 @@ export interface SessionProjectContext {
   projectId: string | null;
 }
 
+export interface SessionTranscriptArtifactRecord extends Pick<
+  ArtifactRecord,
+  "id" | "name" | "artifactType" | "storageKind"
+> {
+  mimeType: string | null;
+  availability: "local" | "remote_only" | "missing" | null;
+  url: string | null;
+}
+
+export interface LocalFileArtifactRecord extends Pick<
+  Extract<ArtifactRecord, { storageKind: "file" }>,
+  | "id"
+  | "sessionId"
+  | "name"
+  | "artifactType"
+  | "mimeType"
+  | "contentSha256"
+  | "byteSize"
+> {
+  availability: "local" | "remote_only" | "missing";
+  localRelativePath: string | null;
+}
+
 export type SessionTranscriptEventRecord =
   | {
       eventId: string;
@@ -161,13 +186,10 @@ export type SessionTranscriptEventRecord =
       eventType: "message";
       role: "user" | "assistant" | "system";
       messageKind:
-        | "prompt"
-        | "progress"
-        | "final"
-        | "run_summary"
-        | "system_notice";
+        "prompt" | "progress" | "final" | "run_summary" | "system_notice";
       status: "completed" | "cancelled" | "failed";
       text: string;
+      artifacts?: SessionTranscriptArtifactRecord[];
     }
   | {
       eventId: string;
@@ -1456,6 +1478,36 @@ export async function getSessionRevision(
   return session?.revision ?? null;
 }
 
+export async function getLocalFileArtifact(
+  database: RadiusDatabase,
+  sessionId: string,
+  artifactId: string,
+): Promise<LocalFileArtifactRecord | null> {
+  const [row] = await database.db
+    .select({
+      id: artifacts.id,
+      sessionId: artifacts.sessionId,
+      name: artifacts.name,
+      artifactType: artifacts.artifactType,
+      mimeType: fileArtifacts.mimeType,
+      contentSha256: fileArtifacts.contentSha256,
+      byteSize: fileArtifacts.byteSize,
+      availability: fileArtifacts.availability,
+      localRelativePath: fileArtifacts.localRelativePath,
+    })
+    .from(artifacts)
+    .innerJoin(fileArtifacts, eq(fileArtifacts.artifactId, artifacts.id))
+    .where(
+      and(
+        eq(artifacts.id, artifactId),
+        eq(artifacts.sessionId, sessionId),
+        isNull(artifacts.deletedAtMs),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function listSessionTranscript(
   database: RadiusDatabase,
   sessionId: string,
@@ -1529,33 +1581,71 @@ export async function listSessionTranscript(
     .leftJoin(toolCalls, eq(toolCalls.eventId, sessionEvents.id))
     .leftJoin(toolResults, eq(toolResults.eventId, sessionEvents.id))
     .leftJoin(approvalRequests, eq(approvalRequests.eventId, sessionEvents.id))
-    .leftJoin(approvalDecisions, eq(approvalDecisions.eventId, sessionEvents.id))
+    .leftJoin(
+      approvalDecisions,
+      eq(approvalDecisions.eventId, sessionEvents.id),
+    )
     .leftJoin(errors, eq(errors.eventId, sessionEvents.id))
     .where(eq(sessionEvents.sessionId, sessionId))
     .orderBy(asc(sessionEvents.sessionRevision));
 
-  const textPartsQuery = database.db
+  const messagePartsQuery = database.db
     .select({
       messageEventId: messageParts.messageEventId,
       position: messageParts.position,
+      partType: messageParts.partType,
       textContent: messageParts.textContent,
+      id: artifacts.id,
+      name: artifacts.name,
+      artifactType: artifacts.artifactType,
+      fileMimeType: fileArtifacts.mimeType,
+      fileAvailability: fileArtifacts.availability,
+      linkUrl: linkArtifacts.url,
     })
     .from(messageParts)
     .innerJoin(sessionEvents, eq(sessionEvents.id, messageParts.messageEventId))
+    .leftJoin(artifacts, eq(artifacts.id, messageParts.artifactId))
+    .leftJoin(fileArtifacts, eq(fileArtifacts.artifactId, artifacts.id))
+    .leftJoin(linkArtifacts, eq(linkArtifacts.artifactId, artifacts.id))
     .where(
       and(
         eq(sessionEvents.sessionId, sessionId),
-        eq(messageParts.partType, "text"),
+        inArray(messageParts.partType, ["text", "artifact_reference"]),
+        isNull(artifacts.deletedAtMs),
       ),
     )
     .orderBy(asc(messageParts.messageEventId), asc(messageParts.position));
-  const [rows, textParts] = await Promise.all([rowsQuery, textPartsQuery]);
+  const [rows, transcriptParts] = await Promise.all([
+    rowsQuery,
+    messagePartsQuery,
+  ]);
   const messageText = new Map<string, string[]>();
-  for (const part of textParts) {
-    if (part.textContent === null) continue;
-    const parts = messageText.get(part.messageEventId) ?? [];
-    parts.push(part.textContent);
-    messageText.set(part.messageEventId, parts);
+  const messageArtifacts = new Map<string, SessionTranscriptArtifactRecord[]>();
+  for (const part of transcriptParts) {
+    if (part.partType === "text" && part.textContent !== null) {
+      const values = messageText.get(part.messageEventId) ?? [];
+      values.push(part.textContent);
+      messageText.set(part.messageEventId, values);
+      continue;
+    }
+    if (
+      part.partType === "artifact_reference" &&
+      part.id &&
+      part.name &&
+      part.artifactType
+    ) {
+      const values = messageArtifacts.get(part.messageEventId) ?? [];
+      values.push({
+        id: part.id,
+        name: part.name,
+        artifactType: part.artifactType,
+        storageKind: part.fileMimeType ? "file" : "link",
+        mimeType: part.fileMimeType,
+        availability: part.fileAvailability,
+        url: part.linkUrl,
+      });
+      messageArtifacts.set(part.messageEventId, values);
+    }
   }
 
   const planIds = Array.from(
@@ -1604,6 +1694,9 @@ export async function listSessionTranscript(
             messageKind: row.messageKind,
             status: row.messageStatus,
             text: (messageText.get(row.eventId) ?? []).join("\n\n"),
+            ...((messageArtifacts.get(row.eventId)?.length ?? 0) > 0
+              ? { artifacts: messageArtifacts.get(row.eventId)! }
+              : {}),
           },
         ];
       case "agent_run":
@@ -1723,7 +1816,9 @@ export async function listSessionTranscript(
         ];
       case "approval_request":
         if (!row.approvalToolCallEventId || !row.approvalReason) {
-          throw new Error(`Approval request event ${row.eventId} is incomplete`);
+          throw new Error(
+            `Approval request event ${row.eventId} is incomplete`,
+          );
         }
         return [
           {
@@ -1742,7 +1837,9 @@ export async function listSessionTranscript(
           !row.approvalDecision ||
           !row.approvalActorType
         ) {
-          throw new Error(`Approval decision event ${row.eventId} is incomplete`);
+          throw new Error(
+            `Approval decision event ${row.eventId} is incomplete`,
+          );
         }
         return [
           {
@@ -1871,18 +1968,20 @@ export async function updateSessionTitle(
       throw new Error("Only the local origin can rename an active session");
     }
 
+    const titleChanged = current.title !== title;
     const session = SessionRecordSchema.parse({
       id: current.id,
       originClientInstanceId: current.originClientInstanceId,
       projectId: current.projectId,
       title,
       status: current.status,
-      revision: current.revision + 1,
+      revision: current.revision + (titleChanged ? 1 : 0),
       createdAt: toIso(current.createdAtMs),
-      updatedAt: toIso(now),
+      updatedAt: toIso(titleChanged ? now : current.updatedAtMs),
       archivedAt: null,
       deletedAt: null,
     });
+    if (!titleChanged) return session;
     const { envelope, payloadJson } = prepareLocalChange({
       originClientInstanceId: session.originClientInstanceId,
       sessionId: session.id,
@@ -1981,6 +2080,9 @@ export async function setSessionArchived(
     }
 
     await tx.delete(sessionPins).where(eq(sessionPins.sessionId, session.id));
+    await tx
+      .delete(composerDrafts)
+      .where(eq(composerDrafts.sessionId, session.id));
     await insertLocalChange(tx, envelope, payloadJson);
     return session;
   });

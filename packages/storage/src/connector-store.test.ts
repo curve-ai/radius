@@ -11,12 +11,15 @@ import {
   configureConnectorProvider,
   deleteConnectorEverywhere,
   disconnectConnectorProvider,
+  getConnectorConnectionTarget,
   installCatalogConnector,
   installConnectorManifest,
   installCustomConnector,
   listConnectorEnabledTools,
   listConnectors,
+  listReadyMcpProviders,
   registerCapabilityContract,
+  saveConnectorDiscovery,
 } from "./connector-store.js";
 import { migrateRadiusDatabase, openRadiusDatabase } from "./database.js";
 import {
@@ -211,17 +214,62 @@ test("installs a custom HTTPS connector without a manifest file", async () => {
   await withDatabase(async (database) => {
     const installed = await installCustomConnector(database, {
       clientInstanceId: clientId,
-      displayName: "OpenBudget",
-      endpointUrl: "https://api.openbudget.sh/mcp",
+      displayName: "Example tools",
+      endpointUrl: "https://mcp.tools.example/mcp",
       now: Date.parse("2026-08-24T12:00:00.000Z"),
     });
 
-    assert.equal(installed.displayName, "OpenBudget");
-    assert.equal(installed.description, "https://api.openbudget.sh/mcp");
+    assert.equal(installed.displayName, "Example tools");
+    assert.equal(installed.description, "https://mcp.tools.example/mcp");
     assert.equal(installed.catalogSource, null);
-    assert.equal(installed.domain, "api.openbudget.sh");
+    assert.equal(installed.domain, "mcp.tools.example");
     assert.equal(installed.lifecycleState, "staged");
     assert.equal(installed.providers.length, 0);
+  });
+});
+
+test("persists discovered MCP tools and returns ready runtime providers", async () => {
+  await withDatabase(async (database) => {
+    const installed = await installCustomConnector(database, {
+      clientInstanceId: clientId,
+      displayName: "Example tools",
+      endpointUrl: "https://mcp.tools.example/mcp",
+    });
+    const target = await getConnectorConnectionTarget(
+      database,
+      clientId,
+      installed.id,
+    );
+    assert.equal(target.endpointUrl, "https://mcp.tools.example/mcp");
+
+    const providerId = await saveConnectorDiscovery(database, {
+      clientInstanceId: clientId,
+      installationId: installed.id,
+      credentialRef: "connector:example-tools",
+      tools: [
+        {
+          name: "search_transactions",
+          title: "Search transactions",
+          description: "Search connected financial accounts.",
+          inputSchemaSha256: hash,
+          outputSchemaSha256: null,
+        },
+      ],
+    });
+    const ready = await listReadyMcpProviders(database, clientId);
+    assert.equal(ready.length, 1);
+    assert.equal(ready[0]?.providerId, providerId);
+    assert.equal(ready[0]?.bindings[0]?.nativeToolName, "search_transactions");
+    assert.equal(
+      (await listConnectors(database, clientId))[0]?.lifecycleState,
+      "ready",
+    );
+
+    assert.equal(
+      await disconnectConnectorProvider(database, providerId),
+      "connector:example-tools",
+    );
+    assert.deepEqual(await listReadyMcpProviders(database, clientId), []);
   });
 });
 

@@ -1,6 +1,7 @@
 import {
   FileText,
   FolderOpen,
+  Plug,
   ShieldAlert,
   SquareTerminal,
 } from "lucide-react";
@@ -9,7 +10,10 @@ import { useState, type ReactNode } from "react";
 
 void React;
 
-import type { SessionTranscriptEvent } from "../../../../radius-api";
+import type {
+  SessionTranscriptEvent,
+  ToolApprovalSelection,
+} from "../../../../radius-api";
 import { Button } from "@renderer/components/ui/button";
 
 type ToolCallEvent = Extract<
@@ -22,6 +26,9 @@ type ApprovalRequestEvent = Extract<
 >;
 
 interface ApprovalDetails {
+  approvalKind: "host" | "mcp";
+  allowAlwaysAvailable: boolean;
+  allowServerAvailable: boolean;
   command: string | null;
   description: string;
   path: string;
@@ -40,12 +47,31 @@ function approvalDetails(event: ToolCallEvent): ApprovalDetails | null {
   const input = event.input as Record<string, unknown>;
   if (input.pendingLocally !== true) return null;
   if (
+    input.approvalKind === "mcp" &&
+    typeof input.serverLabel === "string" &&
+    typeof input.toolName === "string"
+  ) {
+    return {
+      approvalKind: "mcp",
+      allowAlwaysAvailable: input.allowAlwaysAvailable === true,
+      allowServerAvailable: input.allowServerAvailable === true,
+      command: null,
+      description: `${input.toolName} wants to use ${input.serverLabel}.`,
+      path: input.serverLabel,
+      outsideProjectRoots: false,
+      title: "MCP approval required",
+    };
+  }
+  if (
     event.capability === "workspace.files" &&
     (event.operation === "read" || event.operation === "write") &&
     typeof input.path === "string"
   ) {
     const outsideProjectRoots = input.outsideProjectRoots === true;
     return {
+      approvalKind: "host",
+      allowAlwaysAvailable: false,
+      allowServerAvailable: false,
       command: null,
       description: outsideProjectRoots
         ? `This agent needs permission to ${event.operation} a file outside the project folders.`
@@ -66,6 +92,9 @@ function approvalDetails(event: ToolCallEvent): ApprovalDetails | null {
   }
   const args = input.args as string[];
   return {
+    approvalKind: "host",
+    allowAlwaysAvailable: false,
+    allowServerAvailable: false,
     command: [input.command, ...args]
       .map((part) =>
         /^[A-Za-z0-9_./:@%+=,-]+$/.test(part) ? part : JSON.stringify(part),
@@ -88,21 +117,21 @@ export function TerminalApproval({
 }: {
   request: ApprovalRequestEvent;
   toolCall: ToolCallEvent;
-  onResolve(decision: "approved" | "denied"): Promise<void>;
+  onResolve(selection: ToolApprovalSelection): Promise<void>;
 }): ReactNode {
-  const [submitting, setSubmitting] = useState<"approved" | "denied" | null>(
+  const [submitting, setSubmitting] = useState<ToolApprovalSelection | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
   const details = approvalDetails(toolCall);
   if (!details) return null;
 
-  const resolve = async (decision: "approved" | "denied"): Promise<void> => {
+  const resolve = async (selection: ToolApprovalSelection): Promise<void> => {
     if (submitting) return;
-    setSubmitting(decision);
+    setSubmitting(selection);
     setError(null);
     try {
-      await onResolve(decision);
+      await onResolve(selection);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -120,7 +149,11 @@ export function TerminalApproval({
     >
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <ShieldAlert className="size-4" aria-hidden />
+          {details.approvalKind === "mcp" ? (
+            <Plug className="size-4" aria-hidden />
+          ) : (
+            <ShieldAlert className="size-4" aria-hidden />
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <h3
@@ -148,7 +181,9 @@ export function TerminalApproval({
           </div>
         ) : null}
         <div className="flex min-w-0 items-center gap-2 px-0.5 text-xs text-muted-foreground">
-          {details.command ? (
+          {details.approvalKind === "mcp" ? (
+            <Plug className="size-3.5 shrink-0" aria-hidden />
+          ) : details.command ? (
             <FolderOpen className="size-3.5 shrink-0" aria-hidden />
           ) : (
             <FileText className="size-3.5 shrink-0" aria-hidden />
@@ -159,7 +194,7 @@ export function TerminalApproval({
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-end gap-2">
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
         <Button
           type="button"
           variant="outline"
@@ -169,13 +204,39 @@ export function TerminalApproval({
         >
           {submitting === "denied" ? "Denying..." : "Deny"}
         </Button>
+        {details.approvalKind === "mcp" && details.allowAlwaysAvailable ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={submitting !== null}
+            onClick={() => void resolve("allow_always")}
+          >
+            {submitting === "allow_always"
+              ? "Allowing..."
+              : "Always allow tool"}
+          </Button>
+        ) : null}
+        {details.approvalKind === "mcp" && details.allowServerAvailable ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={submitting !== null}
+            onClick={() => void resolve("allow_server")}
+          >
+            {submitting === "allow_server"
+              ? "Allowing..."
+              : "Always allow server"}
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"
           disabled={submitting !== null}
-          onClick={() => void resolve("approved")}
+          onClick={() => void resolve("allow_once")}
         >
-          {submitting === "approved" ? "Allowing..." : "Allow once"}
+          {submitting === "allow_once" ? "Allowing..." : "Allow once"}
         </Button>
       </div>
       {error ? (

@@ -213,7 +213,7 @@ export function WorkspaceSessionHeader(): ReactNode {
 
   return (
     <div
-      className="electron-window-no-drag flex min-w-0 flex-1 items-center gap-1"
+      className="flex min-w-0 flex-1 items-center gap-1"
       onContextMenu={handleContextMenu}
     >
       <SessionIcon className="mr-1 size-4 shrink-0" aria-hidden />

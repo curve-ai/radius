@@ -12,7 +12,10 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { SessionTranscriptEvent } from "../../../../radius-api";
+import type {
+  SessionTranscriptEvent,
+  ToolApprovalSelection,
+} from "../../../../radius-api";
 import { ActivityIndicator } from "@renderer/components/ui/activity-indicator";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -27,7 +30,19 @@ import {
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/utils";
 import { useCopyFeedback } from "./copy-feedback";
+import { MessageImage, MessageImageGallery } from "./message-image";
 import { MessageMarkdown } from "./message-markdown";
+import { messageTimestampPresentation } from "./message-timestamp";
+import { messageMarkdownForCopy } from "./message-markdown-normalize";
+import { deriveWorkingRunActivity } from "./session-run-activity";
+import {
+  SessionRunActivityLabel,
+  type DisplayedRunActivity,
+} from "./session-run-activity-label";
+import {
+  resolveSessionRunDisclosure,
+  toggleSessionRunDisclosure,
+} from "./session-run-disclosure";
 import { TerminalApproval } from "./terminal-approval";
 import {
   buildSessionTranscriptBlocks,
@@ -105,23 +120,29 @@ function Message({
   event,
   completedPlan,
   reduceMotion,
+  sessionId,
 }: {
   event: MessageEvent;
   completedPlan?: SessionPlan;
   reduceMotion: boolean;
+  sessionId: string;
 }): ReactNode {
   const { copied, copyText } = useCopyFeedback();
   const user = event.role === "user";
   const system =
     event.role === "system" || event.messageKind === "system_notice";
   const streaming = event.status === "streaming";
+  const images = (event.artifacts ?? []).filter(
+    (artifact) => artifact.artifactType === "image",
+  );
   const copyIconTransform = reduceMotion ? "scale(1)" : "scale(0.96)";
+  const timestamp = messageTimestampPresentation(event.occurredAt);
 
   const copyMarkdown = async (): Promise<void> => {
-    await copyText(event.text);
+    await copyText(messageMarkdownForCopy(event.text));
   };
 
-  if (!event.text) return null;
+  if (!event.text && images.length === 0) return null;
 
   return (
     <article
@@ -140,11 +161,47 @@ function Message({
           !user && !system && "w-full",
         )}
       >
-        <MessageMarkdown
-          markdown={event.text}
-          fullWidthTables={!user && !system}
-          streaming={streaming}
-        />
+        {event.text ? (
+          <MessageMarkdown
+            markdown={event.text}
+            fullWidthTables={!user && !system}
+            imageSize={user ? "user" : "assistant"}
+            sessionId={sessionId}
+            streaming={streaming}
+          />
+        ) : null}
+        {images.length > 0 ? (
+          <MessageImageGallery>
+            {images.map((artifact) => {
+              const generatedName =
+                artifact.name.startsWith("generated-image-");
+              const authoredAlt = generatedName
+                ? null
+                : artifact.name.replace(/\.(?:avif|gif|jpe?g|png|webp)$/i, "");
+              return artifact.storageKind === "link" && artifact.url ? (
+                <MessageImage
+                  key={artifact.id}
+                  src={artifact.url}
+                  alt={authoredAlt ?? "Generated image"}
+                  caption={authoredAlt}
+                  resolveEnabled={!streaming}
+                  size={user ? "user" : "assistant"}
+                  title={artifact.name}
+                />
+              ) : (
+                <MessageImage
+                  key={artifact.id}
+                  artifact={{ id: artifact.id, sessionId }}
+                  alt={authoredAlt ?? "Generated image"}
+                  caption={authoredAlt}
+                  resolveEnabled={!streaming}
+                  size={user ? "user" : "assistant"}
+                  title={artifact.name}
+                />
+              );
+            })}
+          </MessageImageGallery>
+        ) : null}
         {!user && !system && !streaming ? (
           <div className="pointer-events-none mt-2 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">
             <Tooltip disableHoverableContent>
@@ -193,6 +250,16 @@ function Message({
             </Tooltip>
             {completedPlan ? (
               <PlanProgress plan={completedPlan} placement="message" />
+            ) : null}
+            {timestamp ? (
+              <time
+                dateTime={timestamp.dateTime}
+                title={timestamp.fullLabel}
+                aria-label={`Message sent ${timestamp.fullLabel}`}
+                className="ml-1 text-xs leading-5 tabular-nums text-muted-foreground"
+              >
+                {timestamp.displayLabel}
+              </time>
             ) : null}
           </div>
         ) : null}
@@ -371,14 +438,16 @@ function TraceRow({
 }
 
 function RunTrace({
+  assistantStreaming,
   block,
   onResolveTerminalApproval,
   reduceMotion,
 }: {
+  assistantStreaming: boolean;
   block: Extract<SessionTranscriptBlock, { kind: "run" }>;
   onResolveTerminalApproval(
     approvalRequestEventId: string,
-    decision: "approved" | "denied",
+    selection: ToolApprovalSelection,
   ): Promise<void>;
   reduceMotion: boolean;
 }): ReactNode {
@@ -392,15 +461,17 @@ function RunTrace({
   );
   const latestState = stateEvents.at(-1);
   const state = latestState?.state ?? "working";
-  const working = !isTerminalRunState(state);
+  const live = !isTerminalRunState(state);
+  const activelyWorking = state === "working";
   const presentation = block.events
     .filter(
       (event): event is RunPresentationEvent =>
         event.eventType === "agent_run_presentation",
     )
     .at(-1);
-  const endedAt = latestState && !working ? latestState.occurredAt : null;
-  const [expanded, setExpanded] = useState(false);
+  const endedAt = latestState && !live ? latestState.occurredAt : null;
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  const expanded = resolveSessionRunDisclosure(live, userExpanded);
   const resultByToolCall = useMemo(
     () =>
       new Map(
@@ -465,7 +536,19 @@ function RunTrace({
       event.eventType === "error",
   );
   const canExpand = rows.length > 0;
-  const label = runLabel(state, presentation);
+  const nextActivity = useMemo<DisplayedRunActivity>(() => {
+    if (activelyWorking) {
+      return {
+        ...deriveWorkingRunActivity(block.events, assistantStreaming),
+        active: true,
+      };
+    }
+    return {
+      key: `run-state-${state}`,
+      label: runLabel(state, presentation),
+      active: false,
+    };
+  }, [activelyWorking, assistantStreaming, block.events, presentation, state]);
   const completed = state === "completed";
   const stateEnterTransform = reduceMotion
     ? "translateY(0px)"
@@ -505,9 +588,9 @@ function RunTrace({
   const header = (
     <>
       <AnimatePresence initial={false} mode="popLayout">
-        {working || state === "failed" ? (
+        {live || state === "failed" ? (
           <motion.span
-            key={working ? "working-indicator" : "failed-indicator"}
+            key={live ? "live-indicator" : "failed-indicator"}
             initial={{ opacity: 0, transform: indicatorEnterTransform }}
             animate={{
               opacity: 1,
@@ -527,27 +610,19 @@ function RunTrace({
             }}
             className="shrink-0"
           >
-            {working ? (
-              <ActivityIndicator />
+            {live ? (
+              <ActivityIndicator active={activelyWorking} />
             ) : (
               <CircleAlert className="size-3.5 text-negative" aria-hidden />
             )}
           </motion.span>
         ) : null}
       </AnimatePresence>
-      <AnimatePresence initial={false} mode="popLayout">
-        <motion.span
-          key={`label-${state}`}
-          {...stateTextMotionProps}
-          role={working ? "status" : undefined}
-          className={cn(
-            "text-sm font-normal",
-            working ? "radius-thinking-label" : "text-muted-foreground",
-          )}
-        >
-          {label}
-        </motion.span>
-      </AnimatePresence>
+      <SessionRunActivityLabel
+        live={live}
+        nextActivity={nextActivity}
+        reduceMotion={reduceMotion}
+      />
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={`duration-${state}`}
@@ -556,7 +631,7 @@ function RunTrace({
         >
           {completed ? "Worked for " : null}
           <RunDurationText
-            active={working}
+            active={live}
             endedAt={endedAt}
             startedAt={startedAt}
           />
@@ -583,10 +658,10 @@ function RunTrace({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => setUserExpanded(toggleSessionRunDisclosure(expanded))}
           className={cn(
             "-ml-1.5 flex min-h-7 w-fit gap-2 rounded-sm px-1.5 text-left transition-colors duration-150 hover:bg-accent active:scale-[0.99]",
-            working || state === "failed" ? "items-center" : "items-baseline",
+            live || state === "failed" ? "items-center" : "items-baseline",
           )}
         >
           {header}
@@ -595,7 +670,7 @@ function RunTrace({
         <div
           className={cn(
             "flex min-h-7 w-fit gap-2",
-            working || state === "failed" ? "items-center" : "items-baseline",
+            live || state === "failed" ? "items-center" : "items-baseline",
           )}
         >
           {header}
@@ -652,16 +727,32 @@ export const SessionThread = memo(function SessionThread({
   events,
   onResolveTerminalApproval,
   planPresentation,
+  sessionId,
 }: {
   events: readonly SessionTranscriptEvent[];
   onResolveTerminalApproval(
     approvalRequestEventId: string,
-    decision: "approved" | "denied",
+    selection: ToolApprovalSelection,
   ): Promise<void>;
   planPresentation: SessionPlanPresentation;
+  sessionId: string;
 }): ReactNode {
   const reduceMotion = useReducedMotion() === true;
   const blocks = useMemo(() => buildSessionTranscriptBlocks(events), [events]);
+  const streamingRunIds = useMemo(
+    () =>
+      new Set(
+        events.flatMap((event) =>
+          event.eventType === "message" &&
+          event.role === "assistant" &&
+          event.status === "streaming" &&
+          event.agentRunId
+            ? [event.agentRunId]
+            : [],
+        ),
+      ),
+    [events],
+  );
 
   return (
     <div className="flex w-full flex-col [&>*:last-child]:mb-0">
@@ -674,10 +765,12 @@ export const SessionThread = memo(function SessionThread({
               block.event.eventId,
             )}
             reduceMotion={reduceMotion}
+            sessionId={sessionId}
           />
         ) : (
           <RunTrace
             key={block.runId}
+            assistantStreaming={streamingRunIds.has(block.runId)}
             block={block}
             onResolveTerminalApproval={onResolveTerminalApproval}
             reduceMotion={reduceMotion}

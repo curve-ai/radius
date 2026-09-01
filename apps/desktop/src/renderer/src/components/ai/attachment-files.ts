@@ -23,3 +23,22 @@ export function appendAttachmentFiles(
   });
   return additions.length > 0 ? [...current, ...additions] : current;
 }
+
+export function attachmentFilesFromDataTransfer(
+  dataTransfer: DataTransfer,
+): File[] {
+  const files = Array.from(dataTransfer.files);
+  if (files.length > 0) return files;
+
+  return Array.from(dataTransfer.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+}
+
+export function dataTransferContainsFiles(dataTransfer: DataTransfer): boolean {
+  return (
+    Array.from(dataTransfer.types).includes("Files") ||
+    Array.from(dataTransfer.items).some((item) => item.kind === "file")
+  );
+}

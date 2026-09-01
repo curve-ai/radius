@@ -191,7 +191,10 @@ Python clients and agents over the same stdio protocol Radius already uses.
 ### SDK-native TypeScript agent
 
 The primary first-party developer experience. The SDK supplies the ACP adapter
-and typed Radius capabilities around developer-owned agent logic.
+and typed Radius capabilities around developer-owned agent logic. A run may
+call `context.setSessionTitle(...)` to publish a generated title through the
+standard ACP `session_info_update`; Radius persists it into the same local
+session record used by the sidebar and sync protocol.
 
 Illustrative, non-final source:
 
@@ -221,6 +224,7 @@ The implemented `radius-agent-sdk` is a thin Radius layer over the official
 implementation. Its current responsibilities are:
 
 - Agent/session lifecycle, prompt normalization, and text streaming.
+- Agent-generated session titles through ACP `session_info_update`.
 - Per-session cancellation exposed through `RunContext`.
 - The same ACP stdio transport and stop reasons as the TypeScript SDK.
 - No model-provider ownership, deployment token, registry client, or hidden

@@ -41,9 +41,7 @@ export function platformWebAuthMode(): PlatformWebAuthMode {
 }
 
 export function platformServerClient(): RadiusPlatformClient {
-  const accessToken =
-    process.env.RADIUS_PLATFORM_SERVICE_TOKEN?.trim() ||
-    process.env.RADIUS_PLATFORM_ACCESS_TOKEN?.trim();
+  const accessToken = process.env.RADIUS_PLATFORM_ACCESS_TOKEN?.trim();
   if (!accessToken) {
     throw new Error(
       "RADIUS_PLATFORM_ACCESS_TOKEN is required in development-token mode",

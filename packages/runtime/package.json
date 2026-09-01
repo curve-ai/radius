@@ -18,7 +18,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
     "ws": "8.21.3",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "22.19.1",

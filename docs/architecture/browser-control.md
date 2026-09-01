@@ -71,19 +71,22 @@ whether each MCP call may proceed.
 
 The current local-alpha enforcement remains intentionally narrow:
 
-- Ask for approval cancels unresolved browser tool calls and fails closed.
-- Full access can select only `allow_once` for the current operation.
-- Every MCP tool invocation is reauthorized inside the host against the current
-  access mode and the exact browser capabilities requested by the immutable
-  release. The run token authenticates the caller but never grants an operation.
+- MCP approval is independent of Ask, Project, or Full access.
+- A request can allow one invocation, remember one exact tool through ACP, or
+  create a local provider-wide grant for the Radius browser MCP server.
+- A provider-wide grant bypasses later tool-call prompts for that server. It
+  does not authorize a browser capability absent from the immutable release.
+- Every MCP tool invocation is reauthorized inside the host against the exact
+  browser capabilities requested by the immutable release. The run token
+  authenticates the caller but never grants an operation.
 - The browser MCP endpoint is never supplied to a release that did not request
   a browser-prefixed capability.
 - The extension can pause its entire profile connection and detaches every
   controlled tab when paused.
 
 The approved capability-authorization model still governs the production
-direction. This browser slice does not create a durable grant, policy revision,
-schema, migration, or sync projection.
+direction. Browser provider-wide grants and their append-only revocations are
+durable local state and do not enter sync v1.
 
 ## Browser presentation
 

@@ -26,6 +26,12 @@ SDK packages `@modelcontextprotocol/server` and `@modelcontextprotocol/node`.
 Their licenses remain available in the installed dependency tree and must be
 retained in any generated dependency inventory distributed with Radius.
 
+## Desktop file-type icons
+
+The Radius desktop uses the MIT-licensed `material-icon-theme` package for
+file-type artwork shown beside transcript file links. Its license remains in the
+installed dependency tree and must remain in generated release inventories.
+
 ## Python agent SDK
 
 The Radius Python SDK depends on the Apache-2.0-licensed official Agent Client

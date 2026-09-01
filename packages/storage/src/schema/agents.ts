@@ -400,13 +400,6 @@ export const agentAuthenticationBindings = sqliteTable(
       ],
     }).onDelete("restrict"),
     foreignKey({
-      columns: [table.installationId, table.releaseId],
-      foreignColumns: [
-        agentInstallations.id,
-        agentInstallations.selectedReleaseId,
-      ],
-    }).onDelete("restrict"),
-    foreignKey({
       columns: [table.requirementId, table.releaseId],
       foreignColumns: [
         agentReleaseAuthRequirements.id,

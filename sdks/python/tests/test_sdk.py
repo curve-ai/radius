@@ -21,6 +21,7 @@ async def test_streams_text_and_returns_end_turn() -> None:
 
     async def run(context: RunContext) -> RunResult:
         observed.append((context.cwd, context.text))
+        await context.set_session_title("Python generated title")
         await context.send_text("Hello ")
         return RunResult(text="from Python")
 
@@ -32,7 +33,17 @@ async def test_streams_text_and_returns_end_turn() -> None:
 
     assert result.stop_reason == "end_turn"
     assert observed == [("/tmp/python-agent", "test prompt")]
-    chunks = [update.content.text for _, update in client.updates]
+    titles = [
+        update.title
+        for _, update in client.updates
+        if update.session_update == "session_info_update"
+    ]
+    chunks = [
+        update.content.text
+        for _, update in client.updates
+        if update.session_update == "agent_message_chunk"
+    ]
+    assert titles == ["Python generated title"]
     assert chunks == ["Hello ", "from Python"]
 
 

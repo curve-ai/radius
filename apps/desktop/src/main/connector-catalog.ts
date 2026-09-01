@@ -12,6 +12,7 @@ import {
 } from "@curve-ai/radius-storage";
 
 import { localDeviceIdentity } from "./device-identity";
+import { BoundedLru } from "./bounded-lru";
 import { initializeStorage } from "./storage";
 import { getConnectorCatalogAccessToken } from "./sync";
 
@@ -21,38 +22,11 @@ const MAX_LOGO_BYTES = 1024 * 1024;
 const MAX_LOGO_CACHE_ENTRIES = 128;
 const MAX_LOGO_CACHE_BYTES = 16 * 1024 * 1024;
 const MAX_CONCURRENT_LOGO_REQUESTS = 8;
-const logoCache = new Map<
-  string,
-  { byteSize: number; dataUrl: string | null }
->();
+const logoCache = new BoundedLru<string | null>(
+  MAX_LOGO_CACHE_ENTRIES,
+  MAX_LOGO_CACHE_BYTES,
+);
 const logoRequests = new Map<string, Promise<string | null>>();
-let logoCacheBytes = 0;
-
-function cachedLogo(value: string): string | null | undefined {
-  if (!logoCache.has(value)) return undefined;
-  const cached = logoCache.get(value);
-  if (!cached) return undefined;
-  logoCache.delete(value);
-  logoCache.set(value, cached);
-  return cached.dataUrl;
-}
-
-function cacheLogo(value: string, result: string | null): void {
-  const existing = logoCache.get(value);
-  if (existing) logoCacheBytes -= existing.byteSize;
-  const byteSize = result ? Buffer.byteLength(result) : 0;
-  logoCache.set(value, { byteSize, dataUrl: result });
-  logoCacheBytes += byteSize;
-  while (
-    logoCache.size > MAX_LOGO_CACHE_ENTRIES ||
-    logoCacheBytes > MAX_LOGO_CACHE_BYTES
-  ) {
-    const oldest = logoCache.keys().next().value;
-    if (oldest === undefined) break;
-    logoCacheBytes -= logoCache.get(oldest)?.byteSize ?? 0;
-    logoCache.delete(oldest);
-  }
-}
 
 function catalogBaseUrl(): URL {
   const configured =
@@ -78,7 +52,7 @@ async function catalogFetch(pathname: string): Promise<Response> {
 
 async function logoDataUrl(value: string | null): Promise<string | null> {
   if (!value) return null;
-  const cached = cachedLogo(value);
+  const cached = logoCache.get(value);
   if (cached !== undefined) return cached;
   const pending = logoRequests.get(value);
   if (pending) return pending;
@@ -126,7 +100,7 @@ async function logoDataUrl(value: string | null): Promise<string | null> {
   logoRequests.set(value, request);
   try {
     const result = await request;
-    cacheLogo(value, result);
+    logoCache.set(value, result, result ? Buffer.byteLength(result) : 0);
     return result;
   } finally {
     logoRequests.delete(value);

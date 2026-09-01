@@ -1,21 +1,36 @@
 import {
-  appendSessionEvent,
+  clearComposerDraft,
   createSession,
+  ensureBuiltinToolBinding,
+  ensureBuiltinToolProvider,
   getSessionProjectContext,
   getSessionRevision,
+  grantMcpToolApproval,
+  hasMcpApproval,
+  hasMcpToolApproval,
+  grantMcpServerApproval,
+  hasMcpServerApproval,
   installAgentRelease,
+  listReadyMcpProviders,
   listProjects,
   listSessionTranscript,
   type RadiusDatabase,
   type InstalledAgentRelease,
   type SessionTranscriptEventRecord,
 } from "@curve-ai/radius-storage";
+import type { McpConnectorClient } from "@curve-ai/radius-mcp-connector";
+import {
+  startBrokeredMcpServer,
+  type BrokeredMcpServer,
+  type BrokeredTool,
+} from "@curve-ai/radius-tool-broker";
 import {
   AcpRuntimeSession,
   MicrovmAcpRuntime,
   acpStreamFromWebSocket,
   parseAgentReleaseDescriptor,
   type AcpRuntimeHandlers,
+  type AcpPermissionDecision,
   type AgentReleaseDescriptor,
   type AcpRuntimePromptResult,
   type DevelopmentAgentConnection,
@@ -28,10 +43,10 @@ import {
   type BrowserToolServer,
 } from "@curve-ai/radius-browser-tools";
 import type { BrowserBridgeOperation } from "@curve-ai/radius-browser-protocol";
+import { resolveLocalArtifactPath } from "@curve-ai/radius-sync-core";
 import { app, BrowserWindow } from "electron";
-import { createHash } from "node:crypto";
-import { readFile, realpath } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -41,8 +56,18 @@ import type {
   StartAgentPromptInput,
   StartAgentPromptResult,
   StreamingSessionTranscriptMessage,
+  ToolApprovalSelection,
 } from "../radius-api";
-import { SESSION_TRANSCRIPT_STREAM_CHANNEL } from "../radius-api";
+import {
+  SESSION_RUN_ACTIVITY_DETAIL,
+  SESSION_TRANSCRIPT_STREAM_CHANNEL,
+} from "../radius-api";
+import { splitGeneratedImageLinks } from "../generated-image-link";
+import {
+  needsFileApproval,
+  needsTerminalApproval,
+  type AgentAccessMode,
+} from "./agent-access-policy";
 import {
   agentPlanJournalEvents,
   createAgentPlanJournalState,
@@ -61,6 +86,22 @@ import { initializeStorage, type StorageContext } from "./storage";
 import { resolveAgentReleasePaths } from "./bundled-agents";
 import { browserBridge } from "./browser-bridge";
 import { listDevelopmentAgentConnections } from "./development-agents";
+import { createRuntimeMcpClient } from "./mcp-connector-auth";
+import { decodeAgentImage, MAX_AGENT_IMAGE_BYTES } from "./agent-image-content";
+import { fxStateRelativeImagePath } from "./fx-generated-image-link";
+import {
+  readBoundedImageFile,
+  radiusImageExtension,
+  radiusImageMatchesSignature,
+  radiusImageMimeTypeForPath,
+} from "./image-content";
+import {
+  BROWSER_MCP_TOOL_BINDINGS,
+  browserMcpToolName,
+  mcpAvailableSelections,
+  mcpOptionIdForSelection,
+  mcpPermissionOptionIds,
+} from "./mcp-permission-options";
 import {
   HostFileSystemManager,
   type FileAccessResult,
@@ -71,20 +112,23 @@ import {
   type TerminalAuthorizationRequest,
   type TerminalExecutionResult,
 } from "./terminal-execution";
+import { applyAgentSessionTitleUpdate } from "./agent-session-title";
+import {
+  RuntimeSessionJournal,
+  type RuntimeSessionEvent,
+} from "./runtime-session-journal";
 
-type SessionEvent = Parameters<typeof appendSessionEvent>[1];
-type SessionEventBody = SessionEvent extends infer Event
-  ? Event extends SessionEvent
-    ? Omit<
-        Event,
-        | "sessionId"
-        | "sessionRevision"
-        | "sourceClientInstanceId"
-        | "occurredAt"
-        | "artifactLinks"
-      >
-    : never
-  : never;
+type SessionEvent = RuntimeSessionEvent;
+type SessionMessageEvent = Extract<SessionEvent, { eventType: "message" }>;
+type SessionArtifactLink = SessionEvent["artifactLinks"][number];
+type AgentMessageChunk = Extract<
+  SessionUpdate,
+  { sessionUpdate: "agent_message_chunk" }
+>;
+type AgentImageContent = Extract<
+  AgentMessageChunk["content"],
+  { type: "image" }
+>;
 type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -103,6 +147,239 @@ interface RunningAgentRuntime {
   stop(): Promise<void>;
 }
 
+interface ActiveMcpPermissionContext {
+  providerId: string;
+  serverLabel: string;
+  serverName: string;
+  bindingIds: ReadonlyMap<string, string>;
+  allowedTools: Set<string>;
+  oneTimeTools: Map<string, number>;
+}
+
+function resolveMcpPermissionTool(
+  context: ActiveMcpPermissionContext,
+  value: string,
+): { bindingId: string; nativeToolName: string } | null {
+  for (const [nativeToolName, bindingId] of context.bindingIds) {
+    if (
+      value === nativeToolName ||
+      value === `mcp__${context.serverName}__${nativeToolName}` ||
+      value.endsWith(`__${nativeToolName}`)
+    ) {
+      return { bindingId, nativeToolName };
+    }
+  }
+  return null;
+}
+
+function consumeMcpToolAllowance(
+  context: ActiveMcpPermissionContext,
+  nativeToolName: string,
+): boolean {
+  if (context.allowedTools.has(nativeToolName)) return true;
+  const remaining = context.oneTimeTools.get(nativeToolName) ?? 0;
+  if (remaining < 1) return false;
+  if (remaining === 1) context.oneTimeTools.delete(nativeToolName);
+  else context.oneTimeTools.set(nativeToolName, remaining - 1);
+  return true;
+}
+
+function rememberMcpToolAllowance(
+  context: ActiveMcpPermissionContext,
+  selection: ToolApprovalSelection,
+  nativeToolName: string,
+): void {
+  if (selection === "allow_always") {
+    context.allowedTools.add(nativeToolName);
+  } else if (selection === "allow_once") {
+    context.oneTimeTools.set(
+      nativeToolName,
+      (context.oneTimeTools.get(nativeToolName) ?? 0) + 1,
+    );
+  }
+}
+
+interface PersistedAgentImage {
+  artifactLink: SessionArtifactLink;
+  fileLocation: string;
+}
+
+type CollectedResponsePart =
+  | { kind: "text"; text: string }
+  | { kind: "image"; image: PersistedAgentImage };
+
+async function persistAgentImage(
+  sessionId: string,
+  content: AgentImageContent,
+): Promise<PersistedAgentImage> {
+  const { bytes, extension, mimeType } = decodeAgentImage(content);
+  return persistAgentImageBytes(sessionId, bytes, mimeType, extension);
+}
+
+async function persistAgentImageBytes(
+  sessionId: string,
+  bytes: Buffer,
+  mimeType: string,
+  extension: string,
+  displayName?: string,
+): Promise<PersistedAgentImage> {
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_AGENT_IMAGE_BYTES) {
+    throw new Error("AGENT_IMAGE_TOO_LARGE");
+  }
+  const contentSha256 = createHash("sha256").update(bytes).digest("hex");
+  const artifactId = randomUUID();
+  const safeDisplayName = displayName
+    ? Array.from(displayName, (character) =>
+        character.charCodeAt(0) < 32 ? " " : character,
+      )
+        .join("")
+        .replace(/[/\\:]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 100)
+    : undefined;
+  const name = safeDisplayName
+    ? `${safeDisplayName}.${extension}`
+    : `generated-image-${contentSha256.slice(0, 12)}.${extension}`;
+  const fileLocation = path.posix.join(
+    "sha256",
+    contentSha256.slice(0, 2),
+    `${contentSha256}.${extension}`,
+  );
+  const artifactRoot = path.join(app.getPath("userData"), "artifacts");
+  const targetPath = path.join(artifactRoot, ...fileLocation.split("/"));
+  await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(targetPath, bytes, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const existing = await readFile(targetPath);
+    if (
+      existing.byteLength !== bytes.byteLength ||
+      createHash("sha256").update(existing).digest("hex") !== contentSha256
+    ) {
+      throw new Error("AGENT_IMAGE_STORE_CONFLICT");
+    }
+  }
+
+  return {
+    fileLocation,
+    artifactLink: {
+      relationship: "output",
+      artifact: {
+        id: artifactId,
+        sessionId,
+        name,
+        artifactType: "image",
+        storageKind: "file",
+        mimeType,
+        contentSha256,
+        byteSize: bytes.byteLength,
+        supersedesArtifactId: null,
+        createdAt: new Date().toISOString(),
+        deletedAt: null,
+      },
+    },
+  };
+}
+
+async function importFxGeneratedImages(
+  sessionId: string,
+  stateSharePath: string,
+  parts: readonly CollectedResponsePart[],
+): Promise<CollectedResponsePart[]> {
+  const imported: CollectedResponsePart[] = [];
+  for (const part of parts) {
+    if (part.kind === "image") {
+      imported.push(part);
+      continue;
+    }
+    for (const segment of splitGeneratedImageLinks(part.text)) {
+      if (segment.kind === "text") {
+        appendResponseText(imported, segment.text);
+        continue;
+      }
+      const relativePath = fxStateRelativeImagePath(segment.uri);
+      if (!relativePath) {
+        appendResponseText(imported, segment.raw);
+        continue;
+      }
+      try {
+        const filePath = await resolveLocalArtifactPath(
+          stateSharePath,
+          relativePath,
+        );
+        const mimeType = radiusImageMimeTypeForPath(filePath);
+        const extension = mimeType ? radiusImageExtension(mimeType) : null;
+        if (!mimeType || !extension) {
+          appendResponseText(imported, segment.raw);
+          continue;
+        }
+        const bytes = await readBoundedImageFile(
+          filePath,
+          MAX_AGENT_IMAGE_BYTES,
+        );
+        if (!radiusImageMatchesSignature(mimeType, bytes)) {
+          appendResponseText(imported, segment.raw);
+          continue;
+        }
+        imported.push({
+          kind: "image",
+          image: await persistAgentImageBytes(
+            sessionId,
+            bytes,
+            mimeType,
+            extension,
+            segment.alt,
+          ),
+        });
+      } catch {
+        appendResponseText(imported, segment.raw);
+      }
+    }
+  }
+  return imported;
+}
+
+function appendResponseText(
+  parts: CollectedResponsePart[],
+  text: string,
+): void {
+  const last = parts.at(-1);
+  if (last?.kind === "text") last.text += text;
+  else parts.push({ kind: "text", text });
+}
+
+function durableMessageParts(
+  parts: readonly CollectedResponsePart[],
+): SessionMessageEvent["parts"] {
+  const firstTextIndex = parts.findIndex((part) => part.kind === "text");
+  const lastTextIndex = parts.findLastIndex((part) => part.kind === "text");
+  const durable: SessionMessageEvent["parts"] = [];
+  for (const [index, part] of parts.entries()) {
+    if (part.kind === "image") {
+      durable.push({
+        id: randomUUID(),
+        position: durable.length,
+        partType: "artifact_reference",
+        artifactId: part.image.artifactLink.artifact.id,
+      });
+      continue;
+    }
+    let text = part.text;
+    if (index === firstTextIndex) text = text.trimStart();
+    if (index === lastTextIndex) text = text.trimEnd();
+    if (!text) continue;
+    durable.push({
+      id: randomUUID(),
+      position: durable.length,
+      partType: "text",
+      text,
+    });
+  }
+  return durable;
+}
+
 let runtimeErrorCode: string | null = null;
 const runningSessions = new Map<string, RunningAgentRuntime>();
 const runningTerminalManagers = new Map<string, MacOsTerminalManager>();
@@ -113,16 +390,18 @@ const streamingSessionMessages = new Map<
 >();
 
 type TerminalApprovalDecision = "approved" | "denied" | "cancelled" | "expired";
+type ToolApprovalResolution = ToolApprovalSelection | "cancelled" | "expired";
 
-interface PendingTerminalApproval {
+interface PendingToolApproval {
   sessionId: string;
   exactReason: string;
   exactToolInput: JsonValue;
   toolCallEventId: string;
-  decide(decision: TerminalApprovalDecision): Promise<void>;
+  allowedSelections: ReadonlySet<ToolApprovalSelection>;
+  decide(selection: ToolApprovalResolution): Promise<void>;
 }
 
-const pendingTerminalApprovals = new Map<string, PendingTerminalApproval>();
+const pendingToolApprovals = new Map<string, PendingToolApproval>();
 const TERMINAL_APPROVAL_TIMEOUT_MS = 10 * 60 * 1_000;
 
 function broadcastSessionTranscriptStream(
@@ -172,7 +451,7 @@ export function overlayPendingHostApprovalDetails(
   sessionId: string,
   events: readonly SessionTranscriptEventRecord[],
 ): SessionTranscriptEventRecord[] {
-  const pending = [...pendingTerminalApprovals.entries()].filter(
+  const pending = [...pendingToolApprovals.entries()].filter(
     ([, approval]) => approval.sessionId === sessionId,
   );
   if (pending.length === 0) return [...events];
@@ -201,36 +480,42 @@ export function overlayPendingHostApprovalDetails(
   });
 }
 
-export async function resolveTerminalApproval(
-  rawInput: unknown,
-): Promise<void> {
+export async function resolveToolApproval(rawInput: unknown): Promise<void> {
   if (!rawInput || typeof rawInput !== "object") {
-    throw new Error("Terminal approval decision is invalid");
+    throw new Error("Tool approval decision is invalid");
   }
   const input = rawInput as Record<string, unknown>;
   if (typeof input.sessionId !== "string" || !input.sessionId) {
-    throw new Error("Terminal approval session is required");
+    throw new Error("Tool approval session is required");
   }
   if (
     typeof input.approvalRequestEventId !== "string" ||
     !input.approvalRequestEventId
   ) {
-    throw new Error("Terminal approval request is required");
+    throw new Error("Tool approval request is required");
   }
-  if (input.decision !== "approved" && input.decision !== "denied") {
-    throw new Error("Terminal approval decision must be approved or denied");
+  if (
+    input.selection !== "allow_once" &&
+    input.selection !== "allow_always" &&
+    input.selection !== "allow_server" &&
+    input.selection !== "denied"
+  ) {
+    throw new Error("Tool approval selection is invalid");
   }
-  const pending = pendingTerminalApprovals.get(input.approvalRequestEventId);
+  const pending = pendingToolApprovals.get(input.approvalRequestEventId);
   if (!pending || pending.sessionId !== input.sessionId) {
-    throw new Error("Terminal approval request is no longer pending");
+    throw new Error("Tool approval request is no longer pending");
   }
-  await pending.decide(input.decision);
+  if (!pending.allowedSelections.has(input.selection)) {
+    throw new Error("That approval option is not available for this request");
+  }
+  await pending.decide(input.selection);
 }
 
 async function cancelPendingTerminalApprovals(
   sessionId: string,
 ): Promise<void> {
-  const pending = [...pendingTerminalApprovals.values()].filter(
+  const pending = [...pendingToolApprovals.values()].filter(
     (approval) => approval.sessionId === sessionId,
   );
   await Promise.all(pending.map((approval) => approval.decide("cancelled")));
@@ -464,6 +749,18 @@ export async function startAgentPrompt(
       ],
     });
 
+    await clearComposerDraft(context.database, {
+      clientInstanceId: identity.clientInstanceId,
+      context: input.sessionId
+        ? { kind: "session", sessionId: input.sessionId }
+        : { kind: "new_chat", projectId },
+    }).catch((error) => {
+      console.error(
+        "[drafts] The submitted composer draft could not be cleared",
+        error,
+      );
+    });
+
     void runAgentSession({
       accessMode: input.accessMode,
       context,
@@ -509,7 +806,10 @@ function parsePromptInput(input: unknown): StartAgentPromptInput {
     }
   }
   return {
-    accessMode: value.accessMode === "full" ? "full" : "ask",
+    accessMode:
+      value.accessMode === "project" || value.accessMode === "full"
+        ? value.accessMode
+        : "ask",
     agentId: value.agentId,
     modelId: value.modelId as string | null | undefined,
     prompt: value.prompt,
@@ -605,14 +905,20 @@ async function awaitToolApproval(
 
   return new Promise<TerminalApprovalDecision>((resolve) => {
     let settled = false;
-    const finish = async (
-      decision: TerminalApprovalDecision,
-    ): Promise<void> => {
+    const finish = async (selection: ToolApprovalResolution): Promise<void> => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       signal.removeEventListener("abort", onAbort);
-      pendingTerminalApprovals.delete(approvalRequestEventId);
+      pendingToolApprovals.delete(approvalRequestEventId);
+      const decision: TerminalApprovalDecision =
+        selection === "allow_once" ||
+        selection === "allow_always" ||
+        selection === "allow_server"
+          ? "approved"
+          : selection === "denied"
+            ? "denied"
+            : selection;
       await input.journal.append({
         eventId: randomUUID(),
         agentRunId: input.agentRunId,
@@ -630,7 +936,9 @@ async function awaitToolApproval(
         eventType: "agent_run_state_update",
         state: "working",
         detail:
-          decision === "approved" ? "Continuing with approved access" : null,
+          selection === "allow_once"
+            ? SESSION_RUN_ACTIVITY_DETAIL.resumingWork
+            : null,
       });
       resolve(decision);
     };
@@ -640,11 +948,176 @@ async function awaitToolApproval(
       TERMINAL_APPROVAL_TIMEOUT_MS,
     );
     timeout.unref();
-    pendingTerminalApprovals.set(approvalRequestEventId, {
+    pendingToolApprovals.set(approvalRequestEventId, {
       sessionId: input.sessionId,
       exactReason: request.exactReason,
       exactToolInput: request.exactToolInput,
       toolCallEventId: request.toolCallEventId,
+      allowedSelections: new Set(["allow_once", "denied"]),
+      decide: finish,
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) void finish("cancelled");
+  });
+}
+
+async function awaitMcpPermission(
+  input: ToolApprovalContext & {
+    database: RadiusDatabase;
+    providerId: string;
+    serverLabel: string;
+    serverName: string;
+    toolCallEventIds: Map<string, string>;
+    resolveTool(toolName: string): {
+      bindingId: string;
+      nativeToolName: string;
+    } | null;
+    recordApproval(
+      selection: ToolApprovalSelection,
+      toolName: string,
+    ): Promise<void>;
+  },
+  request: RequestPermissionRequest,
+  signal: AbortSignal,
+): Promise<AcpPermissionDecision> {
+  const optionIds = mcpPermissionOptionIds(request.options);
+  const rawToolName =
+    request.toolCall.name?.trim() ||
+    request.toolCall.title?.trim() ||
+    "MCP tool";
+  const resolvedTool = input.resolveTool(rawToolName);
+  const toolName = resolvedTool?.nativeToolName ?? rawToolName;
+  const bindingId = resolvedTool?.bindingId ?? null;
+  if (
+    await hasMcpServerApproval(input.database, input.providerId).catch(
+      () => false,
+    )
+  ) {
+    const optionId = mcpOptionIdForSelection(optionIds, "allow_server");
+    return optionId
+      ? { outcome: "selected", optionId }
+      : { outcome: "cancelled" };
+  }
+  if (
+    bindingId &&
+    (await hasMcpToolApproval(input.database, bindingId).catch(() => false))
+  ) {
+    const optionId = mcpOptionIdForSelection(optionIds, "allow_always");
+    return optionId
+      ? { outcome: "selected", optionId }
+      : { outcome: "cancelled" };
+  }
+  let toolCallEventId = input.toolCallEventIds.get(request.toolCall.toolCallId);
+  if (!toolCallEventId) {
+    toolCallEventId = randomUUID();
+    input.toolCallEventIds.set(request.toolCall.toolCallId, toolCallEventId);
+    await input.journal.append({
+      eventId: toolCallEventId,
+      agentRunId: input.agentRunId,
+      eventType: "tool_call",
+      triggeringMessageEventId: null,
+      capability: `mcp.${input.serverName}`,
+      operation: toolName,
+      inputSchemaId: "radius.mcp.tool-call",
+      inputSchemaVersion: 1,
+      input: null,
+    });
+  }
+  const allowedSelections = mcpAvailableSelections(optionIds);
+  if (allowedSelections.size === 0) return { outcome: "cancelled" };
+
+  const approvalRequestEventId = randomUUID();
+  const expiresAt = new Date(Date.now() + TERMINAL_APPROVAL_TIMEOUT_MS);
+  const exactToolInput: JsonValue = {
+    approvalKind: "mcp",
+    allowAlwaysAvailable: Boolean(optionIds.allowAlways),
+    allowServerAvailable: true,
+    pendingLocally: true,
+    serverLabel: input.serverLabel,
+    toolName,
+  };
+  await input.journal.append({
+    eventId: randomUUID(),
+    agentRunId: input.agentRunId,
+    eventType: "agent_run_state_update",
+    state: "waiting_for_approval",
+    detail: "Waiting for MCP approval",
+  });
+  await input.journal.append({
+    eventId: approvalRequestEventId,
+    agentRunId: input.agentRunId,
+    eventType: "approval_request",
+    toolCallEventId,
+    reason: `Allow ${toolName} on ${input.serverLabel}`,
+    expiresAt: expiresAt.toISOString(),
+  });
+
+  return new Promise<AcpPermissionDecision>((resolve) => {
+    let settled = false;
+    const finish = async (selection: ToolApprovalResolution): Promise<void> => {
+      if (settled) return;
+      if (selection === "allow_server") {
+        await grantMcpServerApproval(input.database, input.providerId);
+      }
+      if (selection === "allow_always" && bindingId) {
+        await grantMcpToolApproval(input.database, bindingId);
+      }
+      settled = true;
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      pendingToolApprovals.delete(approvalRequestEventId);
+      const approved =
+        selection === "allow_once" ||
+        selection === "allow_always" ||
+        selection === "allow_server";
+      if (approved) await input.recordApproval(selection, toolName);
+      const decision = approved
+        ? "approved"
+        : selection === "denied"
+          ? "denied"
+          : selection;
+      await input.journal.append({
+        eventId: randomUUID(),
+        agentRunId: input.agentRunId,
+        eventType: "approval_decision",
+        approvalRequestEventId,
+        decision,
+        actorType: approved || selection === "denied" ? "user" : "system",
+        actorId: null,
+        note: approved ? `mcp:${selection}` : null,
+      });
+      await input.journal.append({
+        eventId: randomUUID(),
+        agentRunId: input.agentRunId,
+        eventType: "agent_run_state_update",
+        state: "working",
+        detail: approved ? SESSION_RUN_ACTIVITY_DETAIL.resumingWork : null,
+      });
+      if (!approved) {
+        if (selection === "denied" && optionIds.reject) {
+          resolve({ outcome: "selected", optionId: optionIds.reject });
+        } else {
+          resolve({ outcome: "cancelled" });
+        }
+        return;
+      }
+      const optionId = mcpOptionIdForSelection(optionIds, selection);
+      resolve(
+        optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" },
+      );
+    };
+    const onAbort = (): void => void finish("cancelled");
+    const timeout = setTimeout(
+      () => void finish("expired"),
+      TERMINAL_APPROVAL_TIMEOUT_MS,
+    );
+    timeout.unref();
+    pendingToolApprovals.set(approvalRequestEventId, {
+      sessionId: input.sessionId,
+      exactReason: `Allow ${toolName} on ${input.serverLabel}`,
+      exactToolInput,
+      toolCallEventId,
+      allowedSelections,
       decide: finish,
     });
     signal.addEventListener("abort", onAbort, { once: true });
@@ -654,7 +1127,7 @@ async function awaitToolApproval(
 
 async function authorizeTerminal(
   input: {
-    accessMode: "ask" | "full";
+    accessMode: AgentAccessMode;
     agentRunId: string;
     journal: RuntimeSessionJournal;
     sessionId: string;
@@ -691,8 +1164,10 @@ async function authorizeTerminal(
     },
   });
 
-  const needsApproval =
-    input.accessMode === "ask" || request.outsideProjectRoots;
+  const needsApproval = needsTerminalApproval(
+    input.accessMode,
+    request.outsideProjectRoots,
+  );
   if (!needsApproval) return toolCallEventId;
 
   const decision = await awaitToolApproval(
@@ -757,7 +1232,7 @@ async function appendTerminalResult(
 }
 
 async function authorizeFileAccess(
-  input: ToolApprovalContext & { accessMode: "ask" | "full" },
+  input: ToolApprovalContext & { accessMode: AgentAccessMode },
   request: FileAuthorizationRequest,
   signal: AbortSignal,
 ): Promise<string> {
@@ -783,9 +1258,11 @@ async function authorizeFileAccess(
       outsideProjectRoots: request.outsideProjectRoots,
     },
   });
-  const needsApproval =
-    request.outsideProjectRoots ||
-    (input.accessMode === "ask" && request.operation === "write");
+  const needsApproval = needsFileApproval(
+    input.accessMode,
+    request.operation,
+    request.outsideProjectRoots,
+  );
   if (!needsApproval) return toolCallEventId;
 
   const decision = await awaitToolApproval(
@@ -841,7 +1318,7 @@ async function appendFileAccessResult(
 }
 
 async function runAgentSession(input: {
-  accessMode: "ask" | "full";
+  accessMode: AgentAccessMode;
   context: StorageContext;
   modelId: string | null;
   target: AgentTarget;
@@ -858,6 +1335,7 @@ async function runAgentSession(input: {
   const streamedMessage = <Status extends StreamedMessageEvent["status"]>(
     status: Status,
     text: string,
+    artifacts: StreamingSessionTranscriptMessage["artifacts"] = [],
   ): Extract<StreamedMessageEvent, { status: Status }> =>
     ({
       eventId: assistantMessageEventId,
@@ -869,6 +1347,7 @@ async function runAgentSession(input: {
       messageKind: "final",
       status,
       text,
+      artifacts,
     }) as Extract<StreamedMessageEvent, { status: Status }>;
   const updateState: RuntimeUpdateState = {
     hostToolKinds: new Set(),
@@ -884,9 +1363,16 @@ async function runAgentSession(input: {
   const capabilities =
     release?.capabilities ?? developmentConnection!.capabilities;
   let responseText = "";
+  let responseParts: CollectedResponsePart[] | null = null;
   let runtime: RunningAgentRuntime | null = null;
   let fxProfile: FxRuntimeProfileLease | null = null;
   let browserTools: BrowserToolServer | null = null;
+  let browserToolProviderId: string | null = null;
+  const browserToolBindingIds = new Map<string, string>();
+  let browserMcpContext: ActiveMcpPermissionContext | null = null;
+  const connectorMcpClients: McpConnectorClient[] = [];
+  const connectorMcpServers: BrokeredMcpServer[] = [];
+  const connectorMcpContexts: ActiveMcpPermissionContext[] = [];
   let fileSystemManager: HostFileSystemManager | null = null;
   let terminalManager: MacOsTerminalManager | null = null;
 
@@ -903,8 +1389,8 @@ async function runAgentSession(input: {
       eventId: randomUUID(),
       agentRunId,
       eventType: "agent_run_presentation",
-      mode: "inline",
-      initialState: null,
+      mode: "collapsible",
+      initialState: "collapsed",
       summaryMessageEventId: null,
       label: displayName,
     });
@@ -915,10 +1401,10 @@ async function runAgentSession(input: {
       state: "working",
       detail:
         release && isFxRelease(release)
-          ? "Preparing the local fx runtime"
+          ? SESSION_RUN_ACTIVITY_DETAIL.startingFxAgent
           : developmentConnection
-            ? "Connecting to the development agent"
-            : "Preparing the local agent runtime",
+            ? SESSION_RUN_ACTIVITY_DETAIL.connectingAgent
+            : SESSION_RUN_ACTIVITY_DETAIL.startingLocalAgent,
     });
 
     if (release && isFxRelease(release)) {
@@ -928,17 +1414,164 @@ async function runAgentSession(input: {
       );
     }
     if (capabilities.some((capability) => capability.startsWith("browser."))) {
+      browserToolProviderId = await ensureBuiltinToolProvider(
+        input.context.database,
+        {
+          clientInstanceId: input.context.vault.clientInstanceId,
+          providerKey: "radius-browser",
+          label: "Chrome browser",
+          connected: true,
+        },
+      );
+      for (const binding of BROWSER_MCP_TOOL_BINDINGS) {
+        const inputSchemaVersion = 1;
+        browserToolBindingIds.set(
+          binding.nativeToolName,
+          await ensureBuiltinToolBinding(input.context.database, {
+            providerId: browserToolProviderId,
+            capabilityKey: "mcp.radius-browser",
+            contractVersion: 1,
+            displayName: "Chrome browser MCP",
+            description: "Browser tools exposed through Radius.",
+            operationName: binding.nativeToolName,
+            nativeToolName: binding.nativeToolName,
+            inputSchemaId: `mcp.radius-browser.${binding.nativeToolName}`,
+            inputSchemaVersion,
+            inputSchemaSha256: createHash("sha256")
+              .update(
+                `mcp.radius-browser.${binding.nativeToolName}@${inputSchemaVersion}`,
+              )
+              .digest("hex"),
+            outputSchemaId: "mcp.radius-browser.result",
+            outputSchemaVersion: 1,
+            riskClass: binding.riskClass,
+          }),
+        );
+      }
+      browserMcpContext = {
+        providerId: browserToolProviderId,
+        serverLabel: "Chrome browser",
+        serverName: "radius-browser",
+        bindingIds: browserToolBindingIds,
+        allowedTools: new Set(),
+        oneTimeTools: new Map(),
+      };
       browserTools = await startBrowserToolServer(browserBridge, {
-        authorize: (operation) =>
-          input.accessMode === "full" &&
-          browserOperationRequested(capabilities, operation),
+        authorize: async (operation) => {
+          if (!browserOperationRequested(capabilities, operation)) return false;
+          const toolName = browserMcpToolName(operation);
+          const bindingId = browserToolBindingIds.get(toolName);
+          if (
+            browserToolProviderId &&
+            bindingId &&
+            (await hasMcpApproval(input.context.database, {
+              providerId: browserToolProviderId,
+              bindingId,
+            }))
+          ) {
+            return true;
+          }
+          return browserMcpContext
+            ? consumeMcpToolAllowance(browserMcpContext, toolName)
+            : false;
+        },
       });
+    }
+    if (capabilities.includes("mcp.connectors")) {
+      const readyProviders = await listReadyMcpProviders(
+        input.context.database,
+        input.context.vault.clientInstanceId,
+      );
+      for (const [providerIndex, provider] of readyProviders.entries()) {
+        let client: McpConnectorClient | null = null;
+        try {
+          client = await createRuntimeMcpClient({
+            endpoint: provider.endpointUrl,
+            vault: input.context.vault,
+            credentialRef: provider.credentialRef,
+          });
+          await client.connect();
+          const discovered = await client.listTools();
+          const brokeredTools = provider.bindings.flatMap(
+            (binding): BrokeredTool[] => {
+              const tool = discovered.find(
+                (candidate) =>
+                  candidate.name === binding.nativeToolName &&
+                  candidate.inputSchemaSha256 === binding.inputSchemaSha256 &&
+                  candidate.outputSchemaSha256 === binding.outputSchemaSha256,
+              );
+              return tool
+                ? [
+                    {
+                      bindingId: binding.bindingId,
+                      providerId: provider.providerId,
+                      capabilityKey: `mcp.connector.${provider.providerKey}`,
+                      operation: binding.nativeToolName,
+                      contractVersion: 1,
+                      effect: "ask",
+                      tool,
+                    },
+                  ]
+                : [];
+            },
+          );
+          if (brokeredTools.length === 0) {
+            await client.close();
+            client = null;
+            continue;
+          }
+          const serverName = connectorMcpServerName(
+            provider.label,
+            provider.providerId,
+            providerIndex,
+          );
+          const permissionContext: ActiveMcpPermissionContext = {
+            providerId: provider.providerId,
+            serverLabel: provider.label,
+            serverName,
+            bindingIds: new Map(
+              brokeredTools.map((tool) => [tool.tool.name, tool.bindingId]),
+            ),
+            allowedTools: new Set(),
+            oneTimeTools: new Map(),
+          };
+          const server = await startBrokeredMcpServer({
+            name: serverName,
+            providerId: provider.providerId,
+            client,
+            tools: brokeredTools,
+            approvalResolver: {
+              isApproved: ({ providerId, bindingId }) =>
+                hasMcpApproval(input.context.database, {
+                  providerId,
+                  bindingId,
+                }),
+            },
+            authorize: (binding) =>
+              consumeMcpToolAllowance(permissionContext, binding.tool.name),
+          });
+          connectorMcpClients.push(client);
+          connectorMcpServers.push(server);
+          connectorMcpContexts.push(permissionContext);
+          client = null;
+        } catch (error) {
+          await client?.close().catch(() => undefined);
+          if (process.env.RADIUS_RUNTIME_DEBUG === "1") {
+            console.error(
+              "[mcp] connector unavailable",
+              provider.label,
+              error instanceof Error ? error.message : "unknown error",
+            );
+          }
+        }
+      }
     }
     if (
       capabilities.includes("shell.execute") &&
       input.projectRoots.length > 0
     ) {
       terminalManager = new MacOsTerminalManager({
+        fullAccess: input.accessMode === "full",
         projectRoots: input.projectRoots,
         authorize: (request, signal) =>
           authorizeTerminal(
@@ -978,16 +1611,24 @@ async function runAgentSession(input: {
       if (canReadFiles) updateState.hostToolKinds.add("read");
       if (canWriteFiles) updateState.hostToolKinds.add("edit");
     }
-    const mcpServers = browserTools
-      ? [
-          {
-            type: "http" as const,
-            name: "radius-browser",
-            url: browserTools.url,
-            headers: browserTools.headers,
-          },
-        ]
-      : [];
+    const mcpServers = [
+      ...(browserTools
+        ? [
+            {
+              type: "http" as const,
+              name: "radius-browser",
+              url: browserTools.url,
+              headers: browserTools.headers,
+            },
+          ]
+        : []),
+      ...connectorMcpServers.map((server) => ({
+        type: "http" as const,
+        name: server.name,
+        url: server.url,
+        headers: server.headers,
+      })),
+    ];
     const handlers: AcpRuntimeHandlers = {
       fileSystem: fileSystemManager
         ? {
@@ -1001,22 +1642,73 @@ async function runAgentSession(input: {
               : undefined,
           }
         : undefined,
-      onPermissionRequest: async (request: RequestPermissionRequest) =>
-        permissionDecision(input.accessMode, request),
+      onPermissionRequest: async (
+        request: RequestPermissionRequest,
+        signal: AbortSignal,
+      ) => {
+        const rawToolName =
+          request.toolCall.name?.trim() || request.toolCall.title?.trim() || "";
+        const contexts = [
+          ...(browserMcpContext ? [browserMcpContext] : []),
+          ...connectorMcpContexts,
+        ];
+        const permissionContext =
+          contexts.find((context) =>
+            rawToolName.startsWith(`mcp__${context.serverName}__`),
+          ) ??
+          contexts.find((context) =>
+            Boolean(resolveMcpPermissionTool(context, rawToolName)),
+          );
+        if (!permissionContext) return { outcome: "cancelled" };
+        return awaitMcpPermission(
+          {
+            agentRunId,
+            database: input.context.database,
+            journal: input.journal,
+            providerId: permissionContext.providerId,
+            serverLabel: permissionContext.serverLabel,
+            serverName: permissionContext.serverName,
+            sessionId: input.sessionId,
+            toolCallEventIds: updateState.toolCallEventIds,
+            resolveTool: (toolName) =>
+              resolveMcpPermissionTool(permissionContext, toolName),
+            recordApproval: async (selection, nativeToolName) => {
+              if (selection === "allow_server") return;
+              rememberMcpToolAllowance(
+                permissionContext,
+                selection,
+                nativeToolName,
+              );
+            },
+          },
+          request,
+          signal,
+        );
+      },
       terminal: terminalManager ?? undefined,
       onUpdate: async ({ update }: { update: SessionUpdate }) => {
-        if (
-          update.sessionUpdate === "agent_message_chunk" &&
-          update.content.type === "text"
-        ) {
-          const textOffset = responseText.length;
-          responseText += update.content.text;
-          publishStreamingSessionMessage(
-            input.sessionId,
-            streamedMessage("streaming", responseText),
-            update.content.text,
-            textOffset,
-          );
+        if (update.sessionUpdate === "agent_message_chunk") {
+          if (update.content.type === "text") {
+            const textOffset = responseText.length;
+            responseText += update.content.text;
+            if (responseParts) {
+              appendResponseText(responseParts, update.content.text);
+            }
+            publishStreamingSessionMessage(
+              input.sessionId,
+              streamedMessage("streaming", responseText),
+              update.content.text,
+              textOffset,
+            );
+          } else if (update.content.type === "image") {
+            responseParts ??= responseText
+              ? [{ kind: "text", text: responseText }]
+              : [];
+            responseParts.push({
+              kind: "image",
+              image: await persistAgentImage(input.sessionId, update.content),
+            });
+          }
         }
         await appendRuntimeUpdate(
           input.journal,
@@ -1080,32 +1772,65 @@ async function runAgentSession(input: {
     });
     const result = await runtime.prompt(input.prompt);
 
-    if (responseText.trim()) {
-      await input.journal.append({
-        eventId: assistantMessageEventId,
-        agentRunId,
-        eventType: "message",
-        role: "assistant",
-        messageKind: "final",
-        status: result.stopReason === "cancelled" ? "cancelled" : "completed",
-        model: input.modelId,
-        providerMessageId: null,
-        finishReason: result.stopReason,
-        parts: [
-          {
-            id: randomUUID(),
-            position: 0,
-            partType: "text",
-            text: responseText.trim(),
-          },
-        ],
-      });
+    const collectedResponseParts =
+      responseParts ??
+      (responseText ? [{ kind: "text" as const, text: responseText }] : []);
+    const finalizedResponseParts = fxProfile
+      ? await importFxGeneratedImages(
+          input.sessionId,
+          fxProfile.path,
+          collectedResponseParts,
+        )
+      : collectedResponseParts;
+    responseText = finalizedResponseParts
+      .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+      .join("");
+    const messageParts = durableMessageParts(finalizedResponseParts);
+    if (messageParts.length > 0) {
+      const images = finalizedResponseParts.flatMap((part) =>
+        part.kind === "image" ? [part.image] : [],
+      );
+      await input.journal.append(
+        {
+          eventId: assistantMessageEventId,
+          agentRunId,
+          eventType: "message",
+          role: "assistant",
+          messageKind: "final",
+          status: result.stopReason === "cancelled" ? "cancelled" : "completed",
+          model: input.modelId,
+          providerMessageId: null,
+          finishReason: result.stopReason,
+          parts: messageParts,
+        },
+        {
+          artifactLinks: images.map((image) => image.artifactLink),
+          fileLocations: Object.fromEntries(
+            images.map((image) => [
+              image.artifactLink.artifact.id,
+              image.fileLocation,
+            ]),
+          ),
+        },
+      );
       broadcastSessionTranscriptStream({
         sessionId: input.sessionId,
         eventId: assistantMessageEventId,
         event: streamedMessage(
           result.stopReason === "cancelled" ? "cancelled" : "completed",
           responseText.trim(),
+          images.map((image) => ({
+            id: image.artifactLink.artifact.id,
+            name: image.artifactLink.artifact.name,
+            artifactType: "image",
+            storageKind: "file",
+            mimeType:
+              image.artifactLink.artifact.storageKind === "file"
+                ? image.artifactLink.artifact.mimeType
+                : null,
+            availability: "local",
+            url: null,
+          })),
         ),
         mode: "replace",
       });
@@ -1148,8 +1873,28 @@ async function runAgentSession(input: {
     await cancelPendingTerminalApprovals(input.sessionId);
     if (runtime) await runtime.stop();
     await browserTools?.close();
+    await Promise.allSettled(
+      connectorMcpServers.map((server) => server.close()),
+    );
+    await Promise.allSettled(
+      connectorMcpClients.map((client) => client.close()),
+    );
     await fxProfile?.finalize();
   }
+}
+
+function connectorMcpServerName(
+  label: string,
+  providerId: string,
+  index: number,
+): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  const identity = providerId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+  return `radius-${slug || "connector"}-${identity || index + 1}`;
 }
 
 function browserOperationRequested(
@@ -1179,25 +1924,13 @@ function browserOperationRequested(
   return requested.has("browser.page.interact");
 }
 
-function permissionDecision(
-  accessMode: "ask" | "full",
-  request: RequestPermissionRequest,
-): { outcome: "selected"; optionId: string } | { outcome: "cancelled" } {
-  if (accessMode === "ask") return { outcome: "cancelled" };
-  const option = request.options.find(
-    (candidate) => candidate.kind === "allow_once",
-  );
-  return option
-    ? { outcome: "selected", optionId: option.optionId }
-    : { outcome: "cancelled" };
-}
-
 async function appendRuntimeUpdate(
   journal: RuntimeSessionJournal,
   agentRunId: string,
   state: RuntimeUpdateState,
   update: SessionUpdate,
 ): Promise<void> {
+  if (await applyAgentSessionTitleUpdate(journal, update)) return;
   if (update.sessionUpdate === "plan") {
     const events = agentPlanJournalEvents(state.plan, update);
     for (const event of events) {
@@ -1404,33 +2137,4 @@ function developmentAgentSummary(
 function promptTitle(prompt: string): string {
   const firstLine = prompt.split(/\r?\n/, 1)[0]?.trim() || "New chat";
   return firstLine.length <= 80 ? firstLine : `${firstLine.slice(0, 77)}...`;
-}
-
-class RuntimeSessionJournal {
-  private revision: number;
-  private tail: Promise<void> = Promise.resolve();
-
-  constructor(
-    private readonly database: RadiusDatabase,
-    private readonly sourceClientInstanceId: string,
-    private readonly sessionId: string,
-    initialRevision: number,
-  ) {
-    this.revision = initialRevision;
-  }
-
-  append(event: SessionEventBody): Promise<void> {
-    this.tail = this.tail.then(async () => {
-      this.revision += 1;
-      await appendSessionEvent(this.database, {
-        ...event,
-        sessionId: this.sessionId,
-        sessionRevision: this.revision,
-        sourceClientInstanceId: this.sourceClientInstanceId,
-        occurredAt: new Date().toISOString(),
-        artifactLinks: [],
-      } as unknown as SessionEvent);
-    });
-    return this.tail;
-  }
 }

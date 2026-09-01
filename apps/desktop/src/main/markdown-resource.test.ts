@@ -47,6 +47,9 @@ test("extracts bounded link metadata without hydrating markup", () => {
         <meta property="og:description" content="A &lt;safe&gt; preview">
         <meta property="og:site_name" content="Example">
         <meta property="og:image" content="/preview.png">
+        <link rel="icon" href="/favicon.png">
+        <link rel="icon" media="(prefers-color-scheme: dark)" href="/favicon-dark.png">
+        <link rel="icon" media="(prefers-color-scheme: light)" href="/favicon-light.png">
       </head>
     </html>
   `);
@@ -54,9 +57,42 @@ test("extracts bounded link metadata without hydrating markup", () => {
   assert.deepEqual(metadata, {
     title: "Radius & Markdown",
     description: "A preview",
+    iconDarkUrl: "/favicon-dark.png",
+    iconLightUrl: "/favicon-light.png",
+    iconUrl: "/favicon.png",
     siteName: "Example",
     imageUrl: "/preview.png",
   });
+});
+
+test("extracts metadata from a truncated HTML head", () => {
+  assert.deepEqual(
+    extractLinkMetadata(`
+      <head>
+        <title>Large documentation page</title>
+        <link rel="shortcut icon" href="/favicon-16x16.png">
+    `),
+    {
+      title: "Large documentation page",
+      description: null,
+      iconDarkUrl: null,
+      iconLightUrl: null,
+      iconUrl: "/favicon-16x16.png",
+      siteName: null,
+      imageUrl: null,
+    },
+  );
+});
+
+test("prefers a declared raster touch icon over ICO and SVG variants", () => {
+  assert.equal(
+    extractLinkMetadata(`
+      <link rel="icon" href="/favicon.ico" sizes="any">
+      <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+      <link rel="apple-touch-icon" href="/apple-touch-icon.png" type="image/png">
+    `).iconUrl,
+    "/apple-touch-icon.png",
+  );
 });
 
 test("rejects unsafe Markdown media and preview URLs before fetching", async () => {

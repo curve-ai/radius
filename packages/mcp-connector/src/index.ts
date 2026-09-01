@@ -5,11 +5,14 @@ import {
   StreamableHTTPClientTransport,
   type AuthProvider,
   type CallToolResult,
+  type OAuthClientProvider,
   type Tool,
+  UnauthorizedError,
 } from "@modelcontextprotocol/client";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RESULT_BYTES = 2 * 1024 * 1024;
+const MAX_DISCOVERED_TOOLS = 256;
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -53,6 +56,7 @@ export interface DiscoveredMcpTool {
 export interface McpConnectorClientOptions {
   endpoint: string;
   token?: () => Promise<string | undefined>;
+  authProvider?: AuthProvider | OAuthClientProvider;
   timeoutMs?: number;
   fetch?: typeof fetch;
 }
@@ -65,9 +69,12 @@ export class McpConnectorClient {
 
   constructor(options: McpConnectorClientOptions) {
     const endpoint = validateConnectorEndpoint(options.endpoint);
-    const authProvider: AuthProvider | undefined = options.token
-      ? { token: options.token }
-      : undefined;
+    if (options.token && options.authProvider) {
+      throw new Error("CONNECTOR_AUTH_PROVIDER_CONFLICT");
+    }
+    const authProvider =
+      options.authProvider ??
+      (options.token ? { token: options.token } : undefined);
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.#client = new Client(
       { name: "radius", version: "0.0.1" },
@@ -103,15 +110,27 @@ export class McpConnectorClient {
       timeout: this.#timeoutMs,
       cacheMode: "refresh",
     });
+    if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_RESULT_BYTES) {
+      throw new Error("CONNECTOR_TOOL_LIST_TOO_LARGE");
+    }
+    if (result.tools.length > MAX_DISCOVERED_TOOLS) {
+      throw new Error("CONNECTOR_TOOL_LIST_TOO_LARGE");
+    }
     return result.tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title ?? null,
-      description: tool.description ?? null,
+      name: boundedToolName(tool.name),
+      title: boundedOptionalText(tool.title, 200),
+      description: boundedOptionalText(tool.description, 10_000),
       inputSchemaSha256: schemaSha256(tool.inputSchema),
       outputSchemaSha256:
-        tool.outputSchema === undefined ? null : schemaSha256(tool.outputSchema),
+        tool.outputSchema === undefined
+          ? null
+          : schemaSha256(tool.outputSchema),
       definition: tool,
     }));
+  }
+
+  async finishAuth(callbackParams: URLSearchParams): Promise<void> {
+    await this.#transport.finishAuth(callbackParams);
   }
 
   async callTool(
@@ -145,3 +164,33 @@ export class McpConnectorClient {
     await this.#client.close();
   }
 }
+
+function boundedToolName(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized !== value || normalized.length > 256) {
+    throw new Error("CONNECTOR_TOOL_NAME_INVALID");
+  }
+  return normalized;
+}
+
+function boundedOptionalText(
+  value: string | undefined,
+  maxLength: number,
+): string | null {
+  if (value === undefined) return null;
+  return value.slice(0, maxLength);
+}
+
+export function isMcpUnauthorizedError(error: unknown): boolean {
+  return UnauthorizedError.isInstance(error);
+}
+
+export type {
+  AuthProvider,
+  OAuthClientInformationContext,
+  OAuthClientMetadata,
+  OAuthClientProvider,
+  OAuthDiscoveryState,
+  StoredOAuthClientInformation,
+  StoredOAuthTokens,
+} from "@modelcontextprotocol/client";

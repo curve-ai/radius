@@ -32,6 +32,7 @@ export interface RadiusAgentRunContext {
   readonly terminal: {
     execute(input: RadiusTerminalExecuteInput): Promise<RadiusTerminalResult>;
   };
+  setSessionTitle(title: string): Promise<void>;
   sendText(text: string): Promise<void>;
 }
 
@@ -134,6 +135,17 @@ export class RadiusAgent {
         },
       });
     };
+    const setSessionTitle = async (title: string) => {
+      const normalized = title.trim();
+      if (!normalized) throw new Error("Session title is required");
+      await client.notify(methods.client.session.update, {
+        sessionId,
+        update: {
+          sessionUpdate: "session_info_update",
+          title: normalized,
+        },
+      });
+    };
 
     try {
       const result = await this.definition.run({
@@ -173,6 +185,7 @@ export class RadiusAgent {
           execute: (input) =>
             executeTerminal(client, sessionId, session.cwd, turn.signal, input),
         },
+        setSessionTitle,
         sendText,
       });
 

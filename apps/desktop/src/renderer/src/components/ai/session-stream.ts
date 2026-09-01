@@ -21,7 +21,25 @@ export function sameSessionTranscriptSnapshot(
       if (event.eventType !== "message" || nextEvent.eventType !== "message") {
         return true;
       }
-      return event.status === nextEvent.status && event.text === nextEvent.text;
+      const artifacts = event.artifacts ?? [];
+      const nextArtifacts = nextEvent.artifacts ?? [];
+      return (
+        event.status === nextEvent.status &&
+        event.text === nextEvent.text &&
+        artifacts.length === nextArtifacts.length &&
+        artifacts.every((artifact, artifactIndex) => {
+          const nextArtifact = nextArtifacts[artifactIndex];
+          return (
+            artifact.id === nextArtifact?.id &&
+            artifact.name === nextArtifact.name &&
+            artifact.artifactType === nextArtifact.artifactType &&
+            artifact.storageKind === nextArtifact.storageKind &&
+            artifact.mimeType === nextArtifact.mimeType &&
+            artifact.availability === nextArtifact.availability &&
+            artifact.url === nextArtifact.url
+          );
+        })
+      );
     })
   );
 }

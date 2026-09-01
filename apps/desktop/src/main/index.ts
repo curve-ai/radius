@@ -6,6 +6,7 @@ import {
   ipcMain,
   nativeTheme,
   shell,
+  systemPreferences,
 } from "electron";
 import path from "node:path";
 
@@ -22,7 +23,7 @@ import {
   disconnectAgentAuthentication,
   getDesktopRuntimeStatus,
   listDesktopAgents,
-  resolveTerminalApproval,
+  resolveToolApproval,
   startAgentPrompt,
   stopAgentRuntime,
 } from "./agent-runtime";
@@ -50,6 +51,13 @@ import {
   resolveMarkdownMedia,
 } from "./markdown-resource";
 import {
+  clearComposerDraftForRenderer,
+  getComposerDraftForRenderer,
+  saveComposerDraftForRenderer,
+} from "./composer-drafts";
+import { resolveSessionArtifactImage } from "./session-artifacts";
+import { openSessionFile } from "./session-file-links";
+import {
   connectCloud,
   getSyncStatus,
   initializeSync,
@@ -65,12 +73,15 @@ import {
   stopDesktopUpdater,
 } from "./updater";
 import {
+  connectConnectorForRenderer,
   deleteConnectorForRenderer,
   disconnectConnectorForRenderer,
   initializeConnectorRegistry,
   installConnectorForRenderer,
+  listMcpApprovalsForRenderer,
   listConnectorToolsForRenderer,
   listConnectorsForRenderer,
+  revokeMcpApprovalForRenderer,
 } from "./connectors";
 import {
   installCatalogConnectorForRenderer,
@@ -131,6 +142,9 @@ const createWindow = (): void => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      scrollBounce:
+        process.platform === "darwin" &&
+        !systemPreferences.getAnimationSettings().prefersReducedMotion,
     },
   });
 
@@ -171,6 +185,35 @@ app.whenReady().then(async () => {
       console.error("[agents] Radius could not prepare bundled agents", error);
     });
     ipcMain.handle("radius:storage-status", () => ({ ready: true as const }));
+    ipcMain.handle("radius:handle-titlebar-double-click", (event) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window) return;
+
+      if (process.platform === "darwin") {
+        const action = systemPreferences.getUserDefault(
+          "AppleActionOnDoubleClick",
+          "string",
+        );
+        const usesLegacyMinimizePreference =
+          !action &&
+          systemPreferences.getUserDefault(
+            "AppleMiniaturizeOnDoubleClick",
+            "boolean",
+          );
+
+        if (action === "None") return;
+        if (action === "Minimize" || usesLegacyMinimizePreference) {
+          window.minimize();
+          return;
+        }
+      }
+
+      if (window.isMaximized()) {
+        window.unmaximize();
+      } else {
+        window.maximize();
+      }
+    });
     ipcMain.handle(
       "radius:show-native-control-menu",
       showNativeControlMenuForRenderer,
@@ -197,6 +240,15 @@ app.whenReady().then(async () => {
     ipcMain.handle(
       "radius:list-session-transcript",
       listSessionTranscriptForRenderer,
+    );
+    ipcMain.handle("radius:get-composer-draft", (_event, context) =>
+      getComposerDraftForRenderer(context),
+    );
+    ipcMain.handle("radius:save-composer-draft", (_event, input) =>
+      saveComposerDraftForRenderer(input),
+    );
+    ipcMain.handle("radius:clear-composer-draft", (_event, context) =>
+      clearComposerDraftForRenderer(context),
     );
     ipcMain.handle(
       "radius:choose-project-folder",
@@ -233,6 +285,9 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:install-connector", (_event, input) =>
       installConnectorForRenderer(input),
     );
+    ipcMain.handle("radius:connect-connector", (_event, installationId) =>
+      connectConnectorForRenderer(installationId),
+    );
     ipcMain.handle("radius:disconnect-connector", (_event, providerId) =>
       disconnectConnectorForRenderer(providerId),
     );
@@ -256,14 +311,26 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:start-agent-prompt", (_event, input) =>
       startAgentPrompt(input),
     );
-    ipcMain.handle("radius:resolve-terminal-approval", (_event, input) =>
-      resolveTerminalApproval(input),
+    ipcMain.handle("radius:resolve-tool-approval", (_event, input) =>
+      resolveToolApproval(input),
+    );
+    ipcMain.handle("radius:list-mcp-approval-grants", () =>
+      listMcpApprovalsForRenderer(),
+    );
+    ipcMain.handle("radius:revoke-mcp-approval", (_event, input) =>
+      revokeMcpApprovalForRenderer(input),
     );
     ipcMain.handle("radius:resolve-markdown-media", (_event, url) =>
       resolveMarkdownMedia(url),
     );
     ipcMain.handle("radius:resolve-markdown-link-preview", (_event, url) =>
       resolveMarkdownLinkPreview(url),
+    );
+    ipcMain.handle("radius:resolve-session-artifact-image", (_event, input) =>
+      resolveSessionArtifactImage(input),
+    );
+    ipcMain.handle("radius:open-session-file", (_event, input) =>
+      openSessionFile(input),
     );
     ipcMain.handle("radius:cancel-agent-session", (_event, sessionId) =>
       cancelAgentSession(typeof sessionId === "string" ? sessionId : ""),

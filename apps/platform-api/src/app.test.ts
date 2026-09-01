@@ -155,7 +155,7 @@ function services(): RadiusPlatformServices {
   };
 }
 
-test("serves public compatibility without authentication", async () => {
+test("serves current Platform capabilities without authentication", async () => {
   const response = await createPlatformApp(services()).request(
     "/api/platform/v1/info",
   );

@@ -9,7 +9,6 @@ test("accepts company-bundled agent project mappings", () => {
     agents: [
       {
         project: "proj_radius_fx",
-        releaseTemplate: "fx/release-template.json",
         imageLayout: "fx/oci-layout",
       },
     ],
@@ -24,12 +23,10 @@ test("rejects duplicate projects and escaping resource paths", () => {
       agents: [
         {
           project: "proj_radius_fx",
-          releaseTemplate: "../fx/release.json",
-          imageLayout: "fx/oci-layout",
+          imageLayout: "../fx/oci-layout",
         },
         {
           project: "proj_radius_fx",
-          releaseTemplate: "fx/release.json",
           imageLayout: "fx/oci-layout-2",
         },
       ],
