@@ -28,7 +28,6 @@ export async function getCloudAccessToken(
 export async function authenticateCloud(frontendUrl: string): Promise<void> {
   const frontend = validatedCloudUrl(frontendUrl);
   const signIn = new URL("/sign-in", frontend);
-  signIn.searchParams.set("returnUrl", "/workspace");
   const authWindow = new BrowserWindow({
     width: 480,
     height: 720,
@@ -43,6 +42,11 @@ export async function authenticateCloud(frontendUrl: string): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    // A host that does not serve sign-in redirects away from it, so never
+    // reaching the sign-in page means the address is wrong rather than the
+    // user having cancelled.
+    let sawSignInPage = false;
+    let checkingToken = false;
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
@@ -55,7 +59,15 @@ export async function authenticateCloud(frontendUrl: string): Promise<void> {
       () => finish(new Error("CLOUD_AUTH_TIMEOUT")),
       10 * 60 * 1000,
     );
-    authWindow.on("closed", () => finish(new Error("CLOUD_AUTH_CANCELLED")));
+    authWindow.on("closed", () =>
+      finish(
+        new Error(
+          sawSignInPage
+            ? "CLOUD_AUTH_CANCELLED"
+            : "CLOUD_AUTH_SIGN_IN_UNAVAILABLE",
+        ),
+      ),
+    );
     authWindow.webContents.setWindowOpenHandler(({ url }) => {
       void shell.openExternal(url);
       return { action: "deny" };
@@ -67,20 +79,40 @@ export async function authenticateCloud(frontendUrl: string): Promise<void> {
         void shell.openExternal(url);
       }
     });
-    authWindow.webContents.on("did-navigate", async (_event, url) => {
-      const target = new URL(url);
-      if (
-        target.origin !== frontend.origin ||
-        target.pathname !== "/workspace"
-      ) {
+    // The Cloud application owns its own routing, so no single path can mean
+    // "signed in". Ask the session itself after every navigation instead: a
+    // token exists only once the sign-in completed.
+    const completeIfAuthenticated = async (url: string): Promise<void> => {
+      if (settled || checkingToken) return;
+
+      let target: URL;
+      try {
+        target = new URL(url);
+      } catch {
         return;
       }
+      if (target.origin !== frontend.origin) return;
+      if (target.pathname.startsWith("/sign-in")) sawSignInPage = true;
+
+      checkingToken = true;
       try {
         await getCloudAccessToken(frontend.toString());
         finish();
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error("CLOUD_AUTH_FAILED"));
+      } catch {
+        // Not signed in yet. Leave the window open so the user can continue;
+        // rejecting here would abort on the sign-in page itself.
+      } finally {
+        checkingToken = false;
       }
+    };
+
+    authWindow.webContents.on("did-navigate", (_event, url) => {
+      void completeIfAuthenticated(url);
+    });
+    // The Cloud application may transition client-side after sign-in without a
+    // full navigation.
+    authWindow.webContents.on("did-navigate-in-page", (_event, url) => {
+      void completeIfAuthenticated(url);
     });
     void authWindow.loadURL(signIn.toString()).catch((error: unknown) => {
       finish(
