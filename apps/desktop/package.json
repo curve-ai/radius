@@ -22,7 +22,7 @@
     "package": "bun run build && electron-builder --dir",
     "make": "bun run build && electron-builder",
     "lint": "eslint --cache .",
-    "test": "tsx --test 'src/**/*.test.ts'",
+    "test": "ELECTRON_OVERRIDE_DIST_PATH=. tsx --test --test-force-exit 'src/**/*.test.ts'",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "bun run typecheck:node && bun run typecheck:web",

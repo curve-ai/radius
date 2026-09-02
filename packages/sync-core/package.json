@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test --test-force-exit src/**/*.test.ts"
   },
   "dependencies": {
     "@curve-ai/radius-storage": "0.0.1",
