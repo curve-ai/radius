@@ -26,6 +26,14 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
+    define: {
+      __CLOUD_API_URL__: JSON.stringify(
+        process.env.CLOUD_API_URL ?? "https://api.curvehq.sh",
+      ),
+      __CLOUD_WEB_URL__: JSON.stringify(
+        process.env.CLOUD_WEB_URL ?? "https://app.curvehq.sh",
+      ),
+    },
     resolve: {
       alias: {
         "@renderer": resolve("src/renderer/src"),
