@@ -11,7 +11,12 @@ test("accepts https origins", () => {
 test("accepts http only on loopback hosts", () => {
   assert.equal(validateCloudEndpoint("http://localhost:3100"), null);
   assert.equal(validateCloudEndpoint("http://127.0.0.1:3100"), null);
+  assert.equal(validateCloudEndpoint("http://app.localhost:3300"), null);
   assert.equal(validateCloudEndpoint("http://api.example.com"), "INSECURE");
+  assert.equal(
+    validateCloudEndpoint("http://localhost.example.com"),
+    "INSECURE",
+  );
   assert.equal(validateCloudEndpoint("http://192.168.1.10:3100"), "INSECURE");
 });
 

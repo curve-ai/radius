@@ -5,6 +5,20 @@
  */
 export type CloudEndpointError = "EMPTY" | "MALFORMED" | "INSECURE";
 
+/**
+ * `.localhost` is reserved for loopback by RFC 6761, so `app.localhost` and
+ * friends are as local as `localhost` itself and may be reached over HTTP.
+ */
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
 export function validateCloudEndpoint(
   value: string,
 ): CloudEndpointError | null {
@@ -18,7 +32,7 @@ export function validateCloudEndpoint(
     return "MALFORMED";
   }
 
-  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  const loopback = isLoopbackHost(url.hostname);
   if (url.protocol !== "https:" && !(loopback && url.protocol === "http:")) {
     return "INSECURE";
   }
@@ -32,6 +46,6 @@ export function cloudEndpointMessage(error: CloudEndpointError): string {
     case "MALFORMED":
       return "This is not a valid address. Include the scheme, for example https://api.example.com.";
     case "INSECURE":
-      return "Cloud addresses must use HTTPS, except on localhost or 127.0.0.1.";
+      return "Cloud addresses must use HTTPS, except on local development hosts such as localhost, app.localhost, or 127.0.0.1.";
   }
 }
