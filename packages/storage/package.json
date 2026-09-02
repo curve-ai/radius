@@ -14,7 +14,7 @@
     "build": "tsc -p tsconfig.json",
     "schema:generate": "drizzle-kit generate --config drizzle.config.ts --name initial_storage",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test --test-concurrency=1 src/**/*.test.ts"
+    "test": "tsx --test --test-concurrency=1 --test-force-exit src/**/*.test.ts"
   },
   "dependencies": {
     "@curve-ai/radius-connector-protocol": "0.0.1",
