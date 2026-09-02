@@ -9,6 +9,7 @@ import {
   validateCloudEndpoint,
   type CloudEndpointError,
 } from "./cloud-endpoint";
+import { cloudConnectMessage } from "./cloud-errors";
 import { SettingsCard, SettingsRow } from "./settings-primitives";
 
 function errorMessage(cause: unknown, fallback: string): string {
@@ -81,7 +82,7 @@ export function CloudSyncSettings(): ReactNode {
         }),
       );
     } catch (cause) {
-      setFailure(errorMessage(cause, "Radius could not connect to the server"));
+      setFailure(cloudConnectMessage(cause));
     } finally {
       setConnecting(false);
     }
@@ -173,9 +174,10 @@ export function CloudSyncSettings(): ReactNode {
               className="mt-2"
             />
             <p className="mt-2 text-sm leading-5 text-muted-foreground">
-              Where Radius opens the browser to sign you in. Self-hosted
-              installations often serve this on a different port to the server
-              address.
+              Where Radius opens the browser to sign you in. This must be the
+              address that serves sign-in, which is usually an app host such as
+              app.example.com — a plain domain often redirects to a marketing
+              page instead.
             </p>
             {webError ? (
               <p
