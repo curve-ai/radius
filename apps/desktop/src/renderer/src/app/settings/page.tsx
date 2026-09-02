@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { SETTINGS_SECTIONS } from "@renderer/components/shell/settings-sections";
 import { ThemeSwitch } from "@renderer/components/ui/theme-switch";
 import { AboutUpdates } from "./about-updates";
+import { CloudSyncSettings } from "./cloud-sync-settings";
 import { SettingsCard, SettingsRow } from "./settings-primitives";
 import {
   AppConnectionSettings,
@@ -74,6 +75,17 @@ export function SettingsPage(): ReactNode {
           {SETTINGS_SECTIONS.apps.label}
         </h2>
         <AppConnectionSettings />
+      </section>
+
+      <section
+        id={SETTINGS_SECTIONS.cloud.id}
+        className="mt-14 scroll-mt-8"
+        aria-labelledby="settings-cloud-title"
+      >
+        <h2 id="settings-cloud-title" className="type-base">
+          {SETTINGS_SECTIONS.cloud.label}
+        </h2>
+        <CloudSyncSettings />
       </section>
 
       <section
