@@ -55,7 +55,9 @@ if [[ -n "$ca_bundle" ]]; then
 fi
 chmod 0755 "$rootfs_dir/usr/local/bin/agent"
 chmod 0700 "$rootfs_dir/opt/data"
-find "$rootfs_dir" -exec touch -h -t 197001010000 {} +
+# touch -t reads the stamp in local time. Ahead of UTC that yields a negative
+# mtime, which ustar cannot encode, and tar then writes an empty archive.
+find "$rootfs_dir" -exec env TZ=UTC touch -h -t 197001010000 {} +
 
 layer_tar="$stage_dir/layer.tar"
 COPYFILE_DISABLE=1 tar \
@@ -67,6 +69,10 @@ COPYFILE_DISABLE=1 tar \
   --gname radius \
   -C "$rootfs_dir" \
   -cf "$layer_tar" .
+if ! tar -tf "$layer_tar" | grep -qx "./usr/local/bin/agent"; then
+  echo "layer archive does not contain ./usr/local/bin/agent" >&2
+  exit 70
+fi
 layer_diff_id=$(shasum -a 256 "$layer_tar" | awk '{print $1}')
 gzip -n -9 "$layer_tar"
 layer_blob="$layer_tar.gz"
