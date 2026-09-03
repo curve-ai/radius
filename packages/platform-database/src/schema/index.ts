@@ -5,4 +5,5 @@ export * from "./installations.js";
 export * from "./operations.js";
 export * from "./organizations.js";
 export * from "./relations.js";
+export * from "./sync/index.js";
 export * from "./views.js";

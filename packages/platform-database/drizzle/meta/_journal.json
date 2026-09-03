@@ -15,6 +15,13 @@
       "when": 1787854139122,
       "tag": "0001_platform_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788454685647,
+      "tag": "0002_conversation_sync",
+      "breakpoints": true
     }
   ]
 }
