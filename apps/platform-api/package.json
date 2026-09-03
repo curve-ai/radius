@@ -17,6 +17,7 @@
     "@curve-ai/platform-contracts": "0.0.1",
     "@curve-ai/platform-database": "0.0.1",
     "@curve-ai/platform-providers": "0.0.1",
+    "@curve-ai/radius-sync-protocol": "0.0.1",
     "hono": "4.13.3",
     "openid-client": "6.8.7"
   },

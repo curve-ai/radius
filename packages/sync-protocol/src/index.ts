@@ -639,6 +639,25 @@ export const ProviderCapabilitiesSchema = z.object({
   artifactTransfer: z.boolean(),
 });
 
+/**
+ * What a device sends to enrol itself before it may push.
+ *
+ * The public key is the device half of the signature on every later request,
+ * so a server stores it and verifies against it rather than trusting the
+ * client instance id alone.
+ */
+export const DeviceRegistrationSchema = z.object({
+  clientInstanceId: uuid,
+  displayName: z.string().trim().min(1).max(120),
+  platform: z.string().trim().min(1).max(40),
+  publicKeyJwk: z.object({
+    kty: z.literal("OKP"),
+    crv: z.literal("Ed25519"),
+    x: z.string().min(1),
+  }),
+  appVersion: z.string().trim().min(1).max(40),
+});
+
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 export type ArtifactRecord = z.infer<typeof ArtifactRecordSchema>;
@@ -650,3 +669,6 @@ export type PushChangeResult = z.infer<typeof PushChangeResultSchema>;
 export type PushResponse = z.infer<typeof PushResponseSchema>;
 export type PullResponse = z.infer<typeof PullResponseSchema>;
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilitiesSchema>;
+export type DeviceRegistration = z.infer<
+  typeof DeviceRegistrationSchema
+>;
