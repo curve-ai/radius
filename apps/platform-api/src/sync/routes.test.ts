@@ -28,7 +28,7 @@ function services(
   organizations: { id: string; slug: string; displayName: string; role: "owner" }[] = [],
 ): RadiusPlatformServices {
   return {
-    authenticate: async (token) =>
+    authenticate: async (token: string) =>
       token === "valid"
         ? { accountId, response: { apiVersion: 1, accountId, organizations } }
         : null,
