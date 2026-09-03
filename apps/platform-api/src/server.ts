@@ -43,10 +43,15 @@ const provisioning = provisioningToken
       ) => provisionPlatformOrganization(runtime.pool, request),
     }
   : undefined;
+// Conversation sync is opt-in: it needs a cursor secret, and a deployment
+// that does not want to store conversations should not have the routes at all.
+const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
+if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
 const app = createPlatformApp(runtime.services, {
   browserAuth,
   provisioning,
   deploymentMode: sharedOrigins ? "managed" : "self_hosted",
+  syncDatabase: syncEnabled ? runtime.db : undefined,
 });
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 3100),
