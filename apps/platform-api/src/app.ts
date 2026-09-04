@@ -179,6 +179,10 @@ interface PlatformVariables {
   identity: PlatformRequestIdentity;
 }
 
+import type { PlatformDatabase } from "@curve-ai/platform-database";
+
+import { createSyncRoutes } from "./sync/routes.js";
+
 const MAX_JSON_BYTES = 1_048_576;
 
 export function createPlatformApp(
@@ -187,6 +191,9 @@ export function createPlatformApp(
     browserAuth?: PlatformBrowserAuthServices;
     provisioning?: PlatformProvisioningServices;
     deploymentMode?: "managed" | "self_hosted";
+    // Conversation sync needs the database directly: it writes 27 projection
+    // tables rather than going through the services interface.
+    syncDatabase?: PlatformDatabase;
   } = {},
 ) {
   const app = new Hono<{ Variables: PlatformVariables }>();
@@ -370,6 +377,12 @@ export function createPlatformApp(
     context.set("identity", scopedIdentity);
     await next();
   });
+
+  // Mounted after the identity middleware so every sync route already has an
+  // authenticated, organization-scoped caller.
+  if (options.syncDatabase) {
+    app.route("/api/platform/v1/sync", createSyncRoutes(options.syncDatabase));
+  }
 
   app.get("/api/platform/v1/identity", (context) =>
     context.json(context.get("identity").response),

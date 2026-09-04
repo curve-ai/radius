@@ -437,18 +437,30 @@ type LocalChangeInput = SyncChangeEnvelope extends infer Change
     : never
   : never;
 
+// A placeholder that satisfies the digest format so the envelope can be
+// validated before the digest it carries is known.
+const UNHASHED = "0".repeat(64);
+
 function prepareLocalChange(input: LocalChangeInput): {
   envelope: SyncChangeEnvelope;
   payloadJson: string;
 } {
-  const payloadJson = canonicalJson(asJsonValue(input.payload));
-  const envelope = SyncChangeEnvelopeSchema.parse({
+  // Hash what is sent, not what was handed in. Schema parsing normalizes the
+  // payload (it trims strings and drops unknown keys), so hashing the input
+  // would digest something nobody else ever sees: every reader re-hashes the
+  // parsed payload and would read the difference as a corrupt change.
+  const parsed = SyncChangeEnvelopeSchema.parse({
     ...input,
     protocolVersion: 1,
     changeId: randomUUID(),
     payloadSchemaVersion: 1,
-    payloadSha256: sha256Hex(payloadJson),
+    payloadSha256: UNHASHED,
   });
+  const payloadJson = canonicalJson(asJsonValue(parsed.payload));
+  const envelope = {
+    ...parsed,
+    payloadSha256: sha256Hex(payloadJson),
+  } as SyncChangeEnvelope;
   return { envelope, payloadJson };
 }
 
