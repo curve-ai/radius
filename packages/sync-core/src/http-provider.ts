@@ -30,16 +30,37 @@ export interface HttpProviderIdentity {
 export interface HttpSyncProviderOptions {
   endpoint: string;
   identity: HttpProviderIdentity;
-  getAccessToken(): Promise<string>;
+  /**
+   * Omit when the injected fetch already carries the caller's credentials.
+   * The Radius platform authenticates browser sessions by cookie, so the
+   * desktop hands in a session-bound fetch and has no token to send.
+   */
+  getAccessToken?: () => Promise<string>;
+  /**
+   * Produces a fresh key and client instance id after the server reports this
+   * device was revoked. Revocation is final, so re-registering the same
+   * identity would only be refused again.
+   */
+  rotateIdentity?: () => Promise<HttpProviderIdentity>;
   fetch?: typeof globalThis.fetch;
+}
+
+async function errorCode(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.clone().json()) as { error?: unknown };
+    return typeof body.error === "string" ? body.error : null;
+  } catch {
+    return null;
+  }
 }
 
 export class HttpSyncProvider implements SyncProvider {
   readonly #endpoint: URL;
   readonly #fetch: typeof globalThis.fetch;
-  readonly #identity: HttpProviderIdentity;
-  readonly #getAccessToken: () => Promise<string>;
-  readonly #privateKey: KeyObject;
+  readonly #getAccessToken: (() => Promise<string>) | null;
+  readonly #rotateIdentity: (() => Promise<HttpProviderIdentity>) | null;
+  #identity: HttpProviderIdentity;
+  #privateKey: KeyObject;
 
   constructor(options: HttpSyncProviderOptions) {
     this.#endpoint = new URL(
@@ -49,34 +70,70 @@ export class HttpSyncProvider implements SyncProvider {
     );
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#identity = options.identity;
-    this.#getAccessToken = options.getAccessToken;
+    this.#getAccessToken = options.getAccessToken ?? null;
+    this.#rotateIdentity = options.rotateIdentity ?? null;
     this.#privateKey = createPrivateKey({
       key: options.identity.privateKeyJwk,
       format: "jwk",
     });
   }
 
+  /**
+   * The push body names the device that produced the changes, and the server
+   * rejects a batch whose name disagrees with the signature. Rotation changes
+   * it, so callers must read it rather than remember it.
+   */
+  get clientInstanceId(): string {
+    return this.#identity.clientInstanceId;
+  }
+
   async registerDevice(): Promise<void> {
-    const response = await this.#fetch(
-      new URL("devices/register", this.#endpoint),
-      {
-        method: "POST",
-        headers: await this.#headers(),
-        body: JSON.stringify({
-          clientInstanceId: this.#identity.clientInstanceId,
-          displayName: this.#identity.displayName,
-          platform: this.#identity.platform,
-          publicKeyJwk: this.#identity.publicKeyJwk,
-          appVersion: this.#identity.appVersion,
-        }),
-      },
-    );
-    if (!response.ok)
-      throw new Error(`SYNC_DEVICE_REGISTRATION_${response.status}`);
+    const response = await this.#postRegistration();
+    if (response.ok) return;
+    if (
+      response.status === 409 &&
+      this.#rotateIdentity &&
+      (await errorCode(response)) === "DEVICE_REVOKED"
+    ) {
+      this.#adoptIdentity(await this.#rotateIdentity());
+      const retry = await this.#postRegistration();
+      if (retry.ok) return;
+      throw new Error(`SYNC_DEVICE_REGISTRATION_${retry.status}`);
+    }
+    const code = await errorCode(response);
+    throw new Error(code ?? `SYNC_DEVICE_REGISTRATION_${response.status}`);
+  }
+
+  #adoptIdentity(identity: HttpProviderIdentity): void {
+    this.#identity = identity;
+    this.#privateKey = createPrivateKey({
+      key: identity.privateKeyJwk,
+      format: "jwk",
+    });
+  }
+
+  async #postRegistration(): Promise<Response> {
+    return this.#fetch(new URL("devices/register", this.#endpoint), {
+      method: "POST",
+      credentials: "include",
+      headers: await this.#headers(),
+      body: JSON.stringify({
+        clientInstanceId: this.#identity.clientInstanceId,
+        displayName: this.#identity.displayName,
+        platform: this.#identity.platform,
+        publicKeyJwk: this.#identity.publicKeyJwk,
+        appVersion: this.#identity.appVersion,
+      }),
+    });
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
-    const response = await this.#fetch(new URL("capabilities", this.#endpoint));
+    const response = await this.#fetch(
+      new URL("capabilities", this.#endpoint),
+      {
+        credentials: "include",
+      },
+    );
     if (!response.ok) throw new Error(`SYNC_CAPABILITIES_${response.status}`);
     return ProviderCapabilitiesSchema.parse(await response.json());
   }
@@ -86,6 +143,7 @@ export class HttpSyncProvider implements SyncProvider {
     const body = JSON.stringify(request);
     const response = await this.#fetch(url, {
       method: "POST",
+      credentials: "include",
       headers: await this.#signedHeaders("POST", url, body),
       body,
     });
@@ -98,6 +156,7 @@ export class HttpSyncProvider implements SyncProvider {
     url.searchParams.set("limit", String(limit));
     if (cursor) url.searchParams.set("cursor", cursor);
     const response = await this.#fetch(url, {
+      credentials: "include",
       headers: await this.#signedHeaders("GET", url, ""),
     });
     if (!response.ok) throw new Error(`SYNC_PULL_${response.status}`);
@@ -108,6 +167,7 @@ export class HttpSyncProvider implements SyncProvider {
     const url = new URL(`artifacts/${contentSha256}`, this.#endpoint);
     const response = await this.#fetch(url, {
       method: "HEAD",
+      credentials: "include",
       headers: await this.#signedHeaders("HEAD", url, ""),
     });
     if (response.status === 404) return false;
@@ -128,6 +188,7 @@ export class HttpSyncProvider implements SyncProvider {
     );
     const response = await this.#fetch(url, {
       method: "PUT",
+      credentials: "include",
       headers: {
         ...(await this.#signedHeaders("PUT", url, body)),
         "content-type": input.mimeType,
@@ -148,8 +209,9 @@ export class HttpSyncProvider implements SyncProvider {
   }
 
   async #headers(): Promise<Record<string, string>> {
+    const token = await this.#getAccessToken?.();
     return {
-      authorization: `Bearer ${await this.#getAccessToken()}`,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       "content-type": "application/json",
     };
   }

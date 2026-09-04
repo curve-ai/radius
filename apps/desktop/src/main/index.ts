@@ -58,7 +58,8 @@ import {
 import { resolveSessionArtifactImage } from "./session-artifacts";
 import { openSessionFile } from "./session-file-links";
 import {
-  connectCloud,
+  connectPlatform,
+  disconnectPlatform,
   getSyncStatus,
   initializeSync,
   runSyncNow,
@@ -340,9 +341,10 @@ app.whenReady().then(async () => {
     ipcMain.handle("radius:set-sync-enabled", (_event, enabled) =>
       setSyncEnabled(enabled === true),
     );
-    ipcMain.handle("radius:connect-cloud", (_event, input) =>
-      connectCloud(input),
+    ipcMain.handle("radius:connect-platform", (_event, input) =>
+      connectPlatform(input),
     );
+    ipcMain.handle("radius:disconnect-platform", disconnectPlatform);
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.status, getDesktopUpdateStatus);
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.check, checkDesktopUpdate);
     ipcMain.handle(DESKTOP_UPDATE_CHANNELS.perform, performDesktopUpdate);

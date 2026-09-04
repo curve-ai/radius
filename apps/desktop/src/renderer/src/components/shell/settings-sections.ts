@@ -4,6 +4,7 @@ export const SETTINGS_SECTIONS = {
   permissions: { id: "settings-permissions", label: "Permissions" },
   notifications: { id: "settings-notifications", label: "Notifications" },
   apps: { id: "settings-apps", label: "Apps & connections" },
+  cloud: { id: "settings-cloud", label: "Radius Cloud" },
   about: { id: "settings-about", label: "About & updates" },
 } as const;
 
@@ -13,6 +14,7 @@ export const SETTINGS_SECTION_IDS = [
   SETTINGS_SECTIONS.permissions.id,
   SETTINGS_SECTIONS.notifications.id,
   SETTINGS_SECTIONS.apps.id,
+  SETTINGS_SECTIONS.cloud.id,
   SETTINGS_SECTIONS.about.id,
 ] as const;
 

@@ -131,8 +131,10 @@ const radiusApi = {
   syncNow: () => ipcRenderer.invoke("radius:sync-now"),
   setSyncEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("radius:set-sync-enabled", enabled),
-  connectCloud: (input: { frontendUrl: string; apiUrl: string }) =>
-    ipcRenderer.invoke("radius:connect-cloud", input),
+  connectPlatform: (
+    input: { kind: "cloud" } | { kind: "self-hosted"; url: string },
+  ) => ipcRenderer.invoke("radius:connect-platform", input),
+  disconnectPlatform: () => ipcRenderer.invoke("radius:disconnect-platform"),
   updateStatus: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.status),
   checkForUpdates: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.check),
   performUpdate: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.perform),
