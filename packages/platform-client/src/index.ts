@@ -14,6 +14,8 @@ import {
   ListAgentsResponseSchema,
   ListAgentDeploymentsResponseSchema,
   ListInstallationsResponseSchema,
+  RevokeSyncDeviceResponseSchema,
+  SyncOverviewResponseSchema,
   PlatformErrorResponseSchema,
   PlatformIdentityResponseSchema,
   PlatformInfoResponseSchema,
@@ -41,6 +43,9 @@ import {
   type ListAgentDeploymentsResponse,
   type ListInstallationsResponse,
   type PlatformIdentityResponse,
+  type RevokeSyncDeviceResponse,
+  type SyncDeviceSummary,
+  type SyncOverviewResponse,
   type PlatformInfoResponse,
   type PromoteAgentDeploymentRequest,
   type PrepareAgentDeploymentRequest,
@@ -379,6 +384,30 @@ export class RadiusPlatformClient {
     );
   }
 
+  // The caller's own conversation sync state in the organization this
+  // request is scoped to. Sync is a per-member store, so there is no
+  // organization-wide variant.
+  syncOverview(signal?: AbortSignal): Promise<SyncOverviewResponse> {
+    return this.request(
+      "GET",
+      "/api/platform/v1/sync/overview",
+      SyncOverviewResponseSchema,
+      { signal, authenticated: true },
+    );
+  }
+
+  revokeSyncDevice(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<RevokeSyncDeviceResponse> {
+    return this.request(
+      "POST",
+      `/api/platform/v1/sync/devices/${encodeURIComponent(deviceId)}/revoke`,
+      RevokeSyncDeviceResponseSchema,
+      { signal, authenticated: true },
+    );
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -550,6 +579,9 @@ export type {
   ListAgentDeploymentsResponse,
   ListInstallationsResponse,
   PlatformIdentityResponse,
+  RevokeSyncDeviceResponse,
+  SyncDeviceSummary,
+  SyncOverviewResponse,
   PlatformInfoResponse,
   PromoteAgentDeploymentRequest,
   PrepareAgentDeploymentRequest,

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull, max } from "drizzle-orm";
 
 import {
   platformSchema,
@@ -22,8 +22,34 @@ import {
   type SyncOwner,
 } from "./service.js";
 
-const { organizationMemberships, syncDevices, syncFileArtifacts } =
-  platformSchema;
+const {
+  organizationMemberships,
+  syncChanges,
+  syncDevices,
+  syncFileArtifacts,
+  syncProjects,
+  syncSessions,
+} = platformSchema;
+
+function deviceSummary(device: {
+  id: string;
+  displayName: string;
+  platform: string;
+  appVersion: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+  revokedAt: Date | null;
+}) {
+  return {
+    id: device.id,
+    displayName: device.displayName,
+    platform: device.platform,
+    appVersion: device.appVersion,
+    createdAt: device.createdAt.toISOString(),
+    lastSeenAt: device.lastSeenAt.toISOString(),
+    revokedAt: device.revokedAt?.toISOString() ?? null,
+  };
+}
 
 /**
  * The identity middleware has already proved who is calling and, where the
@@ -87,6 +113,106 @@ export function createSyncRoutes(database: PlatformDatabase) {
       artifactTransfer: getArtifactStore() !== null,
     }),
   );
+
+  // What the dashboard shows: the caller's devices and how much they have
+  // synced. Read-only and scoped to the caller's own membership, so a browser
+  // session is enough; no device signature is involved.
+  sync.get("/overview", async (context) => {
+    let scope: SyncOwner;
+    try {
+      scope = await owner(context);
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "SYNC_FORBIDDEN" },
+        403,
+      );
+    }
+    const identity = context.get("identity");
+    const byMembership = eq(syncDevices.membershipId, scope.membershipId);
+    const [devices, [projects], [sessions], [changes]] = await Promise.all([
+      database
+        .select({
+          id: syncDevices.id,
+          displayName: syncDevices.displayName,
+          platform: syncDevices.platform,
+          appVersion: syncDevices.appVersion,
+          createdAt: syncDevices.createdAt,
+          lastSeenAt: syncDevices.lastSeenAt,
+          revokedAt: syncDevices.revokedAt,
+        })
+        .from(syncDevices)
+        .where(byMembership)
+        .orderBy(desc(syncDevices.lastSeenAt)),
+      database
+        .select({ total: count() })
+        .from(syncProjects)
+        .where(
+          and(
+            eq(syncProjects.membershipId, scope.membershipId),
+            isNull(syncProjects.deletedAt),
+          ),
+        ),
+      database
+        .select({ total: count() })
+        .from(syncSessions)
+        .where(
+          and(
+            eq(syncSessions.membershipId, scope.membershipId),
+            isNull(syncSessions.deletedAt),
+          ),
+        ),
+      database
+        .select({ total: count(), latest: max(syncChanges.acceptedAt) })
+        .from(syncChanges)
+        .where(eq(syncChanges.membershipId, scope.membershipId)),
+    ]);
+    return context.json({
+      apiVersion: 1,
+      organization: identity.response.organizations[0]!.slug,
+      artifactTransfer: getArtifactStore() !== null,
+      devices: devices.map(deviceSummary),
+      projects: projects?.total ?? 0,
+      sessions: sessions?.total ?? 0,
+      changes: changes?.total ?? 0,
+      latestChangeAt: changes?.latest ? changes.latest.toISOString() : null,
+    });
+  });
+
+  // Revocation from the dashboard. DELETE /devices/:id below is the
+  // device-signed form used by the desktop; this one is for the person who
+  // lost the laptop and only has a browser. Same rule: revocation is final.
+  sync.post("/devices/:deviceId/revoke", async (context) => {
+    let scope: SyncOwner;
+    try {
+      scope = await owner(context);
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "SYNC_FORBIDDEN" },
+        403,
+      );
+    }
+    const [device] = await database
+      .update(syncDevices)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(syncDevices.id, context.req.param("deviceId")),
+          eq(syncDevices.membershipId, scope.membershipId),
+          isNull(syncDevices.revokedAt),
+        ),
+      )
+      .returning({
+        id: syncDevices.id,
+        displayName: syncDevices.displayName,
+        platform: syncDevices.platform,
+        appVersion: syncDevices.appVersion,
+        createdAt: syncDevices.createdAt,
+        lastSeenAt: syncDevices.lastSeenAt,
+        revokedAt: syncDevices.revokedAt,
+      });
+    if (!device) return context.json({ error: "DEVICE_NOT_FOUND" }, 404);
+    return context.json({ apiVersion: 1, device: deviceSummary(device) });
+  });
 
   sync.post("/devices/register", async (context) => {
     let scope: SyncOwner;
