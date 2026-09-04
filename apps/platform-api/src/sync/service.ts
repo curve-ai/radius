@@ -1,18 +1,18 @@
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 
 import {
   platformSchema,
   type PlatformDatabase,
 } from "@curve-ai/platform-database";
-import type {
-  JsonValue,
-  ProjectRecord,
-  SessionEventRecord,
-  SessionRecord,
-  SyncChangeEnvelope,
+import {
+  payloadSha256,
+  type JsonValue,
+  type ProjectRecord,
+  type SessionEventRecord,
+  type SessionRecord,
+  type SyncChangeEnvelope,
 } from "@curve-ai/radius-sync-protocol";
 
-import { payloadSha256 } from "./canonical-json.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 
 const {
@@ -59,6 +59,42 @@ export interface ChangeResult {
   errorCode: string | null;
 }
 
+/**
+ * A change the server will never accept, however many times it is resent.
+ *
+ * It has to travel back as a per-change result rather than a failed request:
+ * a client that gets a 500 keeps the change at the head of its queue and
+ * retries it forever, so one malformed change would stop the queue behind it.
+ */
+export class SyncChangeRejected extends Error {
+  constructor(readonly errorCode: string) {
+    super(errorCode);
+    this.name = "SyncChangeRejected";
+  }
+}
+
+/**
+ * SQLSTATE class 22 is a data exception (a value too long, a number out of
+ * range) and class 23 an integrity constraint violation. Both mean the change
+ * itself is unacceptable, so resending it cannot help.
+ */
+function isClientDataFault(error: unknown): boolean {
+  // Drizzle wraps driver errors, so the SQLSTATE is usually on a cause rather
+  // than on the error that was thrown.
+  for (let current = error, depth = 0; current && depth < 8; depth += 1) {
+    if (typeof current !== "object") return false;
+    const code = (current as { code?: unknown }).code;
+    if (
+      typeof code === "string" &&
+      (code.startsWith("22") || code.startsWith("23"))
+    ) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 type PlatformTransaction = Parameters<
   Parameters<PlatformDatabase["transaction"]>[0]
 >[0];
@@ -71,7 +107,25 @@ async function insertArtifacts(
   for (const link of event.artifactLinks) {
     const artifact = link.artifact;
     if (artifact.sessionId !== event.sessionId) {
-      throw new Error("ARTIFACT_SESSION_MISMATCH");
+      throw new SyncChangeRejected("ARTIFACT_SESSION_MISMATCH");
+    }
+    if (artifact.supersedesArtifactId) {
+      // The column carries no foreign key, so nothing else stops a revision
+      // chain from pointing at an artifact in someone else's conversation.
+      const [superseded] = await transaction
+        .select({ id: syncArtifacts.id })
+        .from(syncArtifacts)
+        .where(
+          and(
+            eq(syncArtifacts.id, artifact.supersedesArtifactId),
+            eq(syncArtifacts.membershipId, owner.membershipId),
+            eq(syncArtifacts.sessionId, event.sessionId),
+          ),
+        )
+        .limit(1);
+      if (!superseded) {
+        throw new SyncChangeRejected("SUPERSEDED_ARTIFACT_NOT_FOUND");
+      }
     }
     await transaction.insert(syncArtifacts).values({
       id: artifact.id,
@@ -128,7 +182,7 @@ async function insertEventProjection(
         ),
       )
       .limit(1);
-    if (!run) throw new Error("AGENT_RUN_NOT_FOUND");
+    if (!run) throw new SyncChangeRejected("AGENT_RUN_NOT_FOUND");
   }
 
   await transaction.insert(syncSessionEvents).values({
@@ -169,7 +223,9 @@ async function insertEventProjection(
       }
       return;
     case "agent_run":
-      if (!event.agentRunId) throw new Error("AGENT_RUN_ID_REQUIRED");
+      if (!event.agentRunId) {
+        throw new SyncChangeRejected("AGENT_RUN_ID_REQUIRED");
+      }
       await transaction.insert(syncAgentRuns).values({
         id: event.agentRunId,
         eventId: event.eventId,
@@ -301,7 +357,7 @@ async function insertFileChange(
   sessionProjectId: string | null,
 ): Promise<void> {
   if (sessionProjectId !== event.projectId) {
-    throw new Error("FILE_CHANGE_PROJECT_MISMATCH");
+    throw new SyncChangeRejected("FILE_CHANGE_PROJECT_MISMATCH");
   }
   const [existingFile] = await transaction
     .select()
@@ -315,7 +371,7 @@ async function insertFileChange(
       existingFile.createdAt.getTime() !==
         Date.parse(event.projectFileCreatedAt))
   ) {
-    throw new Error("PROJECT_FILE_ID_REUSED");
+    throw new SyncChangeRejected("PROJECT_FILE_ID_REUSED");
   }
   if (!existingFile) {
     await transaction.insert(syncProjectFiles).values({
@@ -356,7 +412,7 @@ async function insertFileChange(
         existing.byteSize !== version.byteSize ||
         existing.capturedAt.getTime() !== Date.parse(version.capturedAt)
       ) {
-        throw new Error("PROJECT_FILE_VERSION_ID_REUSED");
+        throw new SyncChangeRejected("PROJECT_FILE_VERSION_ID_REUSED");
       }
       continue;
     }
@@ -393,7 +449,40 @@ export async function applySyncChange(
   deviceId: string,
   change: SyncChangeEnvelope,
 ): Promise<ChangeResult> {
+  try {
+    return await applyOneChange(database, owner, deviceId, change);
+  } catch (error) {
+    if (error instanceof SyncChangeRejected) {
+      return rejected(change.changeId, error.errorCode);
+    }
+    // A constraint the client broke is the client's to fix, so it comes back
+    // as a verdict on this change. Anything else - a dropped connection, a
+    // deadlock - is the server's problem and must stay retryable.
+    if (isClientDataFault(error)) {
+      console.error("Radius sync change rejected by the database", error);
+      return rejected(change.changeId, "CONSTRAINT_VIOLATION");
+    }
+    throw error;
+  }
+}
+
+async function applyOneChange(
+  database: PlatformDatabase,
+  owner: SyncOwner,
+  deviceId: string,
+  change: SyncChangeEnvelope,
+): Promise<ChangeResult> {
   return database.transaction(async (transaction) => {
+    // Serialize one membership's writes against each other. Change sequences
+    // are handed out at insert time but become visible at commit time, so
+    // without this two concurrent pushes can commit out of order and a pull
+    // that lands between them steps over the lower sequence for good.
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended(${owner.membershipId}::text, 0)
+      )`,
+    );
+
     const [duplicate] = await transaction
       .select({ payloadSha256: syncChanges.payloadSha256 })
       .from(syncChanges)
@@ -435,17 +524,20 @@ async function applyProjectChange(
     { kind: "project.upsert" | "project.delete" }
   >,
 ): Promise<ChangeResult> {
-  const [current] = await transaction
+  // Look the row up by its primary key, not by membership. The write below
+  // conflicts on that same primary key, so a membership-scoped read would let
+  // a project id that belongs to someone else read as absent and then be
+  // overwritten - membership, organization and all - as a fresh revision 1.
+  const [existing] = await transaction
     .select()
     .from(syncProjects)
-    .where(
-      and(
-        eq(syncProjects.membershipId, owner.membershipId),
-        eq(syncProjects.id, change.projectId),
-      ),
-    )
+    .where(eq(syncProjects.id, change.projectId))
     .for("update")
     .limit(1);
+  if (existing && existing.membershipId !== owner.membershipId) {
+    return rejected(change.changeId, "PROJECT_ID_REUSED");
+  }
+  const current = existing;
   if (change.projectRevision !== (current?.revision ?? 0) + 1) {
     return conflict(change.changeId, "REVISION_CONFLICT");
   }
@@ -464,10 +556,19 @@ async function applyProjectChange(
   }
 
   const values = projectValues(owner, change.payload);
-  await transaction
+  // The advisory lock only orders one membership against itself, so the
+  // ownership predicate rides along on the write as well. A conflict on a row
+  // another membership owns updates nothing and returns nothing.
+  const [written] = await transaction
     .insert(syncProjects)
     .values(values)
-    .onConflictDoUpdate({ target: syncProjects.id, set: values });
+    .onConflictDoUpdate({
+      target: syncProjects.id,
+      set: values,
+      setWhere: eq(syncProjects.membershipId, owner.membershipId),
+    })
+    .returning({ id: syncProjects.id });
+  if (!written) return rejected(change.changeId, "PROJECT_ID_REUSED");
   await insertChange(transaction, owner, deviceId, change);
   return accepted(change.changeId);
 }
@@ -481,17 +582,19 @@ async function applySessionChange(
     { kind: "project.upsert" | "project.delete" }
   >,
 ): Promise<ChangeResult> {
-  const [current] = await transaction
+  // By primary key for the same reason as projects: the upsert below conflicts
+  // on the session id alone, so ownership has to be judged on the row that
+  // upsert would actually replace.
+  const [existing] = await transaction
     .select()
     .from(syncSessions)
-    .where(
-      and(
-        eq(syncSessions.membershipId, owner.membershipId),
-        eq(syncSessions.id, change.sessionId),
-      ),
-    )
+    .where(eq(syncSessions.id, change.sessionId))
     .for("update")
     .limit(1);
+  if (existing && existing.membershipId !== owner.membershipId) {
+    return rejected(change.changeId, "SESSION_ID_REUSED");
+  }
+  const current = existing;
   if (change.sessionRevision !== (current?.revision ?? 0) + 1) {
     return conflict(change.changeId, "REVISION_CONFLICT");
   }
@@ -521,10 +624,16 @@ async function applySessionChange(
       if (!project) return conflict(change.changeId, "PROJECT_NOT_FOUND");
     }
     const values = sessionValues(owner, change.payload);
-    await transaction
+    const [written] = await transaction
       .insert(syncSessions)
       .values(values)
-      .onConflictDoUpdate({ target: syncSessions.id, set: values });
+      .onConflictDoUpdate({
+        target: syncSessions.id,
+        set: values,
+        setWhere: eq(syncSessions.membershipId, owner.membershipId),
+      })
+      .returning({ id: syncSessions.id });
+    if (!written) return rejected(change.changeId, "SESSION_ID_REUSED");
   } else if (change.kind === "session.event.append") {
     if (!current) return conflict(change.changeId, "SESSION_NOT_FOUND");
     if (
@@ -547,7 +656,12 @@ async function applySessionChange(
         updatedAt: new Date(change.payload.occurredAt),
         acceptedAt: new Date(),
       })
-      .where(eq(syncSessions.id, change.sessionId));
+      .where(
+        and(
+          eq(syncSessions.id, change.sessionId),
+          eq(syncSessions.membershipId, owner.membershipId),
+        ),
+      );
   } else {
     if (
       !current ||
@@ -561,7 +675,12 @@ async function applySessionChange(
     await transaction
       .update(syncSessions)
       .set(sessionValues(owner, change.payload))
-      .where(eq(syncSessions.id, change.sessionId));
+      .where(
+        and(
+          eq(syncSessions.id, change.sessionId),
+          eq(syncSessions.membershipId, owner.membershipId),
+        ),
+      );
   }
 
   await insertChange(transaction, owner, deviceId, change);
@@ -603,7 +722,10 @@ export async function pullSyncChanges(
     .where(
       after === null
         ? eq(syncChanges.membershipId, owner.membershipId)
-        : and(eq(syncChanges.membershipId, owner.membershipId), gt(syncChanges.sequence, after)),
+        : and(
+            eq(syncChanges.membershipId, owner.membershipId),
+            gt(syncChanges.sequence, after),
+          ),
     )
     .orderBy(syncChanges.sequence)
     .limit(limit);
@@ -647,7 +769,7 @@ function sessionValues(owner: SyncOwner, session: SessionRecord) {
 }
 
 function requiredRunId(value: string | null): string {
-  if (!value) throw new Error("AGENT_RUN_ID_REQUIRED");
+  if (!value) throw new SyncChangeRejected("AGENT_RUN_ID_REQUIRED");
   return value;
 }
 

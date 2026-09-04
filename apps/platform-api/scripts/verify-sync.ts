@@ -24,12 +24,12 @@ import {
 } from "@curve-ai/platform-database";
 import {
   SyncChangeEnvelopeSchema,
+  payloadSha256,
   type JsonValue,
   type SyncChangeEnvelope,
 } from "@curve-ai/radius-sync-protocol";
 
 import { createFileSystemArtifactStore } from "../src/sync/artifact-store.js";
-import { payloadSha256 } from "../src/sync/canonical-json.js";
 import { verifyDeviceRequest } from "../src/sync/device-auth.js";
 import {
   applySyncChange,
@@ -44,6 +44,7 @@ const {
   syncFileChanges,
   syncProjects,
   syncReasoningSummaries,
+  syncSessions,
 } = platformSchema;
 
 const createdAt = new Date().toISOString();
@@ -499,6 +500,187 @@ async function main(): Promise<void> {
       /INVALID_CURSOR/,
     );
 
+    // --- one membership cannot write over another's ----------------------
+    // The upsert conflicts on the session's primary key, which is global, so
+    // a membership-scoped existence check alone would read another tenant's
+    // session as absent and take it over as a fresh revision 1.
+    const takeover = await applySyncChange(
+      database,
+      other.owner,
+      other.deviceId,
+      change({
+        protocolVersion: 1,
+        changeId: randomUUID(),
+        originClientInstanceId: other.deviceId,
+        sessionId,
+        sessionRevision: 1,
+        payloadSchemaVersion: 1,
+        createdAt,
+        kind: "session.upsert",
+        payload: {
+          id: sessionId,
+          originClientInstanceId: other.deviceId,
+          projectId: null,
+          title: "Stolen",
+          status: "active",
+          revision: 1,
+          createdAt,
+          updatedAt: createdAt,
+          archivedAt: null,
+          deletedAt: null,
+        },
+      }),
+    );
+    assert.equal(takeover.status, "rejected");
+    assert.equal(takeover.errorCode, "SESSION_ID_REUSED");
+    const [stillOurs] = await database
+      .select({ membershipId: syncSessions.membershipId })
+      .from(syncSessions)
+      .where(eq(syncSessions.id, sessionId));
+    assert.equal(stillOurs?.membershipId, owner.membershipId);
+
+    const projectTakeover = await applySyncChange(
+      database,
+      other.owner,
+      other.deviceId,
+      change({
+        protocolVersion: 1,
+        changeId: randomUUID(),
+        originClientInstanceId: other.deviceId,
+        projectId,
+        projectRevision: 1,
+        payloadSchemaVersion: 1,
+        createdAt,
+        kind: "project.upsert",
+        payload: {
+          id: projectId,
+          originClientInstanceId: other.deviceId,
+          name: "Stolen",
+          revision: 1,
+          createdAt,
+          updatedAt: createdAt,
+          archivedAt: null,
+          deletedAt: null,
+        },
+      }),
+    );
+    assert.equal(projectTakeover.status, "rejected");
+    assert.equal(projectTakeover.errorCode, "PROJECT_ID_REUSED");
+
+    // --- a bad change is a verdict, never a thrown request ----------------
+    // A change the server will never accept has to come back as a result the
+    // client can drop. If it threw, the client would keep it at the head of
+    // its queue and retry it forever, stalling everything behind it.
+    const probeSessionId = randomUUID();
+    assert.equal(
+      (
+        await applySyncChange(
+          database,
+          owner,
+          deviceId,
+          change({
+            protocolVersion: 1,
+            changeId: randomUUID(),
+            originClientInstanceId: deviceId,
+            sessionId: probeSessionId,
+            sessionRevision: 1,
+            payloadSchemaVersion: 1,
+            createdAt,
+            kind: "session.upsert",
+            payload: {
+              id: probeSessionId,
+              originClientInstanceId: deviceId,
+              projectId: null,
+              title: "Rejection probe",
+              status: "active",
+              revision: 1,
+              createdAt,
+              updatedAt: createdAt,
+              archivedAt: null,
+              deletedAt: null,
+            },
+          }),
+        )
+      ).status,
+      "accepted",
+    );
+
+    const probeEvent = (
+      eventId: string,
+      revision: number,
+      runId: string | null,
+    ) =>
+      change({
+        protocolVersion: 1,
+        changeId: randomUUID(),
+        originClientInstanceId: deviceId,
+        sessionId: probeSessionId,
+        sessionRevision: revision,
+        payloadSchemaVersion: 1,
+        createdAt,
+        kind: "session.event.append",
+        payload: {
+          eventId,
+          sessionId: probeSessionId,
+          sessionRevision: revision,
+          sourceClientInstanceId: deviceId,
+          agentRunId: runId,
+          occurredAt: createdAt,
+          artifactLinks: [],
+          eventType: "reasoning_summary",
+          summaryKind: "analysis",
+          summaryText: "Rejection probe.",
+        },
+      });
+
+    const danglingRun = await applySyncChange(
+      database,
+      owner,
+      deviceId,
+      probeEvent(randomUUID(), 2, randomUUID()),
+    );
+    assert.equal(danglingRun.status, "rejected");
+    assert.equal(danglingRun.errorCode, "AGENT_RUN_NOT_FOUND");
+
+    // A constraint the database enforces reaches the client the same way.
+    const reusedEventId = randomUUID();
+    assert.equal(
+      (
+        await applySyncChange(
+          database,
+          owner,
+          deviceId,
+          probeEvent(reusedEventId, 2, null),
+        )
+      ).status,
+      "accepted",
+    );
+    const reusedEvent = await applySyncChange(
+      database,
+      owner,
+      deviceId,
+      probeEvent(reusedEventId, 3, null),
+    );
+    assert.equal(reusedEvent.status, "rejected");
+    assert.equal(reusedEvent.errorCode, "CONSTRAINT_VIOLATION");
+
+    // --- a revoked device stays revoked ----------------------------------
+    // Re-registering used to clear revoked_at, so a lost machine that still
+    // held a session token could hand itself back its own access.
+    await database
+      .update(syncDevices)
+      .set({ revokedAt: new Date() })
+      .where(eq(syncDevices.id, other.deviceId));
+    await assert.rejects(
+      verifyDeviceRequest(
+        database,
+        signedRequest,
+        other.owner.membershipId,
+        signedBody,
+      ),
+      /DEVICE_NOT_REGISTERED/,
+    );
+
     // --- rows landed where they should -----------------------------------
     assert.equal(
       (
@@ -569,8 +751,10 @@ async function main(): Promise<void> {
       "Platform sync verification passed: projections, cursor, device binding and organization isolation.",
     );
   } finally {
-      await pool.end();
+    // The directory goes first: if closing the pool throws, the temporary
+    // artifacts would otherwise be left behind.
     await rm(artifactDirectory, { force: true, recursive: true });
+    await pool.end();
   }
 }
 

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import {
   platformSchema,
@@ -111,6 +111,7 @@ export function createSyncRoutes(database: PlatformDatabase) {
       .select({
         membershipId: syncDevices.membershipId,
         publicKeyJwk: syncDevices.publicKeyJwk,
+        revokedAt: syncDevices.revokedAt,
       })
       .from(syncDevices)
       .where(eq(syncDevices.id, input.clientInstanceId))
@@ -124,9 +125,15 @@ export function createSyncRoutes(database: PlatformDatabase) {
     ) {
       return context.json({ error: "DEVICE_IDENTITY_CONFLICT" }, 409);
     }
+    // Revocation is final. Re-registering was the way to undo it: the lost
+    // laptop that was revoked from another device still holds a session token,
+    // and registering itself again would have cleared revoked_at.
+    if (existing?.revokedAt) {
+      return context.json({ error: "DEVICE_REVOKED" }, 409);
+    }
 
     const now = new Date();
-    await database
+    const registered = await database
       .insert(syncDevices)
       .values({
         id: input.clientInstanceId,
@@ -147,9 +154,13 @@ export function createSyncRoutes(database: PlatformDatabase) {
           publicKeyJwk: input.publicKeyJwk,
           appVersion: input.appVersion,
           lastSeenAt: now,
-          revokedAt: null,
         },
-      });
+        setWhere: isNull(syncDevices.revokedAt),
+      })
+      .returning({ id: syncDevices.id });
+    if (registered.length === 0) {
+      return context.json({ error: "DEVICE_REVOKED" }, 409);
+    }
     return context.json({ deviceId: input.clientInstanceId, registered: true });
   });
 
@@ -199,9 +210,18 @@ export function createSyncRoutes(database: PlatformDatabase) {
       return context.json({ error: "DEVICE_BODY_MISMATCH" }, 403);
     }
 
+    // A client fault comes back as a per-change verdict rather than a failed
+    // request; only the server's own faults reach here, and those must fail
+    // loudly so the client retries. The batch is answered one result per
+    // change because that is what the client checks for.
     const results = [];
-    for (const change of parsed.data.changes) {
-      results.push(await applySyncChange(database, scope, deviceId, change));
+    try {
+      for (const change of parsed.data.changes) {
+        results.push(await applySyncChange(database, scope, deviceId, change));
+      }
+    } catch (error) {
+      console.error("Radius sync push failed", error);
+      return context.json({ error: "SYNC_PUSH_FAILED" }, 503);
     }
     return context.json({ protocolVersion: SYNC_PROTOCOL_VERSION, results });
   });
@@ -343,13 +363,14 @@ export function createSyncRoutes(database: PlatformDatabase) {
       );
     }
 
+    const DEFAULT_PULL_LIMIT = 100;
     const requestedLimit = Number.parseInt(
-      context.req.query("limit") || "100",
+      context.req.query("limit") || String(DEFAULT_PULL_LIMIT),
       10,
     );
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(requestedLimit, 1), MAX_SYNC_BATCH_SIZE)
-      : MAX_SYNC_BATCH_SIZE;
+      : DEFAULT_PULL_LIMIT;
     try {
       const result = await pullSyncChanges(
         database,
