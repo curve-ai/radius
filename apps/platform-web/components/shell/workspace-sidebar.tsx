@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   LogOut,
   MonitorSmartphone,
+  RefreshCw,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -33,6 +34,7 @@ const links = [
   { label: "Overview", href: "/workspace", icon: LayoutDashboard },
   { label: "Agents", href: "/workspace/agents", icon: Bot },
   { label: "Devices", href: "/workspace/devices", icon: MonitorSmartphone },
+  { label: "Sync", href: "/workspace/sync", icon: RefreshCw },
   { label: "Settings", href: "/workspace/settings", icon: Settings },
 ];
 
