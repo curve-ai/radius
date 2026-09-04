@@ -13,7 +13,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { radiusSync } from "../common.js";
+import { ownedByMembership, ownedThroughEvent, ownedThroughPlan, radiusSync } from "../common.js";
 import { organizations } from "../organizations.js";
 import { syncDevices, syncSessions } from "./core.js";
 
@@ -57,6 +57,7 @@ export const syncSessionEvents = radiusSync.table(
       table.organizationId,
       table.occurredAt,
     ),
+    ownedByMembership("session_events"),
   ],
 );
 
@@ -70,7 +71,7 @@ export const syncMessages = radiusSync.table("messages", {
   model: text("model"),
   providerMessageId: text("provider_message_id"),
   finishReason: text("finish_reason"),
-});
+}, () => [ownedThroughEvent("messages")]);
 
 export const syncMessageParts = radiusSync.table(
   "message_parts",
@@ -89,6 +90,7 @@ export const syncMessageParts = radiusSync.table(
       table.messageEventId,
       table.position,
     ),
+    ownedThroughEvent("message_parts", "message_event_id"),
   ],
 );
 
@@ -116,6 +118,7 @@ export const syncAgentRuns = radiusSync.table(
       table.sessionId,
       table.startedAt,
     ),
+    ownedThroughEvent("agent_runs"),
   ],
 );
 
@@ -132,6 +135,7 @@ export const syncAgentRunStateUpdates = radiusSync.table(
     detail: text("detail"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
   },
+  () => [ownedThroughEvent("agent_run_state_updates")],
 );
 
 export const syncAgentRunPresentations = radiusSync.table(
@@ -150,6 +154,7 @@ export const syncAgentRunPresentations = radiusSync.table(
   },
   (table) => [
     uniqueIndex("sync_agent_run_presentations_run_key").on(table.agentRunId),
+    ownedThroughEvent("agent_run_presentations"),
   ],
 );
 
@@ -159,7 +164,7 @@ export const syncReasoningSummaries = radiusSync.table("reasoning_summaries", {
     .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   summaryKind: text("summary_kind").notNull(),
   summaryText: text("summary_text").notNull(),
-});
+}, () => [ownedThroughEvent("reasoning_summaries")]);
 
 export const syncTaskPlans = radiusSync.table(
   "task_plans",
@@ -172,7 +177,10 @@ export const syncTaskPlans = radiusSync.table(
     supersedesPlanId: uuid("supersedes_plan_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
-  (table) => [uniqueIndex("sync_task_plans_event_key").on(table.eventId)],
+  (table) => [
+    uniqueIndex("sync_task_plans_event_key").on(table.eventId),
+    ownedThroughEvent("task_plans"),
+  ],
 );
 
 export const syncTaskSteps = radiusSync.table(
@@ -190,6 +198,7 @@ export const syncTaskSteps = radiusSync.table(
       table.planId,
       table.position,
     ),
+    ownedThroughPlan("task_steps"),
   ],
 );
 
@@ -202,7 +211,7 @@ export const syncTaskStepUpdates = radiusSync.table("task_step_updates", {
     .references(() => syncTaskSteps.id, { onDelete: "cascade" }),
   state: text("state").notNull(),
   detail: text("detail"),
-});
+}, () => [ownedThroughEvent("task_step_updates")]);
 
 export const syncToolCalls = radiusSync.table("tool_calls", {
   eventId: uuid("event_id")
@@ -214,7 +223,7 @@ export const syncToolCalls = radiusSync.table("tool_calls", {
   inputSchemaId: text("input_schema_id").notNull(),
   inputSchemaVersion: integer("input_schema_version").notNull(),
   input: jsonb("input").$type<unknown>().notNull(),
-});
+}, () => [ownedThroughEvent("tool_calls")]);
 
 export const syncToolProgressEvents = radiusSync.table("tool_progress_events", {
   eventId: uuid("event_id")
@@ -226,7 +235,7 @@ export const syncToolProgressEvents = radiusSync.table("tool_progress_events", {
   progressSchemaId: text("progress_schema_id").notNull(),
   progressSchemaVersion: integer("progress_schema_version").notNull(),
   progress: jsonb("progress").$type<unknown>().notNull(),
-});
+}, () => [ownedThroughEvent("tool_progress_events")]);
 
 export const syncToolResults = radiusSync.table(
   "tool_results",
@@ -244,6 +253,7 @@ export const syncToolResults = radiusSync.table(
   },
   (table) => [
     uniqueIndex("sync_tool_results_call_key").on(table.toolCallEventId),
+    ownedThroughEvent("tool_results"),
   ],
 );
 
@@ -261,6 +271,7 @@ export const syncApprovalRequests = radiusSync.table(
   },
   (table) => [
     uniqueIndex("sync_approval_requests_call_key").on(table.toolCallEventId),
+    ownedThroughEvent("approval_requests"),
   ],
 );
 
@@ -282,6 +293,7 @@ export const syncApprovalDecisions = radiusSync.table(
     uniqueIndex("sync_approval_decisions_request_key").on(
       table.approvalRequestEventId,
     ),
+    ownedThroughEvent("approval_decisions"),
   ],
 );
 
@@ -294,4 +306,4 @@ export const syncErrors = radiusSync.table("errors", {
   retryable: boolean("retryable").notNull(),
   detailsSchemaId: text("details_schema_id"),
   details: jsonb("details").$type<unknown>(),
-});
+}, () => [ownedThroughEvent("errors")]);
