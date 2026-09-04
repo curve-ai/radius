@@ -31,6 +31,7 @@ import {
 
 import { createFileSystemArtifactStore } from "../src/sync/artifact-store.js";
 import { verifyDeviceRequest } from "../src/sync/device-auth.js";
+import { withSyncOwner } from "../src/sync/owner.js";
 import {
   applySyncChange,
   pullSyncChanges,
@@ -96,7 +97,8 @@ async function provisionTenant(
 
   const deviceId = randomUUID();
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  await database.insert(syncDevices).values({
+  await withSyncOwner(database, owner, (transaction) =>
+    transaction.insert(syncDevices).values({
     id: deviceId,
     ...owner,
     clientInstallationId: null,
@@ -107,7 +109,8 @@ async function provisionTenant(
     createdAt: new Date(),
     lastSeenAt: new Date(),
     revokedAt: null,
-  });
+    }),
+  );
   return { owner, deviceId, privateKey };
 }
 
@@ -159,24 +162,28 @@ async function main(): Promise<void> {
       body: signedBody,
     });
     assert.equal(
-      await verifyDeviceRequest(
-        database,
-        signedRequest,
-        owner.membershipId,
-        signedBody,
-      ),
+      await withSyncOwner(database, owner, (transaction) =>
+        verifyDeviceRequest(
+          transaction,
+          signedRequest,
+          owner.membershipId,
+          signedBody,
+        ),
+        ),
       deviceId,
     );
 
     // A device enrolled to one membership must not authenticate another's
     // requests, even with a valid signature.
     await assert.rejects(
-      verifyDeviceRequest(
-        database,
-        signedRequest,
-        other.owner.membershipId,
-        signedBody,
-      ),
+      withSyncOwner(database, other.owner, (transaction) =>
+        verifyDeviceRequest(
+          transaction,
+          signedRequest,
+          other.owner.membershipId,
+          signedBody,
+        ),
+        ),
       /DEVICE_NOT_REGISTERED/,
     );
 
@@ -533,10 +540,12 @@ async function main(): Promise<void> {
     );
     assert.equal(takeover.status, "rejected");
     assert.equal(takeover.errorCode, "SESSION_ID_REUSED");
-    const [stillOurs] = await database
-      .select({ membershipId: syncSessions.membershipId })
-      .from(syncSessions)
-      .where(eq(syncSessions.id, sessionId));
+    const [stillOurs] = await withSyncOwner(database, owner, (transaction) =>
+      transaction
+        .select({ membershipId: syncSessions.membershipId })
+        .from(syncSessions)
+        .where(eq(syncSessions.id, sessionId)),
+    );
     assert.equal(stillOurs?.membershipId, owner.membershipId);
 
     const projectTakeover = await applySyncChange(
@@ -667,24 +676,29 @@ async function main(): Promise<void> {
     // --- a revoked device stays revoked ----------------------------------
     // Re-registering used to clear revoked_at, so a lost machine that still
     // held a session token could hand itself back its own access.
-    await database
-      .update(syncDevices)
-      .set({ revokedAt: new Date() })
-      .where(eq(syncDevices.id, other.deviceId));
+    await withSyncOwner(database, other.owner, (transaction) =>
+      transaction
+        .update(syncDevices)
+        .set({ revokedAt: new Date() })
+        .where(eq(syncDevices.id, other.deviceId)),
+    );
     await assert.rejects(
-      verifyDeviceRequest(
-        database,
-        signedRequest,
-        other.owner.membershipId,
-        signedBody,
-      ),
+      withSyncOwner(database, other.owner, (transaction) =>
+        verifyDeviceRequest(
+          transaction,
+          signedRequest,
+          other.owner.membershipId,
+          signedBody,
+        ),
+        ),
       /DEVICE_NOT_REGISTERED/,
     );
 
     // --- rows landed where they should -----------------------------------
     assert.equal(
       (
-        await database
+        await withSyncOwner(database, owner, (transaction) =>
+          transaction
           .select({ id: syncProjects.id })
           .from(syncProjects)
           .where(
@@ -693,20 +707,24 @@ async function main(): Promise<void> {
               eq(syncProjects.membershipId, owner.membershipId),
               eq(syncProjects.id, projectId),
             ),
-          )
+          ),
+      )
       ).length,
       1,
     );
     assert.ok(
       (
-        await database
+        await withSyncOwner(database, owner, (transaction) =>
+          transaction
           .select({ id: syncReasoningSummaries.eventId })
-          .from(syncReasoningSummaries)
+          .from(syncReasoningSummaries),
+      )
       ).length >= 1,
     );
     assert.equal(
       (
-        await database
+        await withSyncOwner(database, owner, (transaction) =>
+          transaction
           .select({ id: syncFileArtifacts.artifactId })
           .from(syncFileArtifacts)
           .where(
@@ -714,13 +732,15 @@ async function main(): Promise<void> {
               eq(syncFileArtifacts.membershipId, owner.membershipId),
               eq(syncFileArtifacts.artifactId, artifactId),
             ),
-          )
+          ),
+      )
       ).length,
       1,
     );
     assert.equal(
       (
-        await database
+        await withSyncOwner(database, owner, (transaction) =>
+          transaction
           .select({ id: syncAgentRunPresentations.eventId })
           .from(syncAgentRunPresentations)
           .where(
@@ -728,13 +748,15 @@ async function main(): Promise<void> {
               eq(syncAgentRunPresentations.agentRunId, agentRunId),
               eq(syncAgentRunPresentations.mode, "collapsible"),
             ),
-          )
+          ),
+      )
       ).length,
       1,
     );
     assert.equal(
       (
-        await database
+        await withSyncOwner(database, owner, (transaction) =>
+          transaction
           .select({ id: syncFileChanges.eventId })
           .from(syncFileChanges)
           .where(
@@ -742,7 +764,8 @@ async function main(): Promise<void> {
               eq(syncFileChanges.agentRunId, agentRunId),
               eq(syncFileChanges.projectFileId, projectFileId),
             ),
-          )
+          ),
+      )
       ).length,
       1,
     );
