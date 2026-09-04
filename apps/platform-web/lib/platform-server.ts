@@ -16,17 +16,22 @@ export function platformApiUrl(): string {
   return process.env.RADIUS_PLATFORM_API_URL?.trim() || "http://127.0.0.1:3100";
 }
 
+async function requestOrigin(): Promise<{ host: string; protocol: string }> {
+  const requestHeaders = await headers();
+  const host =
+    requestHeaders.get("x-forwarded-host") || requestHeaders.get("host");
+  if (!host) throw new Error("Shared Platform requests require a host");
+  const protocol =
+    requestHeaders.get("x-forwarded-proto") ||
+    (host.includes("localhost") ? "http" : "https");
+  return { host, protocol };
+}
+
 export async function platformPublicApiUrl(): Promise<string> {
   const configured = process.env.RADIUS_PLATFORM_PUBLIC_API_URL?.trim();
   if (configured) return configured;
   if (process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true") {
-    const requestHeaders = await headers();
-    const host =
-      requestHeaders.get("x-forwarded-host") || requestHeaders.get("host");
-    if (!host) throw new Error("Shared Platform requests require a host");
-    const protocol =
-      requestHeaders.get("x-forwarded-proto") ||
-      (host.includes("localhost") ? "http" : "https");
+    const { host, protocol } = await requestOrigin();
     return `${protocol}://${host}`;
   }
   return platformApiUrl();
@@ -63,15 +68,24 @@ export const getPlatformContext = cache(async () => {
     client = platformServerClient();
     identity = await client.identity();
   } else {
-    const requestApiUrl =
+    // Shared origins: the API derives the organization from the origin the
+    // browser used, so forward it while talking to the API over the private
+    // address. The organization host need not resolve from this server.
+    const forwarded =
       process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true"
-        ? await platformPublicApiUrl()
-        : platformApiUrl();
+        ? await requestOrigin()
+        : undefined;
     const cookieStore = await cookies();
     const cookieHeader = cookieStore.toString();
     client = new RadiusPlatformClient({
-      baseUrl: requestApiUrl,
+      baseUrl: platformApiUrl(),
       cookie: cookieHeader,
+      headers: forwarded
+        ? {
+            "x-forwarded-host": forwarded.host,
+            "x-forwarded-proto": forwarded.protocol,
+          }
+        : undefined,
       allowInsecureHttp:
         process.env.RADIUS_PLATFORM_ALLOW_INSECURE_API === "true",
     });
