@@ -44,7 +44,6 @@ import {
   type ListInstallationsResponse,
   type PlatformIdentityResponse,
   type RevokeSyncDeviceResponse,
-  type SyncDeviceSummary,
   type SyncOverviewResponse,
   type PlatformInfoResponse,
   type PromoteAgentDeploymentRequest,
