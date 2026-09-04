@@ -669,6 +669,6 @@ export type PushChangeResult = z.infer<typeof PushChangeResultSchema>;
 export type PushResponse = z.infer<typeof PushResponseSchema>;
 export type PullResponse = z.infer<typeof PullResponseSchema>;
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilitiesSchema>;
-export type DeviceRegistration = z.infer<
-  typeof DeviceRegistrationSchema
->;
+export type DeviceRegistration = z.infer<typeof DeviceRegistrationSchema>;
+
+export { canonicalJson, payloadSha256 } from "./canonical-json.js";
