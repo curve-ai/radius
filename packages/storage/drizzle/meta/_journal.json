@@ -92,6 +92,13 @@
       "when": 1788274812349,
       "tag": "0012_agent_release_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1788527649111,
+      "tag": "0013_platform_connections",
+      "breakpoints": true
     }
   ]
 }

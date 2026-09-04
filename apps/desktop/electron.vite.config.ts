@@ -3,8 +3,15 @@ import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const cloudDefines = {
+  __CLOUD_URL__: JSON.stringify(
+    process.env.CLOUD_URL ?? "https://app.curvehq.sh",
+  ),
+};
+
 export default defineConfig({
   main: {
+    define: cloudDefines,
     build: {
       externalizeDeps: {
         include: ["@libsql/client", "drizzle-orm"],
@@ -26,14 +33,7 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
-    define: {
-      __CLOUD_API_URL__: JSON.stringify(
-        process.env.CLOUD_API_URL ?? "https://api.curvehq.sh",
-      ),
-      __CLOUD_WEB_URL__: JSON.stringify(
-        process.env.CLOUD_WEB_URL ?? "https://app.curvehq.sh",
-      ),
-    },
+    define: cloudDefines,
     resolve: {
       alias: {
         "@renderer": resolve("src/renderer/src"),
