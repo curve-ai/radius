@@ -16,6 +16,7 @@ import {
 
 import { getArtifactStore } from "./artifact-store.js";
 import { verifyDeviceRequest } from "./device-auth.js";
+import { withSyncOwner } from "./owner.js";
 import {
   applySyncChange,
   pullSyncChanges,
@@ -30,6 +31,11 @@ const {
   syncProjects,
   syncSessions,
 } = platformSchema;
+
+function isForeignDevice(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "23505" || code === "42501";
+}
 
 function deviceSummary(device: {
   id: string;
@@ -129,8 +135,12 @@ export function createSyncRoutes(database: PlatformDatabase) {
     }
     const identity = context.get("identity");
     const byMembership = eq(syncDevices.membershipId, scope.membershipId);
-    const [devices, [projects], [sessions], [changes]] = await Promise.all([
-      database
+    const [devices, [projects], [sessions], [changes]] = await withSyncOwner(
+      database,
+      scope,
+      (transaction) =>
+        Promise.all([
+      transaction
         .select({
           id: syncDevices.id,
           displayName: syncDevices.displayName,
@@ -143,7 +153,7 @@ export function createSyncRoutes(database: PlatformDatabase) {
         .from(syncDevices)
         .where(byMembership)
         .orderBy(desc(syncDevices.lastSeenAt)),
-      database
+      transaction
         .select({ total: count() })
         .from(syncProjects)
         .where(
@@ -152,7 +162,7 @@ export function createSyncRoutes(database: PlatformDatabase) {
             isNull(syncProjects.deletedAt),
           ),
         ),
-      database
+      transaction
         .select({ total: count() })
         .from(syncSessions)
         .where(
@@ -161,11 +171,12 @@ export function createSyncRoutes(database: PlatformDatabase) {
             isNull(syncSessions.deletedAt),
           ),
         ),
-      database
+      transaction
         .select({ total: count(), latest: max(syncChanges.acceptedAt) })
         .from(syncChanges)
         .where(eq(syncChanges.membershipId, scope.membershipId)),
-    ]);
+        ]),
+    );
     return context.json({
       apiVersion: 1,
       organization: identity.response.organizations[0]!.slug,
@@ -191,7 +202,8 @@ export function createSyncRoutes(database: PlatformDatabase) {
         403,
       );
     }
-    const [device] = await database
+    const [device] = await withSyncOwner(database, scope, (transaction) =>
+      transaction
       .update(syncDevices)
       .set({ revokedAt: new Date() })
       .where(
@@ -209,7 +221,8 @@ export function createSyncRoutes(database: PlatformDatabase) {
         createdAt: syncDevices.createdAt,
         lastSeenAt: syncDevices.lastSeenAt,
         revokedAt: syncDevices.revokedAt,
-      });
+      }),
+    );
     if (!device) return context.json({ error: "DEVICE_NOT_FOUND" }, 404);
     return context.json({ apiVersion: 1, device: deviceSummary(device) });
   });
@@ -233,7 +246,8 @@ export function createSyncRoutes(database: PlatformDatabase) {
       );
     }
     const input = parsed.data;
-    const [existing] = await database
+    return withSyncOwner(database, scope, async (transaction) => {
+    const [existing] = await transaction
       .select({
         membershipId: syncDevices.membershipId,
         publicKeyJwk: syncDevices.publicKeyJwk,
@@ -259,7 +273,9 @@ export function createSyncRoutes(database: PlatformDatabase) {
     }
 
     const now = new Date();
-    const registered = await database
+    let registered: { id: string }[];
+    try {
+      registered = await transaction
       .insert(syncDevices)
       .values({
         id: input.clientInstanceId,
@@ -284,10 +300,20 @@ export function createSyncRoutes(database: PlatformDatabase) {
         setWhere: isNull(syncDevices.revokedAt),
       })
       .returning({ id: syncDevices.id });
+    } catch (error) {
+      // The id belongs to a device the policy hides: someone else's. Under
+      // row security that is a unique violation or a policy rejection rather
+      // than a visible row, and it means the same thing as before.
+      if (isForeignDevice(error)) {
+        return context.json({ error: "DEVICE_IDENTITY_CONFLICT" }, 409);
+      }
+      throw error;
+    }
     if (registered.length === 0) {
       return context.json({ error: "DEVICE_REVOKED" }, 409);
     }
     return context.json({ deviceId: input.clientInstanceId, registered: true });
+    });
   });
 
   sync.post("/push", async (context) => {
@@ -304,11 +330,13 @@ export function createSyncRoutes(database: PlatformDatabase) {
 
     let deviceId: string;
     try {
-      deviceId = await verifyDeviceRequest(
-        database,
-        context.req.raw,
-        scope.membershipId,
-        body,
+      deviceId = await withSyncOwner(database, scope, (transaction) =>
+        verifyDeviceRequest(
+          transaction,
+          context.req.raw,
+          scope.membershipId,
+          body,
+        ),
       );
     } catch (error) {
       return context.json(
@@ -387,11 +415,13 @@ export function createSyncRoutes(database: PlatformDatabase) {
           ? new Uint8Array(await context.req.arrayBuffer())
           : null;
       try {
-        await verifyDeviceRequest(
-          database,
-          context.req.raw,
-          scope.membershipId,
-          body ?? "",
+        await withSyncOwner(database, scope, (transaction) =>
+          verifyDeviceRequest(
+            transaction,
+            context.req.raw,
+            scope.membershipId,
+            body ?? "",
+          ),
         );
       } catch (error) {
         return context.json(
@@ -403,16 +433,18 @@ export function createSyncRoutes(database: PlatformDatabase) {
         );
       }
 
-      const [metadata] = await database
-        .select()
-        .from(syncFileArtifacts)
-        .where(
-          and(
-            eq(syncFileArtifacts.membershipId, scope.membershipId),
-            eq(syncFileArtifacts.contentSha256, contentSha256),
-          ),
-        )
-        .limit(1);
+      const [metadata] = await withSyncOwner(database, scope, (transaction) =>
+        transaction
+          .select()
+          .from(syncFileArtifacts)
+          .where(
+            and(
+              eq(syncFileArtifacts.membershipId, scope.membershipId),
+              eq(syncFileArtifacts.contentSha256, contentSha256),
+            ),
+          )
+          .limit(1),
+      );
       if (!metadata) return context.json({ error: "ARTIFACT_NOT_FOUND" }, 404);
 
       if (context.req.method === "HEAD") {
@@ -441,15 +473,17 @@ export function createSyncRoutes(database: PlatformDatabase) {
       }
       try {
         const remoteLocator = await store.put(contentSha256, body);
-        await database
-          .update(syncFileArtifacts)
-          .set({ availability: "available", remoteLocator })
-          .where(
-            and(
-              eq(syncFileArtifacts.membershipId, scope.membershipId),
-              eq(syncFileArtifacts.contentSha256, contentSha256),
+        await withSyncOwner(database, scope, (transaction) =>
+          transaction
+            .update(syncFileArtifacts)
+            .set({ availability: "available", remoteLocator })
+            .where(
+              and(
+                eq(syncFileArtifacts.membershipId, scope.membershipId),
+                eq(syncFileArtifacts.contentSha256, contentSha256),
+              ),
             ),
-          );
+        );
         return context.json({ remoteLocator });
       } catch (error) {
         return context.json(
@@ -474,11 +508,8 @@ export function createSyncRoutes(database: PlatformDatabase) {
       );
     }
     try {
-      await verifyDeviceRequest(
-        database,
-        context.req.raw,
-        scope.membershipId,
-        "",
+      await withSyncOwner(database, scope, (transaction) =>
+        verifyDeviceRequest(transaction, context.req.raw, scope.membershipId, ""),
       );
     } catch (error) {
       return context.json(
@@ -527,11 +558,8 @@ export function createSyncRoutes(database: PlatformDatabase) {
       );
     }
     try {
-      await verifyDeviceRequest(
-        database,
-        context.req.raw,
-        scope.membershipId,
-        "",
+      await withSyncOwner(database, scope, (transaction) =>
+        verifyDeviceRequest(transaction, context.req.raw, scope.membershipId, ""),
       );
     } catch (error) {
       return context.json(
@@ -542,16 +570,18 @@ export function createSyncRoutes(database: PlatformDatabase) {
       );
     }
 
-    const result = await database
-      .update(syncDevices)
-      .set({ revokedAt: new Date() })
-      .where(
-        and(
-          eq(syncDevices.id, context.req.param("deviceId")),
-          eq(syncDevices.membershipId, scope.membershipId),
-        ),
-      )
-      .returning({ id: syncDevices.id });
+    const result = await withSyncOwner(database, scope, (transaction) =>
+      transaction
+        .update(syncDevices)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(syncDevices.id, context.req.param("deviceId")),
+            eq(syncDevices.membershipId, scope.membershipId),
+          ),
+        )
+        .returning({ id: syncDevices.id }),
+    );
     return result.length === 1
       ? context.json({ revoked: true })
       : context.json({ error: "DEVICE_NOT_FOUND" }, 404);

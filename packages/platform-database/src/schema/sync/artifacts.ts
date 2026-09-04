@@ -11,7 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { radiusSync } from "../common.js";
+import { ownedByMembership, ownedThroughArtifact, ownedThroughEvent, radiusSync } from "../common.js";
 import { organizations } from "../organizations.js";
 import { syncSessionEvents } from "./events.js";
 import { syncSessions } from "./core.js";
@@ -47,6 +47,7 @@ export const syncArtifacts = radiusSync.table(
       "sync_artifacts_storage_kind_check",
       sql`${table.storageKind} IN ('file', 'link')`,
     ),
+    ownedByMembership("artifacts"),
   ],
 );
 
@@ -80,6 +81,7 @@ export const syncFileArtifacts = radiusSync.table(
       "sync_file_artifacts_availability_check",
       sql`${table.availability} IN ('metadata_only', 'available')`,
     ),
+    ownedByMembership("file_artifacts"),
   ],
 );
 
@@ -90,7 +92,7 @@ export const syncLinkArtifacts = radiusSync.table("link_artifacts", {
   url: text("url").notNull(),
   provider: text("provider").notNull(),
   externalId: text("external_id"),
-});
+}, () => [ownedThroughArtifact("link_artifacts")]);
 
 export const syncEventArtifacts = radiusSync.table(
   "event_artifacts",
@@ -111,5 +113,6 @@ export const syncEventArtifacts = radiusSync.table(
       "sync_event_artifacts_relationship_check",
       sql`${table.relationship} IN ('input', 'output', 'attachment', 'preview')`,
     ),
+    ownedThroughEvent("event_artifacts"),
   ],
 );
