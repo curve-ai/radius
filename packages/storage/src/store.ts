@@ -369,6 +369,10 @@ export interface SyncConnectionRecord {
   credentialRef: string | null;
   remoteSubject: string | null;
   accountLabel: string | null;
+  deploymentMode: string | null;
+  organizationSlug: string | null;
+  organizationRole: string | null;
+  sessionPartition: string | null;
   enabled: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -2327,11 +2331,22 @@ function localChangeEnvelope(
   });
 }
 
+/** The platform details a connection only has once it has signed in. */
+type SyncConnectionPlatformFields =
+  | "deploymentMode"
+  | "organizationSlug"
+  | "organizationRole"
+  | "sessionPartition";
+
 export async function configureSyncConnection(
   database: RadiusDatabase,
-  input: Omit<SyncConnectionRecord, "createdAtMs" | "updatedAtMs"> & {
-    now?: number;
-  },
+  input: Omit<
+    SyncConnectionRecord,
+    "createdAtMs" | "updatedAtMs" | SyncConnectionPlatformFields
+  > &
+    Partial<Pick<SyncConnectionRecord, SyncConnectionPlatformFields>> & {
+      now?: number;
+    },
 ): Promise<SyncConnectionRecord> {
   const now = input.now ?? Date.now();
   await database.db
@@ -2343,6 +2358,10 @@ export async function configureSyncConnection(
       credentialRef: input.credentialRef,
       remoteSubject: input.remoteSubject,
       accountLabel: input.accountLabel,
+      deploymentMode: input.deploymentMode ?? null,
+      organizationSlug: input.organizationSlug ?? null,
+      organizationRole: input.organizationRole ?? null,
+      sessionPartition: input.sessionPartition ?? null,
       enabled: false,
       createdAtMs: now,
       updatedAtMs: now,
@@ -2355,6 +2374,10 @@ export async function configureSyncConnection(
         credentialRef: input.credentialRef,
         remoteSubject: input.remoteSubject,
         accountLabel: input.accountLabel,
+        deploymentMode: input.deploymentMode ?? null,
+        organizationSlug: input.organizationSlug ?? null,
+        organizationRole: input.organizationRole ?? null,
+        sessionPartition: input.sessionPartition ?? null,
         updatedAtMs: now,
       },
     });

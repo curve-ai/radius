@@ -11,23 +11,27 @@ import {
 
 import { id, timestamp } from "./common.js";
 import * as workspace from "./workspace.js";
-const {
-  clientInstances,
-  fileArtifacts,
-  projects,
-  sessionEvents,
-  sessions,
-} = workspace;
+const { clientInstances, fileArtifacts, projects, sessionEvents, sessions } =
+  workspace;
 
 export const syncConnections = sqliteTable(
   "sync_connections",
   {
     id: text("id").primaryKey(),
     providerKey: text("provider_key").notNull(),
+    /** The platform base URL. Every API path is resolved against it. */
     endpointUrl: text("endpoint_url").notNull(),
     credentialRef: text("credential_ref"),
+    /** The platform account this connection signed in as. */
     remoteSubject: text("remote_subject"),
+    /** The organization's display name, shown wherever the connection is. */
     accountLabel: text("account_label"),
+    /** "managed" for Curve Cloud, "self_hosted" for an operator's install. */
+    deploymentMode: text("deployment_mode"),
+    organizationSlug: text("organization_slug"),
+    organizationRole: text("organization_role"),
+    /** Electron partition holding this connection's session cookie. */
+    sessionPartition: text("session_partition"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
     createdAtMs: integer("created_at_ms").notNull(),
     updatedAtMs: integer("updated_at_ms").notNull(),

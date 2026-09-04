@@ -141,12 +141,25 @@ export interface SaveComposerDraftInput {
   content: string;
 }
 
+export interface PlatformConnectionSummary {
+  baseUrl: string;
+  /** A label only. Nothing in the app branches on it. */
+  mode: "managed" | "self_hosted";
+  organizationSlug: string | null;
+  organizationName: string | null;
+  role: string | null;
+  accountId: string | null;
+}
+
 export interface DesktopSyncStatus {
   state: "disabled" | "idle" | "syncing" | "error";
   providerKey: string | null;
   endpointUrl: string | null;
   lastSuccessAt: string | null;
   errorCode: string | null;
+  connection: PlatformConnectionSummary | null;
+  /** What a pending connect attempt is waiting on, for the connect screen. */
+  progress: string | null;
 }
 
 export interface DesktopAgentSummary {
@@ -248,10 +261,13 @@ export interface OpenSessionFileInput {
   sessionId: string;
 }
 
-export interface CloudConnectionInput {
-  frontendUrl: string;
-  apiUrl: string;
-}
+/**
+ * Curve Cloud onboards at a fixed origin this build was made for and finds
+ * the organization's workspace itself. A self-hosted platform is wherever the
+ * operator put it, so the user says where.
+ */
+export type PlatformConnectionInput =
+  { kind: "cloud" } | { kind: "self-hosted"; url: string };
 
 export interface RadiusApi {
   platform: string;
@@ -332,7 +348,8 @@ export interface RadiusApi {
   syncStatus(): Promise<DesktopSyncStatus>;
   syncNow(): Promise<DesktopSyncStatus>;
   setSyncEnabled(enabled: boolean): Promise<DesktopSyncStatus>;
-  connectCloud(input: CloudConnectionInput): Promise<DesktopSyncStatus>;
+  connectPlatform(input: PlatformConnectionInput): Promise<DesktopSyncStatus>;
+  disconnectPlatform(): Promise<DesktopSyncStatus>;
   updateStatus(): Promise<DesktopUpdateStatus>;
   checkForUpdates(): Promise<DesktopUpdateStatus>;
   performUpdate(): Promise<DesktopUpdateStatus>;
