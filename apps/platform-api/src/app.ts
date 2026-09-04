@@ -197,6 +197,8 @@ export function createPlatformApp(
   } = {},
 ) {
   const app = new Hono<{ Variables: PlatformVariables }>();
+  const requestUrl = (context: Context) =>
+    resolveRequestUrl(context, options.deploymentMode === "managed");
 
   app.get("/health", (context) =>
     context.json({ ok: true, service: "radius-platform-api" }),
@@ -240,10 +242,9 @@ export function createPlatformApp(
     const oidc = browserAuth.oidc;
     if (oidc) {
       app.get("/api/platform/v1/auth/oidc/login", async (context) => {
-        const requestUrl = new URL(context.req.url);
         const started = await oidc.begin(
           context.req.query("return_to"),
-          requestUrl,
+          requestUrl(context),
         );
         context.header("Set-Cookie", started.setCookie);
         return context.redirect(started.authorizationUrl.href, 302);
@@ -255,13 +256,13 @@ export function createPlatformApp(
         );
         if (!transaction) {
           return context.redirect(
-            oidc.loginErrorUrl(new URL(context.req.url)).href,
+            oidc.loginErrorUrl(requestUrl(context)).href,
             303,
           );
         }
         try {
           const completed = await oidc.complete(
-            new URL(context.req.url),
+            requestUrl(context),
             transaction,
           );
           context.header("Set-Cookie", completed.clearTransactionCookie);
@@ -275,7 +276,7 @@ export function createPlatformApp(
             append: true,
           });
           return context.redirect(
-            oidc.loginErrorUrl(new URL(context.req.url)).href,
+            oidc.loginErrorUrl(requestUrl(context)).href,
             303,
           );
         }
@@ -313,7 +314,7 @@ export function createPlatformApp(
       return context.json(
         await requireRequestOrganization(
           browserAuth,
-          new URL(context.req.url),
+          requestUrl(context),
           identity,
         ),
       );
@@ -369,7 +370,7 @@ export function createPlatformApp(
             ...identity,
             response: await requireRequestOrganization(
               options.browserAuth,
-              new URL(context.req.url),
+              requestUrl(context),
               identity.response,
             ),
           }
@@ -674,6 +675,21 @@ export function createPlatformApp(
   });
 
   return app;
+}
+
+// Managed deployments serve every organization host from one listener behind
+// a TLS-terminating proxy, so the origin the browser used arrives in
+// X-Forwarded-Host and X-Forwarded-Proto rather than in the request line.
+// Only the proxy may reach the API in that mode; a self-hosted API keeps
+// trusting its own request URL.
+function resolveRequestUrl(context: Context, trustProxy: boolean): URL {
+  const url = new URL(context.req.url);
+  if (!trustProxy) return url;
+  const host = context.req.header("x-forwarded-host")?.split(",")[0]?.trim();
+  const proto = context.req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (host && /^[a-z0-9.-]+(:\d+)?$/i.test(host)) url.host = host;
+  if (proto === "https" || proto === "http") url.protocol = `${proto}:`;
+  return url;
 }
 
 async function requireRequestOrganization(

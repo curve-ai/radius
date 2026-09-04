@@ -561,3 +561,56 @@ test("reports an incompatible agent installation with a stable error code", asyn
   assert.equal(response.status, 200);
   assert.match((await response.json()).agentInstallationId, /^[0-9a-f-]+$/);
 });
+
+test("managed deployments resolve the organization from forwarded proxy headers", async () => {
+  const browserIdentity = {
+    apiVersion: 1 as const,
+    accountId,
+    organizations: [
+      {
+        id: organizationId,
+        slug: "acme",
+        displayName: "Acme",
+        role: "owner" as const,
+      },
+    ],
+  };
+  const platformServices = services();
+  const browserAuth = {
+    sessionCookieName: "radius_platform_session",
+    authenticate: async (token: string) =>
+      token === "browser-valid" ? browserIdentity : null,
+    organizationForRequest: async (url: URL) => {
+      if (url.protocol !== "https:") throw new Error("HTTPS required");
+      return url.hostname.split(".")[0]!;
+    },
+    revoke: async () => true,
+    clearSessionCookie: () => "radius_platform_session=; Max-Age=0",
+  };
+  const headers = {
+    cookie: "radius_platform_session=browser-valid",
+    "x-forwarded-host": "acme.curvehq.sh",
+    "x-forwarded-proto": "https",
+  };
+
+  const managed = createPlatformApp(platformServices, {
+    browserAuth,
+    deploymentMode: "managed",
+  });
+  const allowed = await managed.request(
+    "http://platform-api:3100/api/platform/v1/auth/session",
+    { headers },
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal((await allowed.json()).organizations[0].slug, "acme");
+
+  const selfHosted = createPlatformApp(platformServices, {
+    browserAuth,
+    deploymentMode: "self_hosted",
+  });
+  const ignored = await selfHosted.request(
+    "http://platform-api:3100/api/platform/v1/auth/session",
+    { headers },
+  );
+  assert.equal(ignored.status, 500);
+});

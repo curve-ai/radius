@@ -63,6 +63,9 @@ export interface RadiusPlatformClientOptions {
   cookie?: string;
   fetch?: typeof globalThis.fetch;
   allowInsecureHttp?: boolean;
+  // Sent on every request. A server-side caller behind a shared-origin proxy
+  // uses it to forward the browser origin to an internal API address.
+  headers?: Record<string, string>;
 }
 
 export interface PlatformPageOptions {
@@ -76,6 +79,7 @@ export class RadiusPlatformClient {
   readonly baseUrl: URL;
   private readonly accessToken?: string;
   private readonly cookie?: string;
+  private readonly extraHeaders: Record<string, string>;
   private readonly fetcher: typeof globalThis.fetch;
 
   constructor(options: RadiusPlatformClientOptions) {
@@ -84,6 +88,7 @@ export class RadiusPlatformClient {
     });
     this.accessToken = options.accessToken?.trim() || undefined;
     this.cookie = options.cookie?.trim() || undefined;
+    this.extraHeaders = options.headers ?? {};
     this.fetcher = options.fetch ?? globalThis.fetch;
   }
 
@@ -388,7 +393,10 @@ export class RadiusPlatformClient {
     if (options.authenticated && !this.accessToken && !this.cookie) {
       throw new Error("Radius Platform authentication is required");
     }
-    const headers = new Headers({ accept: "application/json" });
+    const headers = new Headers({
+      ...this.extraHeaders,
+      accept: "application/json",
+    });
     if (options.body !== undefined)
       headers.set("content-type", "application/json");
     if (this.accessToken && options.authenticated) {
