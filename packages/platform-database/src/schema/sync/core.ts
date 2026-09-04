@@ -23,7 +23,9 @@ import {
  *
  * Ownership is a membership rather than an account: the same person in two
  * organizations syncs into two separate sets of conversations, and revoking
- * their membership must take the device's access with it.
+ * their membership must take the device's access with it. Everything inside
+ * radius_sync therefore cascades - a RESTRICT anywhere in the tree would abort
+ * the membership delete instead of being carried away by it.
  */
 export const syncDevices = radiusSync.table(
   "devices",
@@ -74,7 +76,7 @@ export const syncProjects = radiusSync.table(
     membershipId: uuid("membership_id").notNull(),
     originDeviceId: uuid("origin_device_id")
       .notNull()
-      .references(() => syncDevices.id, { onDelete: "restrict" }),
+      .references(() => syncDevices.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     revision: bigint("revision", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -117,9 +119,9 @@ export const syncSessions = radiusSync.table(
     membershipId: uuid("membership_id").notNull(),
     originDeviceId: uuid("origin_device_id")
       .notNull()
-      .references(() => syncDevices.id, { onDelete: "restrict" }),
+      .references(() => syncDevices.id, { onDelete: "cascade" }),
     projectId: uuid("project_id").references(() => syncProjects.id, {
-      onDelete: "restrict",
+      onDelete: "cascade",
     }),
     title: text("title").notNull(),
     status: text("status").notNull(),
@@ -180,7 +182,7 @@ export const syncChanges = radiusSync.table(
     changeId: uuid("change_id").notNull(),
     originDeviceId: uuid("origin_device_id")
       .notNull()
-      .references(() => syncDevices.id, { onDelete: "restrict" }),
+      .references(() => syncDevices.id, { onDelete: "cascade" }),
     projectId: uuid("project_id"),
     projectRevision: bigint("project_revision", { mode: "number" }),
     sessionId: uuid("session_id"),

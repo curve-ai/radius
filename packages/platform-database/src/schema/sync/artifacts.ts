@@ -26,14 +26,14 @@ export const syncArtifacts = radiusSync.table(
     membershipId: uuid("membership_id").notNull(),
     sessionId: uuid("session_id")
       .notNull()
-      .references(() => syncSessions.id, { onDelete: "restrict" }),
+      .references(() => syncSessions.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     artifactType: text("artifact_type").notNull(),
     storageKind: text("storage_kind").notNull(),
     supersedesArtifactId: uuid("supersedes_artifact_id"),
     createdByEventId: uuid("created_by_event_id")
       .notNull()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
@@ -55,7 +55,7 @@ export const syncFileArtifacts = radiusSync.table(
   {
     artifactId: uuid("artifact_id")
       .primaryKey()
-      .references(() => syncArtifacts.id, { onDelete: "restrict" }),
+      .references(() => syncArtifacts.id, { onDelete: "cascade" }),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "restrict" }),
@@ -86,7 +86,7 @@ export const syncFileArtifacts = radiusSync.table(
 export const syncLinkArtifacts = radiusSync.table("link_artifacts", {
   artifactId: uuid("artifact_id")
     .primaryKey()
-    .references(() => syncArtifacts.id, { onDelete: "restrict" }),
+    .references(() => syncArtifacts.id, { onDelete: "cascade" }),
   url: text("url").notNull(),
   provider: text("provider").notNull(),
   externalId: text("external_id"),
@@ -97,10 +97,10 @@ export const syncEventArtifacts = radiusSync.table(
   {
     eventId: uuid("event_id")
       .notNull()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     artifactId: uuid("artifact_id")
       .notNull()
-      .references(() => syncArtifacts.id, { onDelete: "restrict" }),
+      .references(() => syncArtifacts.id, { onDelete: "cascade" }),
     relationship: text("relationship").notNull(),
   },
   (table) => [

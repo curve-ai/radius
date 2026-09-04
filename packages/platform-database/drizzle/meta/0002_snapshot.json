@@ -1,5 +1,5 @@
 {
-  "id": "377e65b3-40e0-4a22-9ef1-67a1b4ca7325",
+  "id": "3b1d53c7-7b3c-4019-94e0-827460264140",
   "prevId": "b6ae6980-1f97-4e11-85d5-3752d67c4977",
   "version": "7",
   "dialect": "postgresql",
@@ -3906,7 +3906,7 @@
           "columnsTo": [
             "session_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "artifacts_created_by_event_id_session_events_event_id_fk": {
@@ -3920,7 +3920,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -3988,7 +3988,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "event_artifacts_artifact_id_artifacts_artifact_id_fk": {
@@ -4002,7 +4002,7 @@
           "columnsTo": [
             "artifact_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -4115,7 +4115,7 @@
           "columnsTo": [
             "artifact_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "file_artifacts_organization_id_organizations_organization_id_fk": {
@@ -4194,7 +4194,7 @@
           "columnsTo": [
             "artifact_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -4425,7 +4425,7 @@
           "columnsTo": [
             "device_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "sync_changes_membership_fk": {
@@ -4731,7 +4731,7 @@
           "columnsTo": [
             "device_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "sync_projects_membership_fk": {
@@ -4960,7 +4960,7 @@
           "columnsTo": [
             "device_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "sessions_project_id_projects_project_id_fk": {
@@ -4974,7 +4974,7 @@
           "columnsTo": [
             "project_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "sync_sessions_membership_fk": {
@@ -5096,7 +5096,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "agent_run_presentations_agent_run_id_agent_runs_agent_run_id_fk": {
@@ -5110,7 +5110,7 @@
           "columnsTo": [
             "agent_run_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5168,7 +5168,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "agent_run_state_updates_agent_run_id_agent_runs_agent_run_id_fk": {
@@ -5182,7 +5182,7 @@
           "columnsTo": [
             "agent_run_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5311,7 +5311,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "agent_runs_session_id_sessions_session_id_fk": {
@@ -5325,7 +5325,7 @@
           "columnsTo": [
             "session_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5405,7 +5405,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "approval_decisions_approval_request_event_id_approval_requests_event_id_fk": {
@@ -5419,7 +5419,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5487,7 +5487,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "approval_requests_tool_call_event_id_tool_calls_event_id_fk": {
@@ -5501,7 +5501,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5565,7 +5565,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5651,7 +5651,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5721,7 +5721,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5767,7 +5767,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -5807,7 +5807,7 @@
         },
         "session_revision": {
           "name": "session_revision",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
@@ -5960,7 +5960,7 @@
           "columnsTo": [
             "session_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "session_events_source_client_instance_id_devices_device_id_fk": {
@@ -5974,7 +5974,7 @@
           "columnsTo": [
             "device_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6048,7 +6048,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6100,7 +6100,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "task_step_updates_task_step_id_task_steps_task_step_id_fk": {
@@ -6114,7 +6114,7 @@
           "columnsTo": [
             "task_step_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6188,7 +6188,7 @@
           "columnsTo": [
             "plan_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6258,7 +6258,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6316,7 +6316,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "tool_progress_events_tool_call_event_id_tool_calls_event_id_fk": {
@@ -6330,7 +6330,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6410,7 +6410,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "tool_results_tool_call_event_id_tool_calls_event_id_fk": {
@@ -6424,7 +6424,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6537,7 +6537,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "file_changes_project_id_projects_project_id_fk": {
@@ -6551,7 +6551,7 @@
           "columnsTo": [
             "project_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "file_changes_project_file_id_project_files_project_file_id_fk": {
@@ -6565,7 +6565,7 @@
           "columnsTo": [
             "project_file_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "file_changes_tool_call_event_id_tool_calls_event_id_fk": {
@@ -6579,7 +6579,7 @@
           "columnsTo": [
             "event_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "file_changes_before_version_id_project_file_versions_version_id_fk": {
@@ -6593,7 +6593,7 @@
           "columnsTo": [
             "version_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "file_changes_after_version_id_project_file_versions_version_id_fk": {
@@ -6607,7 +6607,7 @@
           "columnsTo": [
             "version_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6744,7 +6744,7 @@
           "columnsTo": [
             "project_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "project_file_versions_project_file_id_project_files_project_file_id_fk": {
@@ -6758,7 +6758,7 @@
           "columnsTo": [
             "project_file_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6870,7 +6870,7 @@
           "columnsTo": [
             "project_id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

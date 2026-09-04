@@ -25,7 +25,7 @@ export const syncProjectFiles = radiusSync.table(
     membershipId: uuid("membership_id").notNull(),
     projectId: uuid("project_id")
       .notNull()
-      .references(() => syncProjects.id, { onDelete: "restrict" }),
+      .references(() => syncProjects.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (table) => [
@@ -50,10 +50,10 @@ export const syncProjectFileVersions = radiusSync.table(
     membershipId: uuid("membership_id").notNull(),
     projectId: uuid("project_id")
       .notNull()
-      .references(() => syncProjects.id, { onDelete: "restrict" }),
+      .references(() => syncProjects.id, { onDelete: "cascade" }),
     projectFileId: uuid("project_file_id")
       .notNull()
-      .references(() => syncProjectFiles.id, { onDelete: "restrict" }),
+      .references(() => syncProjectFiles.id, { onDelete: "cascade" }),
     relativePath: text("relative_path").notNull(),
     mimeType: text("mime_type").notNull(),
     contentSha256: text("content_sha256").notNull(),
@@ -84,26 +84,26 @@ export const syncFileChanges = radiusSync.table(
   {
     eventId: uuid("event_id")
       .primaryKey()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     agentRunId: uuid("agent_run_id").notNull(),
     projectId: uuid("project_id")
       .notNull()
-      .references(() => syncProjects.id, { onDelete: "restrict" }),
+      .references(() => syncProjects.id, { onDelete: "cascade" }),
     projectFileId: uuid("project_file_id")
       .notNull()
-      .references(() => syncProjectFiles.id, { onDelete: "restrict" }),
+      .references(() => syncProjectFiles.id, { onDelete: "cascade" }),
     toolCallEventId: uuid("tool_call_event_id").references(
       () => syncToolCalls.eventId,
-      { onDelete: "restrict" },
+      { onDelete: "cascade" },
     ),
     operation: text("operation").notNull(),
     beforeVersionId: uuid("before_version_id").references(
       () => syncProjectFileVersions.id,
-      { onDelete: "restrict" },
+      { onDelete: "cascade" },
     ),
     afterVersionId: uuid("after_version_id").references(
       () => syncProjectFileVersions.id,
-      { onDelete: "restrict" },
+      { onDelete: "cascade" },
     ),
     textDiff: jsonb("text_diff").$type<{
       additions: number;

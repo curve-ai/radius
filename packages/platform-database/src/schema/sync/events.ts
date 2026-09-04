@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   index,
@@ -26,13 +27,15 @@ export const syncSessionEvents = radiusSync.table(
     membershipId: uuid("membership_id").notNull(),
     sessionId: uuid("session_id")
       .notNull()
-      .references(() => syncSessions.id, { onDelete: "restrict" }),
-    sessionRevision: integer("session_revision").notNull(),
+      .references(() => syncSessions.id, { onDelete: "cascade" }),
+    // Matches sessions.revision: a narrower column would fail the insert
+    // rather than the change, long after the revision was accepted.
+    sessionRevision: bigint("session_revision", { mode: "number" }).notNull(),
     eventType: text("event_type").notNull(),
     agentRunId: uuid("agent_run_id"),
     sourceClientInstanceId: uuid("source_client_instance_id")
       .notNull()
-      .references(() => syncDevices.id, { onDelete: "restrict" }),
+      .references(() => syncDevices.id, { onDelete: "cascade" }),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
   },
   (table) => [
@@ -60,7 +63,7 @@ export const syncSessionEvents = radiusSync.table(
 export const syncMessages = radiusSync.table("messages", {
   eventId: uuid("event_id")
     .primaryKey()
-    .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+    .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
   messageKind: text("message_kind").notNull(),
   status: text("status").notNull(),
@@ -75,7 +78,7 @@ export const syncMessageParts = radiusSync.table(
     id: uuid("part_id").primaryKey(),
     messageEventId: uuid("message_event_id")
       .notNull()
-      .references(() => syncMessages.eventId, { onDelete: "restrict" }),
+      .references(() => syncMessages.eventId, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     partType: text("part_type").notNull(),
     text: text("text"),
@@ -95,10 +98,10 @@ export const syncAgentRuns = radiusSync.table(
     id: uuid("agent_run_id").primaryKey(),
     eventId: uuid("event_id")
       .notNull()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     sessionId: uuid("session_id")
       .notNull()
-      .references(() => syncSessions.id, { onDelete: "restrict" }),
+      .references(() => syncSessions.id, { onDelete: "cascade" }),
     providerKey: text("provider_key").notNull(),
     providerRunId: text("provider_run_id"),
     triggeringMessageEventId: uuid("triggering_message_event_id"),
@@ -121,10 +124,10 @@ export const syncAgentRunStateUpdates = radiusSync.table(
   {
     eventId: uuid("event_id")
       .primaryKey()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     agentRunId: uuid("agent_run_id")
       .notNull()
-      .references(() => syncAgentRuns.id, { onDelete: "restrict" }),
+      .references(() => syncAgentRuns.id, { onDelete: "cascade" }),
     state: text("state").notNull(),
     detail: text("detail"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
@@ -136,10 +139,10 @@ export const syncAgentRunPresentations = radiusSync.table(
   {
     eventId: uuid("event_id")
       .primaryKey()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     agentRunId: uuid("agent_run_id")
       .notNull()
-      .references(() => syncAgentRuns.id, { onDelete: "restrict" }),
+      .references(() => syncAgentRuns.id, { onDelete: "cascade" }),
     mode: text("mode").notNull(),
     initialState: text("initial_state"),
     summaryMessageEventId: uuid("summary_message_event_id"),
@@ -153,7 +156,7 @@ export const syncAgentRunPresentations = radiusSync.table(
 export const syncReasoningSummaries = radiusSync.table("reasoning_summaries", {
   eventId: uuid("event_id")
     .primaryKey()
-    .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+    .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   summaryKind: text("summary_kind").notNull(),
   summaryText: text("summary_text").notNull(),
 });
@@ -164,7 +167,7 @@ export const syncTaskPlans = radiusSync.table(
     id: uuid("plan_id").primaryKey(),
     eventId: uuid("event_id")
       .notNull()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     supersedesPlanId: uuid("supersedes_plan_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -178,7 +181,7 @@ export const syncTaskSteps = radiusSync.table(
     id: uuid("task_step_id").primaryKey(),
     planId: uuid("plan_id")
       .notNull()
-      .references(() => syncTaskPlans.id, { onDelete: "restrict" }),
+      .references(() => syncTaskPlans.id, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     title: text("title").notNull(),
   },
@@ -193,10 +196,10 @@ export const syncTaskSteps = radiusSync.table(
 export const syncTaskStepUpdates = radiusSync.table("task_step_updates", {
   eventId: uuid("event_id")
     .primaryKey()
-    .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+    .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   taskStepId: uuid("task_step_id")
     .notNull()
-    .references(() => syncTaskSteps.id, { onDelete: "restrict" }),
+    .references(() => syncTaskSteps.id, { onDelete: "cascade" }),
   state: text("state").notNull(),
   detail: text("detail"),
 });
@@ -204,7 +207,7 @@ export const syncTaskStepUpdates = radiusSync.table("task_step_updates", {
 export const syncToolCalls = radiusSync.table("tool_calls", {
   eventId: uuid("event_id")
     .primaryKey()
-    .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+    .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   triggeringMessageEventId: uuid("triggering_message_event_id"),
   capability: text("capability").notNull(),
   operation: text("operation").notNull(),
@@ -216,10 +219,10 @@ export const syncToolCalls = radiusSync.table("tool_calls", {
 export const syncToolProgressEvents = radiusSync.table("tool_progress_events", {
   eventId: uuid("event_id")
     .primaryKey()
-    .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+    .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   toolCallEventId: uuid("tool_call_event_id")
     .notNull()
-    .references(() => syncToolCalls.eventId, { onDelete: "restrict" }),
+    .references(() => syncToolCalls.eventId, { onDelete: "cascade" }),
   progressSchemaId: text("progress_schema_id").notNull(),
   progressSchemaVersion: integer("progress_schema_version").notNull(),
   progress: jsonb("progress").$type<unknown>().notNull(),
@@ -230,10 +233,10 @@ export const syncToolResults = radiusSync.table(
   {
     eventId: uuid("event_id")
       .primaryKey()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     toolCallEventId: uuid("tool_call_event_id")
       .notNull()
-      .references(() => syncToolCalls.eventId, { onDelete: "restrict" }),
+      .references(() => syncToolCalls.eventId, { onDelete: "cascade" }),
     outcome: text("outcome").notNull(),
     outputSchemaId: text("output_schema_id"),
     outputSchemaVersion: integer("output_schema_version"),
@@ -249,10 +252,10 @@ export const syncApprovalRequests = radiusSync.table(
   {
     eventId: uuid("event_id")
       .primaryKey()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     toolCallEventId: uuid("tool_call_event_id")
       .notNull()
-      .references(() => syncToolCalls.eventId, { onDelete: "restrict" }),
+      .references(() => syncToolCalls.eventId, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
   },
@@ -266,10 +269,10 @@ export const syncApprovalDecisions = radiusSync.table(
   {
     eventId: uuid("event_id")
       .primaryKey()
-      .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+      .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
     approvalRequestEventId: uuid("approval_request_event_id")
       .notNull()
-      .references(() => syncApprovalRequests.eventId, { onDelete: "restrict" }),
+      .references(() => syncApprovalRequests.eventId, { onDelete: "cascade" }),
     decision: text("decision").notNull(),
     actorType: text("actor_type").notNull(),
     actorId: text("actor_id"),
@@ -285,7 +288,7 @@ export const syncApprovalDecisions = radiusSync.table(
 export const syncErrors = radiusSync.table("errors", {
   eventId: uuid("event_id")
     .primaryKey()
-    .references(() => syncSessionEvents.id, { onDelete: "restrict" }),
+    .references(() => syncSessionEvents.id, { onDelete: "cascade" }),
   code: text("code").notNull(),
   message: text("message").notNull(),
   retryable: boolean("retryable").notNull(),
