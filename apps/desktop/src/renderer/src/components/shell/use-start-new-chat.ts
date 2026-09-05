@@ -5,10 +5,10 @@ import { useProjects } from "@renderer/components/shell/project-context-value";
 
 export function useStartNewChat(): () => void {
   const { navigate } = useWorkspaceNavigation();
-  const { clearActiveSession } = useProjects();
+  const { clearActiveProject } = useProjects();
 
   return useCallback(() => {
-    clearActiveSession();
+    clearActiveProject();
     navigate("workspace");
-  }, [clearActiveSession, navigate]);
+  }, [clearActiveProject, navigate]);
 }

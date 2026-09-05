@@ -16,6 +16,7 @@ import {
   type RecentSessionRecord,
 } from "./project-context-value";
 import { projectErrorMessage } from "./project-errors";
+import { resolveActiveProjectId } from "./project-selection";
 import { hasUnreadAssistantMessage } from "./session-unread";
 
 const ACTIVE_PROJECT_STORAGE_KEY = "radius:active-project-id";
@@ -140,15 +141,12 @@ export function ProjectProvider({
           return null;
         });
         setActiveProjectId((current) => {
-          if (recentSessionActive) {
-            localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
-            return null;
-          }
-          const next =
-            storedSessionProject?.id ??
-            (nextProjects.some((project) => project.id === current)
-              ? current
-              : (nextProjects[0]?.id ?? null));
+          const next = resolveActiveProjectId({
+            currentProjectId: current,
+            projectIds: nextProjects.map((project) => project.id),
+            recentSessionActive,
+            storedSessionProjectId: storedSessionProject?.id ?? null,
+          });
           if (next) localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, next);
           else localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
           return next;

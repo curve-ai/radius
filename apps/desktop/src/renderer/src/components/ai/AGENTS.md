@@ -106,6 +106,14 @@
   exception to scripts, frames, connections, or other resource types. Tile
   entry/exit uses opacity plus scale, while position-only layout motion bridges
   reflow. Reduced motion keeps a 100ms opacity transition and disables movement.
+- The owning page serializes submitted attachments into bounded ACP prompt
+  content. Main revalidates every name, MIME type, decoded size, image signature,
+  synthetic resource URI, and live prompt capability before sending it to the
+  agent. Never transmit renderer-authored filesystem paths.
+- ACP elicitations use the shared inline request treatment above the composer.
+  Forms require visible labels, reviewable values, validation, and explicit
+  submit, decline, and cancel actions. URL mode shows the full destination and
+  opens it only after the user activates the action; never prefetch it.
 - Keep motion brief, purposeful, and compatible with reduced-motion settings.
 - Do not render or store raw chain-of-thought. Components may present concise
   user-visible reasoning updates explicitly supplied through ACP.

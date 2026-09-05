@@ -38,6 +38,7 @@ import {
 import { cn } from "@renderer/lib/utils";
 import { useCopyFeedback } from "./copy-feedback";
 import { MessageImage, MessageImageGallery } from "./message-image";
+import { MessageFileIcon } from "./message-file-icon";
 import { MessageMarkdown } from "./message-markdown";
 import { messageTimestampPresentation } from "./message-timestamp";
 import { messageMarkdownForCopy } from "./message-markdown-normalize";
@@ -134,6 +135,9 @@ function Message({
   const images = (event.artifacts ?? []).filter(
     (artifact) => artifact.artifactType === "image",
   );
+  const files = (event.artifacts ?? []).filter(
+    (artifact) => artifact.artifactType !== "image",
+  );
   const copyIconTransform = reduceMotion ? "scale(1)" : "scale(0.96)";
   const timestamp = messageTimestampPresentation(event.occurredAt);
 
@@ -141,7 +145,7 @@ function Message({
     await copyText(messageMarkdownForCopy(event.text));
   };
 
-  if (!event.text && images.length === 0) return null;
+  if (!event.text && images.length === 0 && files.length === 0) return null;
 
   return (
     <article
@@ -200,6 +204,23 @@ function Message({
               );
             })}
           </MessageImageGallery>
+        ) : null}
+        {files.length > 0 ? (
+          <div
+            aria-label="Attached files"
+            className="mt-2 flex flex-wrap gap-1.5"
+          >
+            {files.map((artifact) => (
+              <span
+                key={artifact.id}
+                title={artifact.name}
+                className="flex h-7 max-w-56 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground"
+              >
+                <MessageFileIcon fileName={artifact.name} />
+                <span className="truncate">{artifact.name}</span>
+              </span>
+            ))}
+          </div>
         ) : null}
         {!user && !system && !streaming ? (
           <div className="pointer-events-none mt-2 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">

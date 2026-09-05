@@ -3,6 +3,7 @@ import {
   createSession,
   ensureBuiltinToolBinding,
   ensureBuiltinToolProvider,
+  getLatestAgentProviderSession,
   getSessionProjectContext,
   getSessionRevision,
   grantMcpToolApproval,
@@ -14,6 +15,7 @@ import {
   listReadyMcpProviders,
   listProjects,
   listSessionTranscript,
+  setSessionArchived,
   type RadiusDatabase,
   type InstalledAgentRelease,
   type SessionTranscriptEventRecord,
@@ -29,10 +31,13 @@ import {
   MicrovmAcpRuntime,
   acpStreamFromWebSocket,
   parseAgentReleaseDescriptor,
+  type AcpElicitationHandler,
   type AcpRuntimeHandlers,
+  type AcpAuthenticationHandler,
   type AcpPermissionDecision,
   type AgentReleaseDescriptor,
   type AcpRuntimePromptResult,
+  type ContentBlock,
   type DevelopmentAgentConnection,
   type RequestPermissionRequest,
   type MicrovmRuntimePaths,
@@ -46,17 +51,19 @@ import type { BrowserBridgeOperation } from "@curve-ai/radius-browser-protocol";
 import { resolveLocalArtifactPath } from "@curve-ai/radius-sync-core";
 import { app, BrowserWindow } from "electron";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import type {
   DesktopAgentSummary,
   DesktopRuntimeStatus,
   SessionTranscriptStreamUpdate,
+  SetAgentSessionConfigOptionInput,
   StartAgentPromptInput,
   StartAgentPromptResult,
   StreamingSessionTranscriptMessage,
   ToolApprovalSelection,
+  DesktopAgentSessionFeatures,
 } from "../radius-api";
 import {
   SESSION_RUN_ACTIVITY_DETAIL,
@@ -71,8 +78,25 @@ import {
 import {
   agentPlanJournalEvents,
   createAgentPlanJournalState,
+  removeAgentPlanJournalEvents,
   type AgentPlanJournalState,
 } from "./agent-plan-events";
+import {
+  agentPlanReasoningSummaries,
+  applyAgentPlanProjectionUpdate,
+  createAgentPlanProjectionState,
+  type AgentPlanProjectionState,
+} from "./agent-plan-projection";
+import {
+  AGENT_SESSION_FEATURE_CLIENT_CAPABILITIES,
+  agentSessionFeatureOverrideKey,
+  applyAgentSessionFeatureUpdate,
+  resolveAgentSessionConfigSelection,
+  resolveAgentSessionFeatureOwner,
+  resolveAgentSessionModeSelection,
+  type AgentSessionFeatureOwner,
+  type AgentSessionFeatureState,
+} from "./agent-session-features";
 import { localDeviceIdentity } from "./device-identity";
 import {
   connectFxCodex,
@@ -118,6 +142,29 @@ import {
   RuntimeSessionJournal,
   type RuntimeSessionEvent,
 } from "./runtime-session-journal";
+import {
+  AgentElicitationManager,
+  type PendingElicitationSummary,
+  type ResolveElicitationInput,
+} from "./agent-elicitation-manager";
+import {
+  assertPromptAttachmentCapabilities,
+  parsePromptAttachments,
+  validatePromptAttachments,
+  type ValidatedPromptAttachment,
+} from "./prompt-attachments";
+import { writeContentAddressedFile } from "./content-addressed-file";
+import {
+  createAgentRunStartup,
+  type AgentRunStartup,
+} from "./agent-run-startup";
+import {
+  developmentPromptCapabilitiesKey,
+  releasePromptCapabilitiesKey,
+  sameAgentPromptCapabilities,
+  type AgentPromptCapabilities,
+} from "./agent-prompt-capabilities";
+import { acceptAgentPrompt } from "./agent-prompt-acceptance";
 
 type SessionEvent = RuntimeSessionEvent;
 type SessionMessageEvent = Extract<SessionEvent, { eventType: "message" }>;
@@ -136,14 +183,27 @@ type JsonValue =
 interface RuntimeUpdateState {
   hostToolKinds: Set<string>;
   plan: AgentPlanJournalState;
+  planProjection: AgentPlanProjectionState;
   toolCallEventIds: Map<string, string>;
 }
 type StreamedMessageEvent = NonNullable<SessionTranscriptStreamUpdate["event"]>;
 type AgentTarget =
   | { kind: "development"; connection: DevelopmentAgentConnection }
   | { kind: "release"; release: AgentReleaseDescriptor };
+
+function agentProviderKey(target: AgentTarget): string {
+  return target.kind === "release"
+    ? `${target.release.providerId}:${target.release.agentId}`
+    : `radius-development:${target.connection.agentId}`;
+}
+
 interface RunningAgentRuntime {
-  prompt(text: string): Promise<AcpRuntimePromptResult>;
+  prompt(content: ContentBlock[]): Promise<AcpRuntimePromptResult>;
+  setConfigOption(
+    configId: string,
+    value: string | boolean,
+  ): Promise<AcpRuntimeSession["sessionConfigOptions"]>;
+  setMode(modeId: string): Promise<void>;
   cancel(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -156,6 +216,17 @@ interface ActiveMcpPermissionContext {
   allowedTools: Set<string>;
   oneTimeTools: Map<string, number>;
 }
+
+const selectProtocolAuthentication: AcpAuthenticationHandler = async (
+  methods,
+) => {
+  const supported = methods.filter(
+    (method) => !("type" in method && method.type === "terminal"),
+  );
+  if (supported.length === 0) return null;
+  if (supported.length === 1) return supported[0]!.id;
+  throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
+};
 
 function resolveMcpPermissionTool(
   context: ActiveMcpPermissionContext,
@@ -200,19 +271,18 @@ function rememberMcpToolAllowance(
   }
 }
 
-interface PersistedAgentImage {
+interface PersistedArtifact {
   artifactLink: SessionArtifactLink;
   fileLocation: string;
 }
 
 type CollectedResponsePart =
-  | { kind: "text"; text: string }
-  | { kind: "image"; image: PersistedAgentImage };
+  { kind: "text"; text: string } | { kind: "image"; image: PersistedArtifact };
 
 async function persistAgentImage(
   sessionId: string,
   content: AgentImageContent,
-): Promise<PersistedAgentImage> {
+): Promise<PersistedArtifact> {
   const { bytes, extension, mimeType } = decodeAgentImage(content);
   return persistAgentImageBytes(sessionId, bytes, mimeType, extension);
 }
@@ -223,12 +293,10 @@ async function persistAgentImageBytes(
   mimeType: string,
   extension: string,
   displayName?: string,
-): Promise<PersistedAgentImage> {
+): Promise<PersistedArtifact> {
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_AGENT_IMAGE_BYTES) {
     throw new Error("AGENT_IMAGE_TOO_LARGE");
   }
-  const contentSha256 = createHash("sha256").update(bytes).digest("hex");
-  const artifactId = randomUUID();
   const safeDisplayName = displayName
     ? Array.from(displayName, (character) =>
         character.charCodeAt(0) < 32 ? " " : character,
@@ -239,43 +307,83 @@ async function persistAgentImageBytes(
         .trim()
         .slice(0, 100)
     : undefined;
-  const name = safeDisplayName
-    ? `${safeDisplayName}.${extension}`
-    : `generated-image-${contentSha256.slice(0, 12)}.${extension}`;
+  const name = safeDisplayName ? `${safeDisplayName}.${extension}` : undefined;
+  return persistArtifactBytes({
+    sessionId,
+    bytes,
+    extension,
+    name,
+    artifactType: "image",
+    mimeType,
+    relationship: "output",
+    conflictCode: "AGENT_IMAGE_STORE_CONFLICT",
+  });
+}
+
+async function persistPromptAttachment(
+  sessionId: string,
+  attachment: ValidatedPromptAttachment,
+): Promise<PersistedArtifact> {
+  const providedExtension = path
+    .extname(attachment.name)
+    .slice(1)
+    .toLowerCase();
+  const extension = /^[a-z0-9]{1,12}$/.test(providedExtension)
+    ? providedExtension
+    : attachment.artifactType === "image"
+      ? (radiusImageExtension(attachment.mimeType) ?? "img")
+      : "bin";
+  return persistArtifactBytes({
+    sessionId,
+    bytes: attachment.bytes,
+    extension,
+    name: attachment.name,
+    artifactType: attachment.artifactType,
+    mimeType: attachment.mimeType,
+    relationship: "input",
+    conflictCode: "PROMPT_ATTACHMENT_STORE_CONFLICT",
+  });
+}
+
+async function persistArtifactBytes(input: {
+  sessionId: string;
+  bytes: Buffer;
+  extension: string;
+  name?: string;
+  artifactType: SessionArtifactLink["artifact"]["artifactType"];
+  mimeType: string;
+  relationship: SessionArtifactLink["relationship"];
+  conflictCode: string;
+}): Promise<PersistedArtifact> {
+  const contentSha256 = createHash("sha256").update(input.bytes).digest("hex");
   const fileLocation = path.posix.join(
     "sha256",
     contentSha256.slice(0, 2),
-    `${contentSha256}.${extension}`,
+    `${contentSha256}.${input.extension}`,
   );
   const artifactRoot = path.join(app.getPath("userData"), "artifacts");
   const targetPath = path.join(artifactRoot, ...fileLocation.split("/"));
-  await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-  try {
-    await writeFile(targetPath, bytes, { flag: "wx", mode: 0o600 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const existing = await readFile(targetPath);
-    if (
-      existing.byteLength !== bytes.byteLength ||
-      createHash("sha256").update(existing).digest("hex") !== contentSha256
-    ) {
-      throw new Error("AGENT_IMAGE_STORE_CONFLICT");
-    }
-  }
-
+  await writeContentAddressedFile({
+    bytes: input.bytes,
+    conflictCode: input.conflictCode,
+    contentSha256,
+    targetPath,
+  });
   return {
     fileLocation,
     artifactLink: {
-      relationship: "output",
+      relationship: input.relationship,
       artifact: {
-        id: artifactId,
-        sessionId,
-        name,
-        artifactType: "image",
+        id: randomUUID(),
+        sessionId: input.sessionId,
+        name:
+          input.name ??
+          `generated-image-${contentSha256.slice(0, 12)}.${input.extension}`,
+        artifactType: input.artifactType,
         storageKind: "file",
-        mimeType,
+        mimeType: input.mimeType,
         contentSha256,
-        byteSize: bytes.byteLength,
+        byteSize: input.bytes.byteLength,
         supersedesArtifactId: null,
         createdAt: new Date().toISOString(),
         deletedAt: null,
@@ -385,10 +493,212 @@ let runtimeErrorCode: string | null = null;
 const runningSessions = new Map<string, RunningAgentRuntime>();
 const runningTerminalManagers = new Map<string, MacOsTerminalManager>();
 const workingSessions = new Set<string>();
+const agentSessionFeatures = new Map<string, AgentSessionFeatureOwner>();
+const agentSessionConfigOverrides = new Map<
+  string,
+  Map<string, string | boolean>
+>();
+const agentSessionModeOverrides = new Map<string, string>();
+const agentPromptCapabilities = new Map<string, AgentPromptCapabilities>();
+const agentElicitations = new AgentElicitationManager();
 const streamingSessionMessages = new Map<
   string,
   StreamingSessionTranscriptMessage
 >();
+
+function desktopAgentSessionFeatures(
+  owner: AgentSessionFeatureOwner,
+): DesktopAgentSessionFeatures {
+  const { state } = owner;
+  return {
+    agentId: owner.agentId,
+    availableCommands: state.availableCommands.map((command) => ({
+      name: command.name,
+      description: command.description,
+      inputHint: command.input?.hint ?? null,
+    })),
+    configOptions: state.configOptions.map((option) =>
+      option.type === "boolean"
+        ? {
+            id: option.id,
+            label: option.name,
+            description: option.description ?? null,
+            category: option.category ?? null,
+            type: "boolean" as const,
+            currentValue: option.currentValue,
+          }
+        : {
+            id: option.id,
+            label: option.name,
+            description: option.description ?? null,
+            category: option.category ?? null,
+            type: "select" as const,
+            currentValue: option.currentValue,
+            options: option.options.flatMap((entry) =>
+              "options" in entry
+                ? entry.options.map((value) => ({
+                    id: value.value,
+                    label: value.name,
+                    description: value.description ?? null,
+                    groupId: entry.group,
+                    groupLabel: entry.name,
+                  }))
+                : [
+                    {
+                      id: entry.value,
+                      label: entry.name,
+                      description: entry.description ?? null,
+                      groupId: null,
+                      groupLabel: null,
+                    },
+                  ],
+            ),
+          },
+    ),
+    modes: state.modes
+      ? {
+          currentModeId: state.modes.currentModeId,
+          availableModes: state.modes.availableModes.map((mode) => ({
+            id: mode.id,
+            label: mode.name,
+            description: mode.description ?? null,
+          })),
+        }
+      : null,
+    usage: state.usage
+      ? {
+          used: state.usage.used,
+          size: state.usage.size,
+          cost: state.usage.cost
+            ? {
+                amount: state.usage.cost.amount,
+                currency: state.usage.cost.currency,
+              }
+            : null,
+        }
+      : null,
+  };
+}
+
+export async function getAgentSessionFeatures(
+  rawInput: unknown,
+): Promise<DesktopAgentSessionFeatures | null> {
+  if (!rawInput || typeof rawInput !== "object") return null;
+  const input = rawInput as Record<string, unknown>;
+  if (
+    typeof input.sessionId !== "string" ||
+    !input.sessionId ||
+    typeof input.agentId !== "string" ||
+    !input.agentId
+  ) {
+    return null;
+  }
+  const owner = agentSessionFeatures.get(input.sessionId);
+  return owner?.agentId === input.agentId
+    ? desktopAgentSessionFeatures(owner)
+    : null;
+}
+
+export async function listPendingAgentElicitations(
+  sessionId: string,
+): Promise<PendingElicitationSummary[]> {
+  return agentElicitations.listPending(sessionId);
+}
+
+export async function resolveAgentElicitation(
+  input: ResolveElicitationInput,
+): Promise<void> {
+  agentElicitations.resolve(input);
+}
+
+export async function setAgentSessionConfigOption(
+  rawInput: SetAgentSessionConfigOptionInput,
+): Promise<DesktopAgentSessionFeatures | null> {
+  if (
+    !rawInput ||
+    typeof rawInput !== "object" ||
+    typeof rawInput.sessionId !== "string" ||
+    !rawInput.sessionId ||
+    typeof rawInput.agentId !== "string" ||
+    !rawInput.agentId ||
+    typeof rawInput.configId !== "string" ||
+    !rawInput.configId ||
+    (typeof rawInput.value !== "string" && typeof rawInput.value !== "boolean")
+  ) {
+    throw new Error("ACP_SESSION_CONFIG_OPTION_INVALID");
+  }
+  const owner = agentSessionFeatures.get(rawInput.sessionId);
+  if (!owner || owner.agentId !== rawInput.agentId) return null;
+  const { state } = owner;
+  const selection = resolveAgentSessionConfigSelection(
+    state.configOptions,
+    rawInput.configId,
+    rawInput.value,
+  );
+  if (!selection) throw new Error("ACP_SESSION_CONFIG_OPTION_INVALID");
+
+  const runtime = runningSessions.get(rawInput.sessionId);
+  if (runtime) {
+    state.configOptions = await runtime.setConfigOption(
+      selection.configId,
+      selection.value,
+    );
+  } else {
+    state.configOptions = state.configOptions.map((option) =>
+      option.id === selection.configId
+        ? { ...option, currentValue: selection.value }
+        : option,
+    ) as AgentSessionFeatureState["configOptions"];
+  }
+  const overrides =
+    agentSessionConfigOverrides.get(
+      agentSessionFeatureOverrideKey(rawInput.sessionId, owner.providerKey),
+    ) ?? new Map();
+  overrides.set(selection.configId, selection.value);
+  agentSessionConfigOverrides.set(
+    agentSessionFeatureOverrideKey(rawInput.sessionId, owner.providerKey),
+    overrides,
+  );
+  return desktopAgentSessionFeatures(owner);
+}
+
+export async function setAgentSessionMode(rawInput: {
+  sessionId: string;
+  agentId: string;
+  modeId: string;
+}): Promise<DesktopAgentSessionFeatures | null> {
+  if (
+    !rawInput ||
+    typeof rawInput !== "object" ||
+    typeof rawInput.sessionId !== "string" ||
+    !rawInput.sessionId ||
+    typeof rawInput.agentId !== "string" ||
+    !rawInput.agentId ||
+    typeof rawInput.modeId !== "string" ||
+    !rawInput.modeId
+  ) {
+    throw new Error("ACP_SESSION_MODE_INVALID");
+  }
+  const owner = agentSessionFeatures.get(rawInput.sessionId);
+  if (!owner || owner.agentId !== rawInput.agentId) return null;
+  const { state } = owner;
+  if (!state.modes) return desktopAgentSessionFeatures(owner);
+  const selection = resolveAgentSessionModeSelection(
+    state.modes,
+    rawInput.modeId,
+  );
+  if (!selection) {
+    throw new Error("ACP_SESSION_MODE_INVALID");
+  }
+  const runtime = runningSessions.get(rawInput.sessionId);
+  if (runtime) await runtime.setMode(selection.modeId);
+  state.modes = { ...state.modes, currentModeId: selection.modeId };
+  agentSessionModeOverrides.set(
+    agentSessionFeatureOverrideKey(rawInput.sessionId, owner.providerKey),
+    selection.modeId,
+  );
+  return desktopAgentSessionFeatures(owner);
+}
 
 type TerminalApprovalDecision = "approved" | "denied" | "cancelled" | "expired";
 type ToolApprovalResolution = ToolApprovalSelection | "cancelled" | "expired";
@@ -623,7 +933,14 @@ export async function startAgentPrompt(
 ): Promise<StartAgentPromptResult> {
   const input = parsePromptInput(rawInput);
   const prompt = input.prompt.trim();
-  if (!prompt) throw new Error("A prompt is required");
+  const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
+    image: true,
+    audio: true,
+    embeddedContext: true,
+  });
+  if (!prompt && promptAttachments.length === 0) {
+    throw new Error("A prompt or attachment is required");
+  }
   if (prompt.length > 100_000) throw new Error("The prompt is too long");
 
   const target = await requireAgentTarget(input.agentId);
@@ -678,14 +995,12 @@ export async function startAgentPrompt(
     );
   }
   const identity = localDeviceIdentity(context.vault);
-  const [priorEvents, existingRevision, existingSessionContext] =
-    input.sessionId
-      ? await Promise.all([
-          listSessionTranscript(context.database, input.sessionId),
-          getSessionRevision(context.database, input.sessionId),
-          getSessionProjectContext(context.database, input.sessionId),
-        ])
-      : [[], null, null];
+  const [existingRevision, existingSessionContext] = input.sessionId
+    ? await Promise.all([
+        getSessionRevision(context.database, input.sessionId),
+        getSessionProjectContext(context.database, input.sessionId),
+      ])
+    : [null, null];
   if (input.sessionId && !existingSessionContext) {
     throw new Error("Session does not exist");
   }
@@ -718,7 +1033,7 @@ export async function startAgentPrompt(
     session = await createSession(context.database, {
       originClientInstanceId: identity.clientInstanceId,
       projectId,
-      title: promptTitle(prompt),
+      title: promptTitle(prompt || promptAttachments[0]!.name),
     });
   }
   const journal = new RuntimeSessionJournal(
@@ -728,28 +1043,40 @@ export async function startAgentPrompt(
     session.revision,
   );
   const userMessageEventId = randomUUID();
+  const persistedPromptAttachments = await Promise.all(
+    promptAttachments.map((attachment) =>
+      persistPromptAttachment(session.id, attachment),
+    ),
+  );
+  const providerKey = agentProviderKey(target);
+  const previousProviderSession = input.sessionId
+    ? await getLatestAgentProviderSession(
+        context.database,
+        input.sessionId,
+        providerKey,
+      )
+    : null;
+  const startup = createAgentRunStartup();
   markSessionWorking(session.id);
+  void runAgentSession({
+    accessMode: input.accessMode,
+    context,
+    continuingSession: Boolean(input.sessionId),
+    modelId,
+    persistedPromptAttachments,
+    promptAttachments,
+    providerSessionId: previousProviderSession?.providerSessionId ?? null,
+    startup,
+    target,
+    prompt,
+    projectRoots,
+    sessionId: session.id,
+    thinkingEffortId,
+    userMessageEventId,
+    journal,
+  });
   try {
-    await journal.append({
-      eventId: userMessageEventId,
-      agentRunId: null,
-      eventType: "message",
-      role: "user",
-      messageKind: "prompt",
-      status: "completed",
-      model: null,
-      providerMessageId: null,
-      finishReason: null,
-      parts: [
-        {
-          id: randomUUID(),
-          position: 0,
-          partType: "text",
-          text: prompt,
-        },
-      ],
-    });
-
+    await startup.promise;
     await clearComposerDraft(context.database, {
       clientInstanceId: identity.clientInstanceId,
       context: input.sessionId
@@ -761,21 +1088,13 @@ export async function startAgentPrompt(
         error,
       );
     });
-
-    void runAgentSession({
-      accessMode: input.accessMode,
-      context,
-      modelId,
-      target,
-      prompt: promptWithHistory(priorEvents, prompt),
-      projectRoots,
-      sessionId: session.id,
-      thinkingEffortId,
-      userMessageEventId,
-      journal,
-    });
   } catch (error) {
-    clearSessionWorking(session.id);
+    if (!input.sessionId) {
+      await setSessionArchived(context.database, {
+        originClientInstanceId: identity.clientInstanceId,
+        sessionId: session.id,
+      }).catch(() => undefined);
+    }
     throw error;
   }
   return { sessionId: session.id, userMessageEventId };
@@ -812,6 +1131,7 @@ function parsePromptInput(input: unknown): StartAgentPromptInput {
         ? value.accessMode
         : "ask",
     agentId: value.agentId,
+    attachments: parsePromptAttachments(value.attachments),
     modelId: value.modelId as string | null | undefined,
     prompt: value.prompt,
     projectId: value.projectId as string | null | undefined,
@@ -823,12 +1143,15 @@ function parsePromptInput(input: unknown): StartAgentPromptInput {
 function promptWithHistory(
   events: Awaited<ReturnType<typeof listSessionTranscript>>,
   prompt: string,
+  currentMessageEventId: string,
 ): string {
   const messages = events.filter(
     (
       event,
     ): event is Extract<(typeof events)[number], { eventType: "message" }> =>
-      event.eventType === "message" && Boolean(event.text.trim()),
+      event.eventType === "message" &&
+      event.eventId !== currentMessageEventId &&
+      Boolean(event.text.trim()),
   );
   if (messages.length === 0) return prompt;
   const history = messages
@@ -846,6 +1169,7 @@ function promptWithHistory(
 
 export async function cancelAgentSession(sessionId: string): Promise<void> {
   const runtime = runningSessions.get(sessionId);
+  agentElicitations.cancelSession(sessionId);
   await Promise.all([
     runtime?.cancel(),
     runningTerminalManagers.get(sessionId)?.close(),
@@ -860,6 +1184,7 @@ export function stopAgentRuntime(): void {
   }
   for (const sessionId of workingSessions) {
     void cancelPendingTerminalApprovals(sessionId);
+    agentElicitations.cancelSession(sessionId);
   }
   for (const sessionId of [...streamingSessionMessages.keys()]) {
     clearStreamingSessionMessage(sessionId);
@@ -867,6 +1192,10 @@ export function stopAgentRuntime(): void {
   runningSessions.clear();
   runningTerminalManagers.clear();
   workingSessions.clear();
+  agentSessionFeatures.clear();
+  agentSessionConfigOverrides.clear();
+  agentSessionModeOverrides.clear();
+  agentPromptCapabilities.clear();
 }
 
 interface ToolApprovalContext {
@@ -1345,7 +1674,12 @@ async function appendFileAccessResult(
 async function runAgentSession(input: {
   accessMode: AgentAccessMode;
   context: StorageContext;
+  continuingSession: boolean;
   modelId: string | null;
+  persistedPromptAttachments: PersistedArtifact[];
+  promptAttachments: ValidatedPromptAttachment[];
+  providerSessionId: string | null;
+  startup: AgentRunStartup;
   target: AgentTarget;
   prompt: string;
   projectRoots: string[];
@@ -1383,6 +1717,7 @@ async function runAgentSession(input: {
   const updateState: RuntimeUpdateState = {
     hostToolKinds: new Set(),
     plan: createAgentPlanJournalState(),
+    planProjection: createAgentPlanProjectionState(),
     toolCallEventIds: new Map(),
   };
   const release = input.target.kind === "release" ? input.target.release : null;
@@ -1390,7 +1725,16 @@ async function runAgentSession(input: {
     input.target.kind === "development" ? input.target.connection : null;
   const displayName =
     release?.displayName ?? developmentConnection!.displayName;
-  const providerKey = release?.providerId ?? "radius-development";
+  const providerKey = agentProviderKey(input.target);
+  const agentId = release?.agentId ?? developmentConnection!.agentId;
+  const existingFeatureOwner = agentSessionFeatures.get(input.sessionId);
+  const featureOwner = resolveAgentSessionFeatureOwner(
+    existingFeatureOwner,
+    agentId,
+    providerKey,
+  );
+  const featureState = featureOwner.state;
+  agentSessionFeatures.set(input.sessionId, featureOwner);
   const capabilities =
     release?.capabilities ?? developmentConnection!.capabilities;
   let runtime: RunningAgentRuntime | null = null;
@@ -1506,15 +1850,21 @@ async function runAgentSession(input: {
     });
   };
 
-  try {
+  let agentRunRecorded = false;
+  let userMessageRecorded = false;
+  const recordAgentRun = async (
+    providerRunId: string | null,
+  ): Promise<void> => {
+    if (agentRunRecorded) return;
     await input.journal.append({
       eventId: randomUUID(),
       agentRunId,
       eventType: "agent_run",
       providerKey,
-      providerRunId: null,
+      providerRunId,
       triggeringMessageEventId: input.userMessageEventId,
     });
+    agentRunRecorded = true;
     await input.journal.append({
       eventId: randomUUID(),
       agentRunId,
@@ -1536,7 +1886,9 @@ async function runAgentSession(input: {
             ? SESSION_RUN_ACTIVITY_DETAIL.connectingAgent
             : SESSION_RUN_ACTIVITY_DETAIL.startingLocalAgent,
     });
+  };
 
+  try {
     if (release && isFxRelease(release)) {
       fxProfile = await prepareFxRuntimeProfile(
         input.context,
@@ -1761,7 +2113,55 @@ async function runAgentSession(input: {
         headers: server.headers,
       })),
     ];
+    const handleElicitation = async (
+      request: Parameters<AcpElicitationHandler>[0],
+      signal: Parameters<AcpElicitationHandler>[1],
+      waitingDetail: string,
+    ): ReturnType<AcpElicitationHandler> => {
+      if (agentRunRecorded) {
+        await input.journal.append({
+          eventId: randomUUID(),
+          agentRunId,
+          eventType: "agent_run_state_update",
+          state: "waiting_for_user",
+          detail: waitingDetail,
+        });
+      }
+      try {
+        return await agentElicitations.handle(input.sessionId, request, signal);
+      } finally {
+        if (!signal.aborted && agentRunRecorded) {
+          await input.journal.append({
+            eventId: randomUUID(),
+            agentRunId,
+            eventType: "agent_run_state_update",
+            state: "working",
+            detail: SESSION_RUN_ACTIVITY_DETAIL.resumingWork,
+          });
+        }
+      }
+    };
     const handlers: AcpRuntimeHandlers = {
+      elicitation: {
+        form: (request, signal) =>
+          handleElicitation(
+            request,
+            signal,
+            "Waiting for requested information",
+          ),
+        url: (request, signal) =>
+          handleElicitation(
+            request,
+            signal,
+            "Waiting for external authorization",
+          ),
+        onComplete: (notification) => {
+          agentElicitations.completeUrl(
+            input.sessionId,
+            notification.elicitationId,
+          );
+        },
+      },
       fileSystem: fileSystemManager
         ? {
             readTextFile: canReadFiles
@@ -1774,6 +2174,9 @@ async function runAgentSession(input: {
               : undefined,
           }
         : undefined,
+      onReplayUpdate: ({ update }) => {
+        applyAgentSessionFeatureUpdate(featureState, update);
+      },
       onPermissionRequest: async (
         request: RequestPermissionRequest,
         signal: AbortSignal,
@@ -1819,6 +2222,7 @@ async function runAgentSession(input: {
       },
       terminal: terminalManager ?? undefined,
       onUpdate: async ({ update }: { update: SessionUpdate }) => {
+        applyAgentSessionFeatureUpdate(featureState, update);
         if (
           update.sessionUpdate !== "agent_thought_chunk" &&
           thoughtText.trim()
@@ -1891,7 +2295,11 @@ async function runAgentSession(input: {
         );
       },
     };
-    let runtimeSessionId: string;
+    let acpSession: AcpRuntimeSession;
+    const sessionStart = input.providerSessionId
+      ? ({ kind: "auto", sessionId: input.providerSessionId } as const)
+      : ({ kind: "new" } as const);
+    const additionalDirectories = input.projectRoots.slice(1);
     if (developmentConnection) {
       const session = await AcpRuntimeSession.connect(
         acpStreamFromWebSocket(
@@ -1899,52 +2307,211 @@ async function runAgentSession(input: {
           developmentConnection.authorization,
         ),
         {
+          additionalDirectories,
+          clientCapabilities: AGENT_SESSION_FEATURE_CLIENT_CAPABILITIES,
           cwd: input.projectRoots[0] ?? developmentConnection.cwd,
           modelId: input.modelId,
           mcpServers,
           handlers,
           clientName: "radius-desktop-development",
+          onAuthenticate: selectProtocolAuthentication,
+          session: sessionStart,
         },
       );
-      runtimeSessionId = session.sessionId;
+      acpSession = session;
       runtime = {
-        prompt: (text) => session.prompt(text),
+        prompt: (content) => session.prompt(content, { collectText: false }),
+        setConfigOption: (configId, value) =>
+          session.setConfigOption(configId, value),
+        setMode: (modeId) => session.setMode(modeId),
         cancel: () => session.cancel(),
         stop: async () => session.close(),
       };
     } else {
       const microvm = await MicrovmAcpRuntime.start({
+        additionalDirectories,
+        clientCapabilities: AGENT_SESSION_FEATURE_CLIENT_CAPABILITIES,
         release: release!,
         modelId: input.modelId,
         paths: resolveMicrovmPaths(release!, fxProfile?.path),
         cwd: input.projectRoots[0] ?? release!.process.statePath,
         mcpServers,
         handlers,
+        onAuthenticate:
+          release && isFxRelease(release)
+            ? undefined
+            : selectProtocolAuthentication,
+        session: sessionStart,
         onStderr: (chunk) => {
           if (process.env.RADIUS_RUNTIME_DEBUG === "1") {
             console.error("[runtime]", chunk.trimEnd());
           }
         },
       });
-      runtimeSessionId = microvm.session.sessionId;
-      runtime = microvm;
+      acpSession = microvm.session;
+      runtime = {
+        prompt: (content) => microvm.prompt(content, { collectText: false }),
+        setConfigOption: (configId, value) =>
+          acpSession.setConfigOption(configId, value),
+        setMode: (modeId) => acpSession.setMode(modeId),
+        cancel: () => microvm.cancel(),
+        stop: () => microvm.stop(),
+      };
     }
-    if (terminalManager) {
-      terminalManager.bindSession(runtimeSessionId);
-      runningTerminalManagers.set(input.sessionId, terminalManager);
+    featureState.configOptions = [...acpSession.sessionConfigOptions];
+    featureState.modes = acpSession.sessionModes
+      ? {
+          currentModeId: acpSession.sessionModes.currentModeId,
+          availableModes: [...acpSession.sessionModes.availableModes],
+        }
+      : null;
+    const overrideKey = agentSessionFeatureOverrideKey(
+      input.sessionId,
+      providerKey,
+    );
+    const overrides = agentSessionConfigOverrides.get(overrideKey);
+    if (overrides) {
+      for (const [configId, value] of overrides) {
+        const selection = resolveAgentSessionConfigSelection(
+          featureState.configOptions,
+          configId,
+          value,
+        );
+        if (!selection) continue;
+        featureState.configOptions = await runtime.setConfigOption(
+          selection.configId,
+          selection.value,
+        );
+      }
     }
-    fileSystemManager?.bindSession(runtimeSessionId);
-    runningSessions.set(input.sessionId, runtime);
-    runtimeErrorCode = null;
-    await input.journal.append({
-      eventId: randomUUID(),
-      agentRunId,
-      eventType: "agent_run_state_update",
-      state: "working",
-      detail: `Waiting for ${displayName}`,
+    const modeOverride = agentSessionModeOverrides.get(overrideKey);
+    const modeSelection = modeOverride
+      ? resolveAgentSessionModeSelection(featureState.modes, modeOverride)
+      : null;
+    if (modeSelection) {
+      await runtime.setMode(modeSelection.modeId);
+      featureState.modes = {
+        ...featureState.modes!,
+        currentModeId: modeSelection.modeId,
+      };
+    }
+    const promptCapabilityKey =
+      input.target.kind === "release"
+        ? releasePromptCapabilitiesKey(input.target.release)
+        : developmentPromptCapabilitiesKey(input.target.connection);
+    const promptCapabilities = {
+      image: acpSession.agentCapabilities.promptCapabilities?.image === true,
+      audio: acpSession.agentCapabilities.promptCapabilities?.audio === true,
+      embeddedContext:
+        acpSession.agentCapabilities.promptCapabilities?.embeddedContext ===
+        true,
+    };
+    if (
+      !sameAgentPromptCapabilities(
+        agentPromptCapabilities.get(promptCapabilityKey),
+        promptCapabilities,
+      )
+    ) {
+      agentPromptCapabilities.set(promptCapabilityKey, promptCapabilities);
+    }
+    await acceptAgentPrompt({
+      assertCapabilities: () =>
+        assertPromptAttachmentCapabilities(
+          input.promptAttachments,
+          acpSession.agentCapabilities.promptCapabilities,
+        ),
+      appendPrompt: async () => {
+        await input.journal.append(
+          {
+            eventId: input.userMessageEventId,
+            agentRunId: null,
+            eventType: "message",
+            role: "user",
+            messageKind: "prompt",
+            status: "completed",
+            model: null,
+            providerMessageId: null,
+            finishReason: null,
+            parts: [
+              ...(input.prompt
+                ? [
+                    {
+                      id: randomUUID(),
+                      position: 0,
+                      partType: "text" as const,
+                      text: input.prompt,
+                    },
+                  ]
+                : []),
+              ...input.persistedPromptAttachments.map((attachment, index) => ({
+                id: randomUUID(),
+                position: (input.prompt ? 1 : 0) + index,
+                partType: "artifact_reference" as const,
+                artifactId: attachment.artifactLink.artifact.id,
+              })),
+            ],
+          },
+          {
+            artifactLinks: input.persistedPromptAttachments.map(
+              (attachment) => attachment.artifactLink,
+            ),
+            fileLocations: Object.fromEntries(
+              input.persistedPromptAttachments.map((attachment) => [
+                attachment.artifactLink.artifact.id,
+                attachment.fileLocation,
+              ]),
+            ),
+          },
+        );
+        userMessageRecorded = true;
+      },
+      recordAgentRun: () => recordAgentRun(acpSession.sessionId),
+      activate: async () => {
+        if (terminalManager) {
+          terminalManager.bindSession(acpSession.sessionId);
+          runningTerminalManagers.set(input.sessionId, terminalManager);
+        }
+        fileSystemManager?.bindSession(acpSession.sessionId);
+        runningSessions.set(input.sessionId, runtime!);
+        runtimeErrorCode = null;
+        await input.journal.append({
+          eventId: randomUUID(),
+          agentRunId,
+          eventType: "agent_run_state_update",
+          state: "working",
+          detail: `Waiting for ${displayName}`,
+        });
+        input.startup.resolve();
+      },
     });
-    const result = await runtime.prompt(input.prompt);
+    const promptText =
+      acpSession.lifecycle === "new" && input.continuingSession
+        ? promptWithHistory(
+            await listSessionTranscript(
+              input.context.database,
+              input.sessionId,
+            ),
+            input.prompt,
+            input.userMessageEventId,
+          )
+        : input.prompt;
+    const promptContent: ContentBlock[] = [
+      ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
+      ...input.promptAttachments.map((attachment) => attachment.content),
+    ];
+    const result = await runtime.prompt(promptContent);
     await flushThought();
+    for (const summaryText of agentPlanReasoningSummaries(
+      updateState.planProjection,
+    )) {
+      await input.journal.append({
+        eventId: randomUUID(),
+        agentRunId,
+        eventType: "reasoning_summary",
+        summaryKind: "analysis",
+        summaryText,
+      });
+    }
     await persistBufferedResponse(
       "final",
       result.stopReason === "cancelled" ? "cancelled" : "completed",
@@ -1959,6 +2526,11 @@ async function runAgentSession(input: {
     });
   } catch (error) {
     runtimeErrorCode = "AGENT_RUN_FAILED";
+    if (!userMessageRecorded) {
+      input.startup.reject(error);
+      return;
+    }
+    await recordAgentRun(null);
     const message =
       error instanceof Error ? error.message : "Unknown agent runtime error";
     await input.journal.append({
@@ -1978,6 +2550,7 @@ async function runAgentSession(input: {
       state: "failed",
       detail: message.slice(0, 500),
     });
+    input.startup.reject(error);
   } finally {
     clearStreamingSessionMessage(input.sessionId);
     clearSessionWorking(input.sessionId);
@@ -1985,6 +2558,7 @@ async function runAgentSession(input: {
     runningTerminalManagers.delete(input.sessionId);
     await terminalManager?.close();
     await cancelPendingTerminalApprovals(input.sessionId);
+    agentElicitations.cancelSession(input.sessionId);
     if (runtime) await runtime.stop();
     await browserTools?.close();
     await Promise.allSettled(
@@ -2045,8 +2619,22 @@ async function appendRuntimeUpdate(
   update: SessionUpdate,
 ): Promise<void> {
   if (await applyAgentSessionTitleUpdate(journal, update)) return;
-  if (update.sessionUpdate === "plan") {
-    const events = agentPlanJournalEvents(state.plan, update);
+  const planChange = applyAgentPlanProjectionUpdate(
+    state.planProjection,
+    update,
+  );
+  if (planChange) {
+    if (planChange.canonicalEntries === undefined) return;
+    if (planChange.canonicalEntries === null) {
+      for (const event of removeAgentPlanJournalEvents(state.plan)) {
+        await journal.append({ ...event, agentRunId });
+      }
+      return;
+    }
+    const events = agentPlanJournalEvents(state.plan, {
+      sessionUpdate: "plan",
+      entries: planChange.canonicalEntries,
+    });
     for (const event of events) {
       await journal.append({ ...event, agentRunId });
     }
@@ -2111,6 +2699,7 @@ async function appendRuntimeUpdate(
         (update.content === undefined ? null : { content: update.content }),
     ),
   });
+  state.toolCallEventIds.delete(update.toolCallId);
 }
 
 function acpToolProgress(
@@ -2262,6 +2851,9 @@ function desktopAgentSummary(
         defaultThinkingEffortId: null,
       })),
     defaultModelId: authentication?.defaultModelId ?? release.defaultModelId,
+    promptCapabilities: agentPromptCapabilities.get(
+      releasePromptCapabilitiesKey(release),
+    ),
     authentication: authentication
       ? {
           state: authentication.state,
@@ -2285,6 +2877,9 @@ function developmentAgentSummary(
     detail: "Development connection",
     models: [],
     defaultModelId: null,
+    promptCapabilities: agentPromptCapabilities.get(
+      developmentPromptCapabilitiesKey(connection),
+    ),
     authentication: {
       state: "not_required",
       label: null,

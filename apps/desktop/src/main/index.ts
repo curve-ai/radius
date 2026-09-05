@@ -22,8 +22,13 @@ import {
   connectAgentAuthentication,
   disconnectAgentAuthentication,
   getDesktopRuntimeStatus,
+  getAgentSessionFeatures,
+  listPendingAgentElicitations,
   listDesktopAgents,
   resolveToolApproval,
+  resolveAgentElicitation,
+  setAgentSessionConfigOption,
+  setAgentSessionMode,
   startAgentPrompt,
   stopAgentRuntime,
 } from "./agent-runtime";
@@ -306,6 +311,15 @@ app.whenReady().then(async () => {
         ),
     );
     ipcMain.handle("radius:runtime-status", getDesktopRuntimeStatus);
+    ipcMain.handle("radius:get-agent-session-features", (_event, input) =>
+      getAgentSessionFeatures(input),
+    );
+    ipcMain.handle("radius:set-agent-session-config-option", (_event, input) =>
+      setAgentSessionConfigOption(input),
+    );
+    ipcMain.handle("radius:set-agent-session-mode", (_event, input) =>
+      setAgentSessionMode(input),
+    );
     ipcMain.handle("radius:browser-status", getBrowserConnectionStatus);
     ipcMain.handle("radius:reveal-browser-extension", revealBrowserExtension);
     ipcMain.handle("radius:start-agent-prompt", (_event, input) =>
@@ -313,6 +327,16 @@ app.whenReady().then(async () => {
     );
     ipcMain.handle("radius:resolve-tool-approval", (_event, input) =>
       resolveToolApproval(input),
+    );
+    ipcMain.handle(
+      "radius:list-pending-agent-elicitations",
+      (_event, sessionId) =>
+        listPendingAgentElicitations(
+          typeof sessionId === "string" ? sessionId : "",
+        ),
+    );
+    ipcMain.handle("radius:resolve-agent-elicitation", (_event, input) =>
+      resolveAgentElicitation(input),
     );
     ipcMain.handle("radius:list-mcp-approval-grants", () =>
       listMcpApprovalsForRenderer(),
