@@ -86,6 +86,17 @@ test("keeps commentary, command disclosures, and final prose in agent order", ()
       messageKind: "final",
       status: "completed",
       text: "The checks passed.",
+      artifacts: [
+        {
+          id: "artifact-1",
+          name: "report.pdf",
+          artifactType: "document",
+          storageKind: "file",
+          mimeType: "application/pdf",
+          availability: "local",
+          url: null,
+        },
+      ],
     },
   ];
 
@@ -113,5 +124,7 @@ test("keeps commentary, command disclosures, and final prose in agent order", ()
   assert.ok(final > command);
   assert.match(html, /\$ gh run watch 123/);
   assert.match(html, /Build complete/);
+  assert.match(html, /report\.pdf/);
+  assert.match(html, /aria-label="Attached files"/);
   assert.match(html, /data-tool-call-id="command"/);
 });

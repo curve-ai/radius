@@ -25,7 +25,11 @@ import {
   appendAttachmentFiles,
   attachmentFilesFromDataTransfer,
   dataTransferContainsFiles,
+  PromptAttachmentError,
+  serializePromptAttachments,
 } from "@renderer/components/ai/attachment-files";
+import { AgentElicitationPanel } from "@renderer/components/ai/agent-elicitation";
+import { createSessionRequestGuard } from "@renderer/components/ai/session-request-guard";
 import {
   CHAT_RESPONSE_EDGE_GAP_PX,
   isChatFollowCancelKey,
@@ -66,8 +70,11 @@ import {
 import { Skeleton } from "@renderer/components/ui/skeleton";
 import { cloudPageUrl } from "@renderer/lib/cloud-links";
 import type {
+  AgentElicitationResponse,
   ComposerDraftContext,
   DesktopAgentSummary,
+  DesktopAgentSessionFeatures,
+  PendingAgentElicitation,
   SessionTranscriptEvent,
   SessionTranscriptStreamUpdate,
   ToolApprovalSelection,
@@ -194,6 +201,35 @@ function useChatFileIngress(onAddFiles: (files: readonly File[]) => void): {
     onDragOver,
     onDrop,
     onPaste,
+  };
+}
+
+function usePromptAttachmentFiles(): {
+  attachments: File[];
+  addAttachments(files: readonly File[]): void;
+  clearAttachments(): void;
+  fileIngress: ReturnType<typeof useChatFileIngress>;
+  removeAttachment(index: number): void;
+} {
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const addAttachments = useCallback((files: readonly File[]): void => {
+    if (files.length === 0) return;
+    setAttachments((current) => appendAttachmentFiles(current, files));
+  }, []);
+  const clearAttachments = useCallback((): void => setAttachments([]), []);
+  const removeAttachment = useCallback(
+    (index: number): void =>
+      setAttachments((current) =>
+        current.filter((_, currentIndex) => currentIndex !== index),
+      ),
+    [],
+  );
+  return {
+    attachments,
+    addAttachments,
+    clearAttachments,
+    fileIngress: useChatFileIngress(addAttachments),
+    removeAttachment,
   };
 }
 
@@ -348,12 +384,190 @@ function useDesktopAgents(): {
   };
 }
 
+function usePollingRefresh(
+  refresh: () => Promise<void>,
+  active: boolean,
+  intervalMs: number,
+): void {
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | null = null;
+    const poll = async (): Promise<void> => {
+      await refresh();
+      if (!disposed && active) {
+        timer = window.setTimeout(() => void poll(), intervalMs);
+      }
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [active, intervalMs, refresh]);
+}
+
+function useAgentSessionFeatures(
+  sessionId: string,
+  agentId: string | null,
+  active: boolean,
+): {
+  features: DesktopAgentSessionFeatures | null;
+  refresh(): Promise<void>;
+  setConfigOption(configId: string, value: string | boolean): Promise<void>;
+  setMode(modeId: string): Promise<void>;
+} {
+  const [snapshot, setSnapshot] = useState<{
+    sessionId: string;
+    features: DesktopAgentSessionFeatures | null;
+  }>({ sessionId, features: null });
+  const requestGuardRef = useRef(createSessionRequestGuard());
+  const mutatingRef = useRef(false);
+  const features = snapshot.sessionId === sessionId ? snapshot.features : null;
+
+  const refresh = useCallback(async (): Promise<void> => {
+    if (mutatingRef.current) return;
+    const requestToken = requestGuardRef.current.start();
+    if (!agentId) {
+      if (requestGuardRef.current.current(requestToken)) {
+        setSnapshot({ sessionId, features: null });
+      }
+      return;
+    }
+    try {
+      const next = await window.radius.getAgentSessionFeatures({
+        sessionId,
+        agentId,
+      });
+      if (requestGuardRef.current.current(requestToken)) {
+        setSnapshot({ sessionId, features: next });
+      }
+    } catch {
+      if (requestGuardRef.current.current(requestToken)) {
+        setSnapshot({ sessionId, features: null });
+      }
+    }
+  }, [agentId, sessionId]);
+
+  const setConfigOption = useCallback(
+    async (configId: string, value: string | boolean): Promise<void> => {
+      if (!agentId) return;
+      mutatingRef.current = true;
+      const requestToken = requestGuardRef.current.start();
+      try {
+        const next = await window.radius.setAgentSessionConfigOption({
+          sessionId,
+          agentId,
+          configId,
+          value,
+        });
+        if (requestGuardRef.current.current(requestToken)) {
+          setSnapshot({ sessionId, features: next });
+        }
+      } finally {
+        mutatingRef.current = false;
+      }
+    },
+    [agentId, sessionId],
+  );
+
+  const setMode = useCallback(
+    async (modeId: string): Promise<void> => {
+      if (!agentId) return;
+      mutatingRef.current = true;
+      const requestToken = requestGuardRef.current.start();
+      try {
+        const next = await window.radius.setAgentSessionMode({
+          sessionId,
+          agentId,
+          modeId,
+        });
+        if (requestGuardRef.current.current(requestToken)) {
+          setSnapshot({ sessionId, features: next });
+        }
+      } finally {
+        mutatingRef.current = false;
+      }
+    },
+    [agentId, sessionId],
+  );
+
+  usePollingRefresh(refresh, active, 1_500);
+  useEffect(
+    () => () => requestGuardRef.current.invalidate(),
+    [agentId, sessionId],
+  );
+
+  return { features, refresh, setConfigOption, setMode };
+}
+
+function useAgentElicitations(
+  sessionId: string,
+  active: boolean,
+): {
+  requests: PendingAgentElicitation[];
+  loading: boolean;
+  error: string | null;
+  refresh(): Promise<void>;
+  resolve(requestId: string, response: AgentElicitationResponse): Promise<void>;
+} {
+  const [snapshot, setSnapshot] = useState<{
+    sessionId: string;
+    requests: PendingAgentElicitation[];
+    loading: boolean;
+    error: string | null;
+  }>({ sessionId, requests: [], loading: true, error: null });
+  const requestGuardRef = useRef(createSessionRequestGuard());
+  const current =
+    snapshot.sessionId === sessionId
+      ? snapshot
+      : { sessionId, requests: [], loading: true, error: null };
+
+  const refresh = useCallback(async (): Promise<void> => {
+    const requestToken = requestGuardRef.current.start();
+    try {
+      const requests =
+        await window.radius.listPendingAgentElicitations(sessionId);
+      if (requestGuardRef.current.current(requestToken)) {
+        setSnapshot({ sessionId, requests, loading: false, error: null });
+      }
+    } catch {
+      if (requestGuardRef.current.current(requestToken)) {
+        setSnapshot((existing) => ({
+          sessionId,
+          requests: existing.sessionId === sessionId ? existing.requests : [],
+          loading: false,
+          error: "Requested input could not be refreshed.",
+        }));
+      }
+    }
+  }, [sessionId]);
+
+  const resolve = useCallback(
+    async (
+      requestId: string,
+      response: AgentElicitationResponse,
+    ): Promise<void> => {
+      await window.radius.resolveAgentElicitation({
+        sessionId,
+        requestId,
+        response,
+      });
+      await refresh();
+    },
+    [refresh, sessionId],
+  );
+
+  usePollingRefresh(refresh, active, 1_000);
+  useEffect(() => () => requestGuardRef.current.invalidate(), [sessionId]);
+
+  return { ...current, refresh, resolve };
+}
+
 function NewChatPage({
   onPendingOutgoingTurnChange,
 }: {
   onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
 }): ReactNode {
-  const [attachments, setAttachments] = useState<File[]>([]);
   const [accessMode, setAccessMode] = useState<ChatAccessMode>("project");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -374,36 +588,37 @@ function NewChatPage({
     [activeProject?.id],
   );
   const draft = useComposerDraft(draftContext);
-
-  const addAttachments = useCallback((files: readonly File[]): void => {
-    if (files.length === 0) return;
-
-    setAttachments((current) => appendAttachmentFiles(current, files));
-  }, []);
-  const fileIngress = useChatFileIngress(addAttachments);
+  const selectedAgent =
+    agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const {
+    attachments,
+    addAttachments,
+    clearAttachments,
+    fileIngress,
+    removeAttachment,
+  } = usePromptAttachmentFiles();
 
   const handleSubmit = async (submittedPrompt: string): Promise<void> => {
     if (!selectedAgentId || submitting) return;
-    if (attachments.length > 0) {
-      setSubmitError(
-        "File attachments are not available in the local agent preview yet.",
-      );
-      return;
-    }
     setSubmitting(true);
     setSubmitError(null);
     try {
+      const promptAttachments = await serializePromptAttachments(
+        attachments,
+        selectedAgent?.promptCapabilities,
+      );
       await draft.flush();
       const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
+        attachments: promptAttachments,
         modelId: selectedModelId,
         prompt: submittedPrompt,
         projectId: activeProject?.id ?? null,
         thinkingEffortId: selectedThinkingEffortId,
       });
       draft.reset();
-      setAttachments([]);
+      clearAttachments();
       onPendingOutgoingTurnChange({
         eventId: result.userMessageEventId,
         sessionId: result.sessionId,
@@ -411,10 +626,12 @@ function NewChatPage({
       await activateSession(result.sessionId);
     } catch (cause) {
       setSubmitError(
-        agentErrorMessage(
-          cause,
-          "The local agent could not be started. Restart Radius and try again.",
-        ),
+        cause instanceof PromptAttachmentError
+          ? cause.message
+          : agentErrorMessage(
+              cause,
+              "The local agent could not be started. Restart Radius and try again.",
+            ),
       );
     } finally {
       setSubmitting(false);
@@ -457,15 +674,11 @@ function NewChatPage({
             selectedModelId={selectedModelId ?? undefined}
             selectedThinkingEffortId={selectedThinkingEffortId ?? undefined}
             value={draft.value}
-            workspaceLabel={activeProject?.name ?? "Select a project"}
+            workspaceLabel={activeProject?.name ?? "No project"}
             workspaceMenu={<ProjectComposerMenu />}
             onAccessModeChange={setAccessMode}
             onAddAttachments={addAttachments}
-            onRemoveAttachment={(index) =>
-              setAttachments((current) =>
-                current.filter((_, currentIndex) => currentIndex !== index),
-              )
-            }
+            onRemoveAttachment={removeAttachment}
             onSelectedAgentChange={setSelectedAgentId}
             onSelectedModelChange={setSelectedModelId}
             onSelectedThinkingEffortChange={setSelectedThinkingEffortId}
@@ -492,7 +705,6 @@ function SessionPage({
   onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
   pendingOutgoingTurn: PendingOutgoingTurn | null;
 }): ReactNode {
-  const [attachments, setAttachments] = useState<File[]>([]);
   const [accessMode, setAccessMode] = useState<ChatAccessMode>("project");
   const [events, setEvents] = useState<SessionTranscriptEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -527,11 +739,22 @@ function SessionPage({
     setSelectedThinkingEffortId,
   } = useDesktopAgents();
   const { project, session } = activeSession;
+  const selectedAgent =
+    agents.find((agent) => agent.id === selectedAgentId) ?? null;
   const draftContext = useMemo<ComposerDraftContext>(
     () => ({ kind: "session", sessionId: session.id }),
     [session.id],
   );
   const draft = useComposerDraft(draftContext);
+  const sessionFeatures = useAgentSessionFeatures(
+    session.id,
+    selectedAgentId,
+    session.status === "active",
+  );
+  const elicitations = useAgentElicitations(
+    session.id,
+    session.status === "active",
+  );
   const planPresentation = useMemo(
     () => buildSessionPlanPresentation(events),
     [events],
@@ -540,11 +763,13 @@ function SessionPage({
   const reduceMotion = useReducedMotion();
   const windowResizing = useWorkspaceWindowResizing();
 
-  const addAttachments = useCallback((files: readonly File[]): void => {
-    if (files.length === 0) return;
-    setAttachments((current) => appendAttachmentFiles(current, files));
-  }, []);
-  const fileIngress = useChatFileIngress(addAttachments);
+  const {
+    attachments,
+    addAttachments,
+    clearAttachments,
+    fileIngress,
+    removeAttachment,
+  } = usePromptAttachmentFiles();
 
   const resolveToolApproval = useCallback(
     async (
@@ -843,19 +1068,18 @@ function SessionPage({
 
   const handleSubmit = async (submittedPrompt: string): Promise<void> => {
     if (!selectedAgentId || submitting) return;
-    if (attachments.length > 0) {
-      setSubmitError(
-        "File attachments are not available in the local agent preview yet.",
-      );
-      return;
-    }
     setSubmitting(true);
     setSubmitError(null);
     try {
+      const promptAttachments = await serializePromptAttachments(
+        attachments,
+        selectedAgent?.promptCapabilities,
+      );
       await draft.flush();
       const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
+        attachments: promptAttachments,
         modelId: selectedModelId,
         prompt: submittedPrompt,
         projectId: project?.id ?? null,
@@ -863,21 +1087,55 @@ function SessionPage({
         thinkingEffortId: selectedThinkingEffortId,
       });
       draft.reset();
-      setAttachments([]);
+      clearAttachments();
       onPendingOutgoingTurnChange({
         eventId: result.userMessageEventId,
         sessionId: result.sessionId,
       });
       setRefreshKey((current) => current + 1);
+      void sessionFeatures.refresh().catch(() => undefined);
+    } catch (cause) {
+      setSubmitError(
+        cause instanceof PromptAttachmentError
+          ? cause.message
+          : agentErrorMessage(
+              cause,
+              "The local agent could not be started. Restart Radius and try again.",
+            ),
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSessionConfigOptionChange = async (
+    configId: string,
+    value: string | boolean,
+  ): Promise<void> => {
+    setSubmitError(null);
+    try {
+      await sessionFeatures.setConfigOption(configId, value);
     } catch (cause) {
       setSubmitError(
         agentErrorMessage(
           cause,
-          "The local agent could not be started. Restart Radius and try again.",
+          "The agent setting could not be updated. Try again.",
         ),
       );
-    } finally {
-      setSubmitting(false);
+    }
+  };
+
+  const handleSessionModeChange = async (modeId: string): Promise<void> => {
+    setSubmitError(null);
+    try {
+      await sessionFeatures.setMode(modeId);
+    } catch (cause) {
+      setSubmitError(
+        agentErrorMessage(
+          cause,
+          "The agent mode could not be updated. Try again.",
+        ),
+      );
     }
   };
 
@@ -981,6 +1239,15 @@ function SessionPage({
       >
         <div className="radius-chat-panel-inset pl-4 sm:pl-6">
           <div className="radius-chat-stable-width pointer-events-auto mx-auto">
+            <AgentElicitationPanel
+              requests={elicitations.requests}
+              loading={elicitations.loading}
+              error={elicitations.error}
+              onRefresh={() => void elicitations.refresh()}
+              onResolve={(request, response) =>
+                elicitations.resolve(request.requestId, response)
+              }
+            />
             {activePlan ? (
               <div className="mb-2 flex justify-center">
                 <PlanProgress plan={activePlan} />
@@ -1000,23 +1267,29 @@ function SessionPage({
               attachments={attachments}
               connectedAgents={agents}
               connectedModels={models}
-              disabled={submitting}
+              contextUsage={sessionFeatures.features?.usage}
+              disabled={submitting || elicitations.requests.length > 0}
               focusKey={session.id}
               selectedAgentId={selectedAgentId ?? undefined}
               selectedModelId={selectedModelId ?? undefined}
               selectedThinkingEffortId={selectedThinkingEffortId ?? undefined}
+              sessionConfigOptions={sessionFeatures.features?.configOptions}
+              sessionModes={sessionFeatures.features?.modes}
+              slashCommands={sessionFeatures.features?.availableCommands}
               value={draft.value}
               workspaceLabel={project?.name}
               onAccessModeChange={setAccessMode}
               onAddAttachments={addAttachments}
-              onRemoveAttachment={(index) =>
-                setAttachments((current) =>
-                  current.filter((_, currentIndex) => currentIndex !== index),
-                )
-              }
+              onRemoveAttachment={removeAttachment}
               onSelectedAgentChange={setSelectedAgentId}
               onSelectedModelChange={setSelectedModelId}
               onSelectedThinkingEffortChange={setSelectedThinkingEffortId}
+              onSessionConfigOptionChange={(configId, value) =>
+                void handleSessionConfigOptionChange(configId, value)
+              }
+              onSessionModeChange={(modeId) =>
+                void handleSessionModeChange(modeId)
+              }
               onSubmit={
                 selectedAgentId
                   ? ({ prompt: submittedPrompt }) =>

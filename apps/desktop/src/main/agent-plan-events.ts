@@ -4,6 +4,7 @@ import type { SessionUpdate } from "@curve-ai/radius-runtime";
 
 type AcpPlanUpdate = Extract<SessionUpdate, { sessionUpdate: "plan" }>;
 type PlanStepState = AcpPlanUpdate["entries"][number]["status"];
+type CanonicalPlanStepState = PlanStepState | "skipped";
 
 export type AgentPlanJournalEvent =
   | {
@@ -18,7 +19,7 @@ export type AgentPlanJournalEvent =
       eventId: string;
       eventType: "task_step_update";
       taskStepId: string;
-      state: PlanStepState;
+      state: CanonicalPlanStepState;
       detail: null;
     };
 
@@ -104,4 +105,26 @@ export function agentPlanJournalEvents(
           ],
     ),
   ];
+}
+
+export function removeAgentPlanJournalEvents(
+  state: AgentPlanJournalState,
+  createId: () => string = randomUUID,
+): AgentPlanJournalEvent[] {
+  const current = state.current;
+  if (!current) return [];
+  state.current = null;
+  return current.stepIds.flatMap((taskStepId, index) =>
+    current.statuses[index] === "completed"
+      ? []
+      : [
+          {
+            eventId: createId(),
+            eventType: "task_step_update" as const,
+            taskStepId,
+            state: "skipped" as const,
+            detail: null,
+          },
+        ],
+  );
 }

@@ -64,13 +64,25 @@ are not the packaged product path.
 
 ## Current limitations
 
-- Each prompt starts a disposable microVM and ACP session.
-- Follow-up context is replayed from canonical stored messages by the desktop.
-- Ask-for-approval is fail-closed until the approval surface exists.
+- The desktop starts a disposable microVM process for each prompt. It resumes or
+  loads the provider ACP session when the agent advertises continuation support;
+  otherwise it creates a new provider session and supplies bounded canonical
+  message history.
+- Prompts accept ACP text, image, audio, and embedded-resource content. Agents
+  must advertise the corresponding optional prompt capabilities before Radius
+  sends non-text content.
+- Clients can provide memory-only form and URL elicitation handlers. URL
+  completion remains an agent notification and does not embed or prefetch the
+  destination.
+- Radius can automatically use one advertised non-terminal authentication
+  method. Choosing among multiple methods and interactive terminal
+  authentication remain unimplemented.
+- Ask-for-approval remains fail-closed whenever an approval cannot be presented
+  or resolved.
 - Project access may choose only an ACP `allow_once` option for a requested
   operation.
 - ACP terminal and text-file client adapters are implemented. The desktop may
   advertise them when the active release, project roots, and host policy allow;
-  ordinary file attachments remain unconnected.
+  additional project roots are sent only when the agent advertises support.
 - Release signature verification, staged activation, rollback, and revocation
   remain release-manager work.

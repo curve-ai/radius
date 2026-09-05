@@ -154,6 +154,12 @@ export interface SessionProjectContext {
   projectId: string | null;
 }
 
+export interface AgentProviderSessionRecord {
+  agentRunId: string;
+  providerKey: string;
+  providerSessionId: string;
+}
+
 export interface SessionTranscriptArtifactRecord extends Pick<
   ArtifactRecord,
   "id" | "name" | "artifactType" | "storageKind"
@@ -1929,6 +1935,35 @@ export async function getSessionProjectContext(
     .where(and(eq(sessions.id, sessionId), isNull(sessions.deletedAtMs)))
     .limit(1);
   return session ?? null;
+}
+
+export async function getLatestAgentProviderSession(
+  database: RadiusDatabase,
+  sessionId: string,
+  providerKey: string,
+): Promise<AgentProviderSessionRecord | null> {
+  const [record] = await database.db
+    .select({
+      agentRunId: agentRuns.id,
+      providerKey: agentRuns.providerKey,
+      providerSessionId: agentRuns.providerRunId,
+    })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.sessionId, sessionId),
+        eq(agentRuns.providerKey, providerKey),
+        isNotNull(agentRuns.providerRunId),
+      ),
+    )
+    .orderBy(desc(agentRuns.startedAtMs))
+    .limit(1);
+  if (!record?.providerSessionId) return null;
+  return {
+    agentRunId: record.agentRunId,
+    providerKey: record.providerKey,
+    providerSessionId: record.providerSessionId,
+  };
 }
 
 export async function setSessionPinned(

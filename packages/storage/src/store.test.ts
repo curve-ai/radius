@@ -37,6 +37,7 @@ import {
   createProject,
   createSession,
   getSessionProjectContext,
+  getLatestAgentProviderSession,
   getSessionRevision,
   listAgentRunFileOutcomes,
   listAllProjectSessions,
@@ -286,6 +287,71 @@ test("projects canonical plans and step updates into the session transcript", as
         detail: "Matching the supplied reference",
       },
     ]);
+  });
+});
+
+test("finds the latest provider session for one Radius session and agent", async () => {
+  await withDatabase(async (database) => {
+    const session = await createSession(database, {
+      originClientInstanceId: clientId,
+      title: "Provider continuity",
+      now: Date.parse("2026-09-01T14:59:00.000Z"),
+    });
+    const events = [
+      {
+        eventId: "9b72ed2c-a992-4c43-88df-f7c556d50010",
+        sessionId: session.id,
+        sessionRevision: 2,
+        sourceClientInstanceId: clientId,
+        agentRunId: "9b72ed2c-a992-4c43-88df-f7c556d50011",
+        occurredAt: "2026-09-01T15:00:00.000Z",
+        artifactLinks: [],
+        eventType: "agent_run" as const,
+        providerKey: "fx",
+        providerRunId: "provider-session-old",
+        triggeringMessageEventId: null,
+      },
+      {
+        eventId: "9b72ed2c-a992-4c43-88df-f7c556d50012",
+        sessionId: session.id,
+        sessionRevision: 3,
+        sourceClientInstanceId: clientId,
+        agentRunId: "9b72ed2c-a992-4c43-88df-f7c556d50013",
+        occurredAt: "2026-09-01T15:01:00.000Z",
+        artifactLinks: [],
+        eventType: "agent_run" as const,
+        providerKey: "other-agent",
+        providerRunId: "provider-session-other",
+        triggeringMessageEventId: null,
+      },
+      {
+        eventId: "9b72ed2c-a992-4c43-88df-f7c556d50014",
+        sessionId: session.id,
+        sessionRevision: 4,
+        sourceClientInstanceId: clientId,
+        agentRunId: "9b72ed2c-a992-4c43-88df-f7c556d50015",
+        occurredAt: "2026-09-01T15:02:00.000Z",
+        artifactLinks: [],
+        eventType: "agent_run" as const,
+        providerKey: "fx",
+        providerRunId: "provider-session-current",
+        triggeringMessageEventId: null,
+      },
+    ];
+    for (const event of events) await appendSessionEvent(database, event);
+
+    assert.deepEqual(
+      await getLatestAgentProviderSession(database, session.id, "fx"),
+      {
+        agentRunId: "9b72ed2c-a992-4c43-88df-f7c556d50015",
+        providerKey: "fx",
+        providerSessionId: "provider-session-current",
+      },
+    );
+    assert.equal(
+      await getLatestAgentProviderSession(database, session.id, "missing"),
+      null,
+    );
   });
 });
 

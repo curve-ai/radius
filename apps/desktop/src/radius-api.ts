@@ -160,6 +160,16 @@ export interface DesktopAgentSummary {
     defaultThinkingEffortId: string | null;
   }>;
   defaultModelId: string | null;
+  /**
+   * ACP prompt content advertised by the agent when Radius has already
+   * initialized it. Omitted means the desktop main process must negotiate and
+   * validate content against the live initialize response before prompting.
+   */
+  promptCapabilities?: {
+    image: boolean;
+    audio: boolean;
+    embeddedContext: boolean;
+  };
   authentication: {
     state:
       | "not_required"
@@ -172,11 +182,117 @@ export interface DesktopAgentSummary {
   };
 }
 
+export type PromptAttachment =
+  | {
+      type: "image";
+      name: string;
+      mimeType: string;
+      /** Base64-encoded file bytes. */
+      data: string;
+    }
+  | {
+      type: "audio";
+      name: string;
+      mimeType: string;
+      /** Base64-encoded file bytes. */
+      data: string;
+    }
+  | {
+      type: "resource";
+      name: string;
+      resource:
+        | {
+            uri: string;
+            mimeType: string;
+            text: string;
+          }
+        | {
+            uri: string;
+            mimeType: string;
+            /** Base64-encoded file bytes. */
+            blob: string;
+          };
+    };
+
+export const MAX_PROMPT_ATTACHMENT_COUNT = 10;
+export const MAX_PROMPT_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_PROMPT_AUDIO_BYTES = 20 * 1024 * 1024;
+export const MAX_PROMPT_RESOURCE_BYTES = 2 * 1024 * 1024;
+export const MAX_PROMPT_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
+
 export interface DesktopRuntimeStatus {
   state: "unconfigured" | "ready" | "running" | "error";
   agentId: string | null;
   releaseVersion: string | null;
   errorCode: string | null;
+}
+
+export interface DesktopAgentSessionConfigSelectOption {
+  id: string;
+  label: string;
+  description: string | null;
+  groupId: string | null;
+  groupLabel: string | null;
+}
+
+interface DesktopAgentSessionConfigOptionBase {
+  id: string;
+  label: string;
+  description: string | null;
+  /** ACP semantic category. Unknown and extension categories are retained. */
+  category: string | null;
+}
+
+export type DesktopAgentSessionConfigOption =
+  | (DesktopAgentSessionConfigOptionBase & {
+      type: "select";
+      currentValue: string;
+      options: DesktopAgentSessionConfigSelectOption[];
+    })
+  | (DesktopAgentSessionConfigOptionBase & {
+      type: "boolean";
+      currentValue: boolean;
+    });
+
+export interface DesktopAgentSessionFeatures {
+  agentId: string;
+  availableCommands: Array<{
+    name: string;
+    description: string;
+    inputHint: string | null;
+  }>;
+  configOptions: DesktopAgentSessionConfigOption[];
+  modes: {
+    currentModeId: string;
+    availableModes: Array<{
+      id: string;
+      label: string;
+      description: string | null;
+    }>;
+  } | null;
+  usage: {
+    used: number;
+    size: number;
+    cost: { amount: number; currency: string } | null;
+  } | null;
+}
+
+export interface GetAgentSessionFeaturesInput {
+  sessionId: string;
+  agentId: string;
+}
+
+export interface SetAgentSessionConfigOptionInput {
+  sessionId: string;
+  agentId: string;
+  configId: string;
+  value: string | boolean;
+}
+
+export interface SetAgentSessionModeInput {
+  sessionId: string;
+  agentId: string;
+  modeId: string;
 }
 
 export interface BrowserConnectionStatus {
@@ -191,6 +307,12 @@ export interface BrowserConnectionStatus {
 export interface StartAgentPromptInput {
   accessMode: "ask" | "project" | "full";
   agentId: string;
+  /**
+   * Serializable prompt content prepared by the renderer. Desktop main must
+   * revalidate names, MIME types, decoded sizes, and ACP prompt capabilities
+   * before constructing ContentBlocks.
+   */
+  attachments?: PromptAttachment[];
   modelId?: string | null;
   prompt: string;
   projectId?: string | null;
@@ -210,6 +332,64 @@ export interface ResolveToolApprovalInput {
   approvalRequestEventId: string;
   selection: ToolApprovalSelection;
   sessionId: string;
+}
+
+export type AgentElicitationValue = string | number | boolean | string[];
+
+export interface AgentElicitationOption {
+  value: string;
+  title: string;
+  description: string | null;
+}
+
+export interface AgentElicitationField {
+  name: string;
+  type: "string" | "number" | "integer" | "boolean" | "array";
+  title: string | null;
+  description: string | null;
+  required: boolean;
+  defaultValue: AgentElicitationValue | null;
+  options: AgentElicitationOption[] | null;
+  format: "email" | "uri" | "date" | "date-time" | null;
+  minimum: number | null;
+  maximum: number | null;
+  minimumLength: number | null;
+  maximumLength: number | null;
+  pattern: string | null;
+}
+
+export type PendingAgentElicitation = {
+  requestId: string;
+  sessionId: string;
+  message: string;
+  toolCallId: string | null;
+  createdAt: string;
+} & (
+  | {
+      mode: "form";
+      title: string | null;
+      description: string | null;
+      fields: AgentElicitationField[];
+    }
+  | {
+      mode: "url";
+      elicitationId: string;
+      url: string;
+    }
+);
+
+export type AgentElicitationResponse =
+  | {
+      action: "accept";
+      content?: Record<string, AgentElicitationValue> | null;
+    }
+  | { action: "decline" }
+  | { action: "cancel" };
+
+export interface ResolveAgentElicitationInput {
+  sessionId: string;
+  requestId: string;
+  response: AgentElicitationResponse;
 }
 
 export interface McpApprovalGrantSummary {
@@ -305,6 +485,15 @@ export interface RadiusApi {
   connectAgentAuthentication(agentId: string): Promise<DesktopAgentSummary>;
   disconnectAgentAuthentication(agentId: string): Promise<DesktopAgentSummary>;
   runtimeStatus(): Promise<DesktopRuntimeStatus>;
+  getAgentSessionFeatures(
+    input: GetAgentSessionFeaturesInput,
+  ): Promise<DesktopAgentSessionFeatures | null>;
+  setAgentSessionConfigOption(
+    input: SetAgentSessionConfigOptionInput,
+  ): Promise<DesktopAgentSessionFeatures | null>;
+  setAgentSessionMode(
+    input: SetAgentSessionModeInput,
+  ): Promise<DesktopAgentSessionFeatures | null>;
   browserStatus(): Promise<BrowserConnectionStatus>;
   revealBrowserExtension(): Promise<boolean>;
   onBrowserStatus(
@@ -314,6 +503,10 @@ export interface RadiusApi {
     input: StartAgentPromptInput,
   ): Promise<StartAgentPromptResult>;
   resolveToolApproval(input: ResolveToolApprovalInput): Promise<void>;
+  listPendingAgentElicitations(
+    sessionId: string,
+  ): Promise<PendingAgentElicitation[]>;
+  resolveAgentElicitation(input: ResolveAgentElicitationInput): Promise<void>;
   listMcpApprovalGrants(): Promise<McpApprovalGrantSummary[]>;
   revokeMcpApproval(input: {
     grantId: string;
