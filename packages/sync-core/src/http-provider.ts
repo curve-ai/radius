@@ -100,8 +100,11 @@ export class HttpSyncProvider implements SyncProvider {
       if (retry.ok) return;
       throw new Error(`SYNC_DEVICE_REGISTRATION_${retry.status}`);
     }
+    // The status is what callers key retry decisions off, so it stays in the
+    // message even when the server names the failure itself.
     const code = await errorCode(response);
-    throw new Error(code ?? `SYNC_DEVICE_REGISTRATION_${response.status}`);
+    const failure = `SYNC_DEVICE_REGISTRATION_${response.status}`;
+    throw new Error(code ? `${failure}_${code}` : failure);
   }
 
   #adoptIdentity(identity: HttpProviderIdentity): void {
