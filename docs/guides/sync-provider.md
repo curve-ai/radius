@@ -179,12 +179,15 @@ The current developer connection path is opt-in through Electron-main-process
 environment variables:
 
 ```text
-RADIUS_SYNC_ENDPOINT=https://example.test/api/sync/v1/
-RADIUS_SYNC_TOKEN=<short-lived Better Auth JWT>
+RADIUS_SYNC_ENDPOINT=https://northwind.example.test
+RADIUS_SYNC_TOKEN=radius_pat_<platform developer token>
 ```
 
-The token never crosses the preload boundary. This environment path is for
-development and self-host conformance, not the final sign-in UX. A future
+The endpoint is a platform base URL; sync itself lives at
+`/api/platform/v1/sync/` beneath it. The token never crosses the preload
+boundary. This environment path is for headless development and self-host
+conformance, not the sign-in UX: the app itself signs in through a window and
+authenticates with the `radius_platform_session` cookie instead. A future
 provider registry should express intent without embedding credentials and may
 resemble:
 

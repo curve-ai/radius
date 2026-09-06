@@ -14,7 +14,7 @@ import {
 import { localDeviceIdentity } from "./device-identity";
 import { BoundedLru } from "./bounded-lru";
 import { initializeStorage } from "./storage";
-import { getConnectorCatalogAccessToken } from "./sync";
+import { platformRequestCredentials } from "./sync";
 
 const CATALOG_TIMEOUT_MS = 20_000;
 const LOGO_TIMEOUT_MS = 8_000;
@@ -217,17 +217,20 @@ export async function requestConnectorLogoResolution(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CATALOG_TIMEOUT_MS);
   try {
-    const token = await getConnectorCatalogAccessToken(controller.signal);
-    const response = await fetch(new URL("logos/resolve", catalogBaseUrl()), {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
+    const credentials = await platformRequestCredentials(controller.signal);
+    const response = await credentials.fetch(
+      new URL("logos/resolve", catalogBaseUrl()),
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          ...credentials.headers,
+        },
+        body: JSON.stringify({ domain, homepageUrl }),
       },
-      body: JSON.stringify({ domain, homepageUrl }),
-    });
+    );
     if (!response.ok && response.status !== 202) {
       throw new Error(`CONNECTOR_LOGO_RESOLVE_${response.status}`);
     }
