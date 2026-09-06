@@ -25,6 +25,12 @@ export interface PlatformIdentity {
 }
 
 const SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * How long a sign-in may stay invisible. A redirect chain that needs nothing
+ * from the user finishes well inside this; anything slower is shown so the
+ * user is never waiting on a window they cannot see.
+ */
+const SILENT_SIGN_IN_GRACE_MS = 6_000;
 
 export function platformSession(): Electron.Session {
   return electronSession.fromPartition(PLATFORM_PARTITION);
@@ -120,9 +126,15 @@ export async function platformLogout(baseUrl: string): Promise<void> {
 }
 
 /**
- * Opens a window on the platform's own login route and resolves once the
- * session cookie is in the partition. Which identity provider appears is the
- * operator's business; Radius only waits for the outcome.
+ * Signs in to a platform, showing a window only if one is needed.
+ *
+ * A Curve Cloud organization host delegates login back to Cloud, and the
+ * Cloud session already lives in this partition, so the whole exchange is a
+ * redirect chain that resolves without the user touching anything. Showing a
+ * window for that reads as being asked to sign in twice. The window is
+ * therefore created hidden and revealed only once the chain settles somewhere
+ * that is not the workspace, which is the point at which a person is actually
+ * being asked for something.
  */
 export async function signInToPlatform(baseUrl: string): Promise<void> {
   const base = validatedPlatformUrl(baseUrl);
@@ -133,6 +145,7 @@ export async function signInToPlatform(baseUrl: string): Promise<void> {
     width: 480,
     height: 720,
     title: "Sign in to Radius",
+    show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -152,6 +165,7 @@ export async function signInToPlatform(baseUrl: string): Promise<void> {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      clearTimeout(revealTimer);
       if (!authWindow.isDestroyed()) authWindow.close();
       if (error) reject(error);
       else resolve();
@@ -160,6 +174,33 @@ export async function signInToPlatform(baseUrl: string): Promise<void> {
       () => finish(new Error("PLATFORM_AUTH_TIMEOUT")),
       SIGN_IN_TIMEOUT_MS,
     );
+
+    const reveal = (): void => {
+      if (settled || authWindow.isDestroyed() || authWindow.isVisible()) return;
+      authWindow.show();
+    };
+    // A safety net for a chain that stalls without ever settling: better a
+    // window the user can act on than an invisible wait.
+    const revealTimer = setTimeout(reveal, SILENT_SIGN_IN_GRACE_MS);
+    revealTimer.unref?.();
+    authWindow.webContents.on("did-stop-loading", () => {
+      // Intermediate redirects do not stop loading, so this fires on a page
+      // the user has landed on. Anywhere but the workspace wants input.
+      let current: URL;
+      try {
+        current = new URL(authWindow.webContents.getURL());
+      } catch {
+        return;
+      }
+      if (
+        current.origin === base.origin &&
+        current.pathname === workspacePath
+      ) {
+        return;
+      }
+      reveal();
+    });
+
     authWindow.on("closed", () =>
       finish(
         new Error(

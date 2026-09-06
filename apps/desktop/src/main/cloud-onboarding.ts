@@ -22,10 +22,20 @@ export async function connectViaCloud(
 ): Promise<CloudWorkspace> {
   const cloud = validatedPlatformUrl(cloudUrl);
   const onboarding = new URL("onboarding", cloud);
+
+  // Someone reconnecting is usually still signed in and already has a
+  // workspace, in which case there is nothing to ask and no reason to open a
+  // window at all.
+  const existing = await readCloudSetupState(cloud.toString(), platformFetch);
+  if (existing.status === "ready") return existing.workspace;
+
   const window = new BrowserWindow({
     width: 520,
     height: 760,
     title: "Connect to Curve Cloud",
+    // Shown only once the poll finds something a person has to do. Waiting on
+    // provisioning is not one of those things: the app reports that itself.
+    show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -51,6 +61,10 @@ export async function connectViaCloud(
       () => finish(new Error("CLOUD_SETUP_TIMEOUT")),
       SETUP_TIMEOUT_MS,
     );
+    const reveal = (): void => {
+      if (settled || window.isDestroyed() || window.isVisible()) return;
+      window.show();
+    };
     window.on("closed", () => finish(new Error("PLATFORM_AUTH_CANCELLED")));
     window.webContents.setWindowOpenHandler(({ url }) => {
       void shell.openExternal(url);
@@ -68,9 +82,11 @@ export async function connectViaCloud(
         switch (state.status) {
           case "signed-out":
             onProgress("Waiting for you to sign in to Curve Cloud.");
+            reveal();
             return;
           case "no-organization":
             onProgress("Waiting for you to create an organization.");
+            reveal();
             return;
           case "provisioning":
             onProgress("Setting up your workspace…");
