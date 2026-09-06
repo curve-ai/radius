@@ -106,14 +106,25 @@ function setProgress(message: string | null): void {
   status = { ...status, progress: message };
 }
 
-async function stopActiveSync(): Promise<void> {
+/**
+ * Stops the schedule and cancels anything in flight, without waiting for it.
+ * Safe to call from inside a run: waiting there would mean the run awaiting
+ * its own promise, which never resolves and wedges every later caller.
+ */
+function haltActiveSync(): void {
   if (timer) clearInterval(timer);
   timer = null;
   manualRun = null;
   const controller = activeAbortController;
   activeAbortController = null;
   controller?.abort();
-  await runPromise;
+}
+
+/** Halts, then waits for the cancelled run to unwind. Never call from a run. */
+async function stopActiveSync(): Promise<void> {
+  const pending = runPromise;
+  haltActiveSync();
+  await pending;
 }
 
 async function startConnection(
@@ -204,7 +215,7 @@ async function startConnection(
           errorCode.includes("SYNC_MEMBERSHIP_NOT_FOUND") ||
           errorCode.includes("401")
         ) {
-          await stopActiveSync();
+          haltActiveSync();
         }
         status = { ...status, state: "error", errorCode, progress: null };
       }
