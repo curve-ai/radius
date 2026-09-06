@@ -38,7 +38,9 @@ function connectionDescription(status: DesktopSyncStatus): string {
     case "error":
       return `Connected to ${where}, but the last sync did not finish.`;
     case "disabled":
-      return "Conversations stay on this Mac until you connect a platform.";
+      return status.connection
+        ? `Syncing with ${where} is turned off. Conversations stay on this Mac.`
+        : "Conversations stay on this Mac until you connect a platform.";
   }
 }
 
@@ -145,6 +147,25 @@ export function PlatformSyncSettings(): ReactNode {
           label="Radius platform"
           description={connectionDescription(status)}
         />
+        {status.connection ? (
+          <SettingsRow
+            label="Automatic sync"
+            description="Turn this back on to resume the connection you already set up."
+          >
+            <Switch
+              checked={false}
+              disabled={busy || connecting}
+              aria-label="Sync conversations automatically"
+              onCheckedChange={() =>
+                void runAction(
+                  () => window.radius.setSyncEnabled(true),
+                  "Radius could not turn syncing back on",
+                )
+              }
+            />
+          </SettingsRow>
+        ) : null}
+
         <div className="space-y-4 px-4 py-4">
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -275,9 +296,9 @@ export function PlatformSyncSettings(): ReactNode {
           checked
           disabled={busy}
           aria-label="Sync conversations automatically"
-          onCheckedChange={() =>
+          onCheckedChange={(next) =>
             void runAction(
-              () => window.radius.setSyncEnabled(false),
+              () => window.radius.setSyncEnabled(next),
               "Radius could not turn off syncing",
             )
           }

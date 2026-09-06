@@ -35,6 +35,12 @@ export function platformConnectMessage(cause: unknown): string {
   if (raw.includes("CLOUD_SETUP_FAILED")) {
     return "Curve Cloud could not finish setting up your workspace. Retry setup from the Cloud dashboard (CLOUD_SETUP_FAILED).";
   }
+  if (raw.includes("CLOUD_ORGANIZATION_URL_UNKNOWN")) {
+    return "Curve Cloud did not say where your workspace lives, and Radius could not work it out. Retry setup from the Cloud dashboard (CLOUD_ORGANIZATION_URL_UNKNOWN).";
+  }
+  if (raw.includes("SYNC_REAUTHENTICATION_REQUIRED")) {
+    return "Your platform session has expired. Sign out and connect again (SYNC_REAUTHENTICATION_REQUIRED).";
+  }
   if (raw.includes("SYNC_MEMBERSHIP_NOT_FOUND")) {
     return "You were removed from this organization, so syncing has stopped (SYNC_MEMBERSHIP_NOT_FOUND).";
   }

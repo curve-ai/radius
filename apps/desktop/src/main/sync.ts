@@ -370,8 +370,33 @@ export async function connectPlatform(
 }
 
 export async function runSyncNow(): Promise<DesktopSyncStatus> {
-  await manualRun?.();
+  if (manualRun) {
+    await manualRun();
+    return getSyncStatus();
+  }
+  // A fatal error halted the schedule, so there is no run left to repeat.
+  // Retrying means starting the connection again, which registers the device
+  // afresh and reports honestly whether the session still works.
+  await startStoredConnection();
   return getSyncStatus();
+}
+
+/**
+ * Starts the connection the user last set up. Refuses rather than starting a
+ * connection whose credentials are gone, so the caller can say that signing
+ * in again is the only way forward.
+ */
+async function startStoredConnection(): Promise<void> {
+  if (!storageContext) throw new Error("STORAGE_NOT_READY");
+  const connection = await getMostRecentSyncConnection(storageContext.database);
+  if (!connection) throw new Error("SYNC_PROVIDER_REQUIRED");
+  if (!canResume(connection)) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+  await enableSyncConnection(storageContext.database, connection.id);
+  await startConnection(
+    storageContext,
+    { ...connection, enabled: true },
+    accessTokenProvider(connection),
+  );
 }
 
 export async function setSyncEnabled(
@@ -396,15 +421,7 @@ export async function setSyncEnabled(
     return getSyncStatus();
   }
 
-  const connection = await getMostRecentSyncConnection(storageContext.database);
-  if (!connection) throw new Error("SYNC_PROVIDER_REQUIRED");
-  if (!canResume(connection)) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-  await enableSyncConnection(storageContext.database, connection.id);
-  await startConnection(
-    storageContext,
-    { ...connection, enabled: true },
-    accessTokenProvider(connection),
-  );
+  await startStoredConnection();
   return getSyncStatus();
 }
 
