@@ -19,11 +19,18 @@ export interface CloudWorkspace {
 const READY = "ready";
 const TERMINAL_FAILURES = new Set(["failed", "suspended", "closed"]);
 
+/** The label Cloud onboarding is served on, and the one an org replaces. */
+const CLOUD_HOSTNAME_LABEL = "app";
+
 /**
  * Cloud replaces the leading hostname label: `app.curvehq.sh` becomes
  * `northwind.curvehq.sh`, and `app.localhost:8080` becomes
  * `northwind.localhost:8080`. Used only when the API does not report a URL
  * of its own.
+ *
+ * Any other shape of host cannot be rewritten this way. Guessing would hand
+ * back a plausible address for a host that does not exist, so this refuses
+ * instead and lets the caller report a failure the user can act on.
  */
 export function organizationBaseUrl(
   cloudUrl: string,
@@ -31,7 +38,9 @@ export function organizationBaseUrl(
 ): string {
   const cloud = validatedPlatformUrl(cloudUrl);
   const labels = cloud.hostname.split(".");
-  if (labels.length < 2) return cloud.toString();
+  if (labels.length < 2 || labels[0] !== CLOUD_HOSTNAME_LABEL) {
+    throw new Error("CLOUD_ORGANIZATION_URL_UNKNOWN");
+  }
   const organization = new URL(cloud.toString());
   organization.hostname = [hostnameLabel, ...labels.slice(1)].join(".");
   return organization.toString();
@@ -49,6 +58,7 @@ interface CurrentOrganizationResponse {
 
 export type SetupState =
   | { status: "signed-out" }
+  | { status: "unavailable"; reason: string }
   | { status: "no-organization" }
   | { status: "provisioning" }
   | { status: "failed"; lifecycleState: string }
@@ -73,10 +83,15 @@ export async function readCloudSetupState(
       { credentials: "include" },
     );
   } catch {
-    return { status: "signed-out" };
+    return { status: "unavailable", reason: "PLATFORM_UNREACHABLE" };
   }
+  // Only a 401 means "nobody is signed in here". Anything else is Cloud
+  // failing to answer, and telling the user to sign in would send them
+  // looking for a problem they do not have.
   if (response.status === 401) return { status: "signed-out" };
-  if (!response.ok) return { status: "signed-out" };
+  if (!response.ok) {
+    return { status: "unavailable", reason: `CLOUD_SETUP_${response.status}` };
+  }
 
   const body = (await response
     .json()

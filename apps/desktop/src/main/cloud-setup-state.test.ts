@@ -22,6 +22,15 @@ test("swaps the leading hostname label for the organization's", () => {
   );
 });
 
+test("refuses to rebuild a host that is not Cloud's own shape", () => {
+  for (const cloudUrl of ["https://curvehq.sh", "http://localhost:8080"]) {
+    assert.throws(
+      () => organizationBaseUrl(cloudUrl, "northwind"),
+      /CLOUD_ORGANIZATION_URL_UNKNOWN/,
+    );
+  }
+});
+
 test("reports being signed out rather than failing", async () => {
   const state = await readCloudSetupState(
     "https://app.curvehq.sh",
@@ -101,4 +110,26 @@ test("waits when no organization has been created yet", async () => {
     respond(200, { organization: null }),
   );
   assert.equal(state.status, "no-organization");
+});
+
+test("separates Cloud being unavailable from nobody being signed in", async () => {
+  const failed = await readCloudSetupState(
+    "https://app.curvehq.sh",
+    respond(500, { error: "INTERNAL" }),
+  );
+  assert.deepEqual(failed, {
+    status: "unavailable",
+    reason: "CLOUD_SETUP_500",
+  });
+
+  const unreachable = await readCloudSetupState(
+    "https://app.curvehq.sh",
+    (async () => {
+      throw new Error("connect ECONNREFUSED");
+    }) as unknown as typeof fetch,
+  );
+  assert.deepEqual(unreachable, {
+    status: "unavailable",
+    reason: "PLATFORM_UNREACHABLE",
+  });
 });

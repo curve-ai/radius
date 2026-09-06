@@ -80,6 +80,11 @@ export async function connectViaCloud(
           platformFetch,
         );
         switch (state.status) {
+          case "unavailable":
+            // A blip must not end a flow the user is halfway through, and it
+            // is not a reason to ask them to sign in again.
+            onProgress("Waiting for Curve Cloud to respond…");
+            return;
           case "signed-out":
             onProgress("Waiting for you to sign in to Curve Cloud.");
             reveal();
