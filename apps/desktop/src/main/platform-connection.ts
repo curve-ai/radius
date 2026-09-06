@@ -126,8 +126,18 @@ export async function platformLogout(baseUrl: string): Promise<void> {
  */
 function oidcLoginUrl(base: URL): URL {
   const url = new URL("api/platform/v1/auth/oidc/login", base);
-  url.searchParams.set("return_to", "/workspace");
+  url.searchParams.set("return_to", workspacePath(base));
   return url;
+}
+
+/**
+ * Where the platform lands a signed-in browser. A platform hosted below the
+ * root keeps its prefix, so this has to be derived from the base rather than
+ * written out: the identity provider must return to the same path sign-in
+ * waits for.
+ */
+function workspacePath(base: URL): string {
+  return new URL("workspace", base).pathname;
 }
 
 /**
@@ -173,7 +183,7 @@ export async function trySilentPlatformSignIn(
 export async function signInToPlatform(baseUrl: string): Promise<void> {
   const base = validatedPlatformUrl(baseUrl);
   const loginUrl = oidcLoginUrl(base);
-  const workspacePath = new URL("workspace", base).pathname;
+  const signedInPath = workspacePath(base);
 
   const authWindow = new BrowserWindow({
     width: 480,
@@ -234,7 +244,7 @@ export async function signInToPlatform(baseUrl: string): Promise<void> {
       }
       if (target.origin !== base.origin) return;
       sawPlatformPage = true;
-      if (target.pathname !== workspacePath) return;
+      if (target.pathname !== signedInPath) return;
 
       checking = true;
       try {
