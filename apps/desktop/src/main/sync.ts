@@ -434,13 +434,31 @@ export async function stopSync(): Promise<void> {
   await stopActiveSync();
 }
 
-export async function getConnectorCatalogAccessToken(
+/**
+ * How to authenticate a request to the platform outside the sync engine. It
+ * is the same choice `startConnection` makes: a headless installation carries
+ * a token on the global fetch, and a signed-in one rides the session cookie,
+ * which only the partition's own fetch will send.
+ */
+export interface PlatformRequestCredentials {
+  fetch: typeof globalThis.fetch;
+  headers: Record<string, string>;
+}
+
+export async function platformRequestCredentials(
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<PlatformRequestCredentials> {
   if (!storageContext) throw new Error("STORAGE_NOT_READY");
   const connection = await getMostRecentSyncConnection(storageContext.database);
   if (!connection) throw new Error("PLATFORM_CONNECTION_REQUIRED");
   const provider = accessTokenProvider(connection);
-  if (!provider) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-  return provider(signal);
+  if (!provider) {
+    if (!canResume(connection))
+      throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+    return { fetch: platformFetch, headers: {} };
+  }
+  return {
+    fetch: globalThis.fetch,
+    headers: { authorization: `Bearer ${await provider(signal)}` },
+  };
 }
