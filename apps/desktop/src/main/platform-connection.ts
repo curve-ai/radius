@@ -25,12 +25,6 @@ export interface PlatformIdentity {
 }
 
 const SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
-/**
- * How long a sign-in may stay invisible. A redirect chain that needs nothing
- * from the user finishes well inside this; anything slower is shown so the
- * user is never waiting on a window they cannot see.
- */
-const SILENT_SIGN_IN_GRACE_MS = 6_000;
 
 export function platformSession(): Electron.Session {
   return electronSession.fromPartition(PLATFORM_PARTITION);
@@ -126,26 +120,65 @@ export async function platformLogout(baseUrl: string): Promise<void> {
 }
 
 /**
- * Signs in to a platform, showing a window only if one is needed.
+ * The platform's `/login` page is a real page with a button on it, and that
+ * button goes here. Starting at the destination skips a click that exists
+ * only for people who arrived in a browser without meaning to sign in.
+ */
+function oidcLoginUrl(base: URL): URL {
+  const url = new URL("api/platform/v1/auth/oidc/login", base);
+  url.searchParams.set("return_to", "/workspace");
+  return url;
+}
+
+/**
+ * Completes sign-in without any window when the redirect chain needs nothing
+ * from the user.
  *
  * A Curve Cloud organization host delegates login back to Cloud, and the
- * Cloud session already lives in this partition, so the whole exchange is a
- * redirect chain that resolves without the user touching anything. Showing a
- * window for that reads as being asked to sign in twice. The window is
- * therefore created hidden and revealed only once the chain settles somewhere
- * that is not the workspace, which is the point at which a person is actually
- * being asked for something.
+ * Cloud session already lives in this partition, so the exchange is pure
+ * redirects. Following them with the partition's own fetch lands the session
+ * cookie in the same jar a window would have used. An identity provider that
+ * wants a password ends the chain on its own page instead, which sets no
+ * session and simply reports failure here.
+ */
+export async function trySilentPlatformSignIn(
+  baseUrl: string,
+): Promise<boolean> {
+  const base = validatedPlatformUrl(baseUrl);
+  try {
+    const response = await platformFetch(oidcLoginUrl(base).toString(), {
+      redirect: "follow",
+    });
+    // A platform with no identity provider cannot be signed in to at all.
+    if (response.status === 503)
+      throw new Error("PLATFORM_OIDC_NOT_CONFIGURED");
+    await platformIdentity(base.toString());
+    return true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "PLATFORM_OIDC_NOT_CONFIGURED"
+    ) {
+      throw error;
+    }
+    return false;
+  }
+}
+
+/**
+ * Opens a window on the platform's identity provider and resolves once the
+ * session cookie is in the partition. Which provider appears is the
+ * operator's business; Radius only waits for the outcome.
  */
 export async function signInToPlatform(baseUrl: string): Promise<void> {
   const base = validatedPlatformUrl(baseUrl);
-  const loginUrl = new URL("login?return_to=/workspace", base);
+  const loginUrl = oidcLoginUrl(base);
   const workspacePath = new URL("workspace", base).pathname;
 
   const authWindow = new BrowserWindow({
     width: 480,
     height: 720,
     title: "Sign in to Radius",
-    show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -165,7 +198,6 @@ export async function signInToPlatform(baseUrl: string): Promise<void> {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      clearTimeout(revealTimer);
       if (!authWindow.isDestroyed()) authWindow.close();
       if (error) reject(error);
       else resolve();
@@ -174,32 +206,6 @@ export async function signInToPlatform(baseUrl: string): Promise<void> {
       () => finish(new Error("PLATFORM_AUTH_TIMEOUT")),
       SIGN_IN_TIMEOUT_MS,
     );
-
-    const reveal = (): void => {
-      if (settled || authWindow.isDestroyed() || authWindow.isVisible()) return;
-      authWindow.show();
-    };
-    // A safety net for a chain that stalls without ever settling: better a
-    // window the user can act on than an invisible wait.
-    const revealTimer = setTimeout(reveal, SILENT_SIGN_IN_GRACE_MS);
-    revealTimer.unref?.();
-    authWindow.webContents.on("did-stop-loading", () => {
-      // Intermediate redirects do not stop loading, so this fires on a page
-      // the user has landed on. Anywhere but the workspace wants input.
-      let current: URL;
-      try {
-        current = new URL(authWindow.webContents.getURL());
-      } catch {
-        return;
-      }
-      if (
-        current.origin === base.origin &&
-        current.pathname === workspacePath
-      ) {
-        return;
-      }
-      reveal();
-    });
 
     authWindow.on("closed", () =>
       finish(

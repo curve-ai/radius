@@ -25,6 +25,7 @@ import {
   platformIdentity,
   platformLogout,
   signInToPlatform,
+  trySilentPlatformSignIn,
   type PlatformOrganization,
 } from "./platform-connection";
 import {
@@ -342,10 +343,10 @@ export async function connectPlatform(
   // Reconnecting to a platform this partition still holds a session for needs
   // no sign-in at all.
   let identity = await platformIdentity(baseUrl).catch(() => null);
-  if (!identity) {
+  if (!identity && !(await trySilentPlatformSignIn(baseUrl))) {
     await signInToPlatform(baseUrl);
-    identity = await platformIdentity(baseUrl);
   }
+  identity ??= await platformIdentity(baseUrl);
   // Managed hosts scope the session to the organization that owns the host,
   // so the list holds one entry. A self-hosted platform serves one
   // organization too; take the first either way.
