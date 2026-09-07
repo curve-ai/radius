@@ -9,7 +9,11 @@ import {
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
   type RadiusApi,
   type ComposerDraftContext,
+  type GetAgentSessionFeaturesInput,
+  type ResolveAgentElicitationInput,
   type SaveComposerDraftInput,
+  type SetAgentSessionConfigOptionInput,
+  type SetAgentSessionModeInput,
   type SessionTranscriptStreamUpdate,
 } from "../radius-api";
 import type { BrowserConnectionStatus } from "../radius-api";
@@ -95,6 +99,12 @@ const radiusApi = {
   disconnectAgentAuthentication: (agentId: string) =>
     ipcRenderer.invoke("radius:disconnect-agent-authentication", agentId),
   runtimeStatus: () => ipcRenderer.invoke("radius:runtime-status"),
+  getAgentSessionFeatures: (input: GetAgentSessionFeaturesInput) =>
+    ipcRenderer.invoke("radius:get-agent-session-features", input),
+  setAgentSessionConfigOption: (input: SetAgentSessionConfigOptionInput) =>
+    ipcRenderer.invoke("radius:set-agent-session-config-option", input),
+  setAgentSessionMode: (input: SetAgentSessionModeInput) =>
+    ipcRenderer.invoke("radius:set-agent-session-mode", input),
   browserStatus: () => ipcRenderer.invoke("radius:browser-status"),
   revealBrowserExtension: () =>
     ipcRenderer.invoke("radius:reveal-browser-extension"),
@@ -111,6 +121,10 @@ const radiusApi = {
     ipcRenderer.invoke("radius:start-agent-prompt", input),
   resolveToolApproval: (input: ResolveToolApprovalInput) =>
     ipcRenderer.invoke("radius:resolve-tool-approval", input),
+  listPendingAgentElicitations: (sessionId: string) =>
+    ipcRenderer.invoke("radius:list-pending-agent-elicitations", sessionId),
+  resolveAgentElicitation: (input: ResolveAgentElicitationInput) =>
+    ipcRenderer.invoke("radius:resolve-agent-elicitation", input),
   listMcpApprovalGrants: () =>
     ipcRenderer.invoke("radius:list-mcp-approval-grants"),
   revokeMcpApproval: (input: { grantId: string; scope: "server" | "tool" }) =>
@@ -131,8 +145,10 @@ const radiusApi = {
   syncNow: () => ipcRenderer.invoke("radius:sync-now"),
   setSyncEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("radius:set-sync-enabled", enabled),
-  connectCloud: (input: { frontendUrl: string; apiUrl: string }) =>
-    ipcRenderer.invoke("radius:connect-cloud", input),
+  connectPlatform: (
+    input: { kind: "cloud" } | { kind: "self-hosted"; url: string },
+  ) => ipcRenderer.invoke("radius:connect-platform", input),
+  disconnectPlatform: () => ipcRenderer.invoke("radius:disconnect-platform"),
   updateStatus: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.status),
   checkForUpdates: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.check),
   performUpdate: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.perform),

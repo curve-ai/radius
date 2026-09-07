@@ -154,6 +154,12 @@ export interface SessionProjectContext {
   projectId: string | null;
 }
 
+export interface AgentProviderSessionRecord {
+  agentRunId: string;
+  providerKey: string;
+  providerSessionId: string;
+}
+
 export interface SessionTranscriptArtifactRecord extends Pick<
   ArtifactRecord,
   "id" | "name" | "artifactType" | "storageKind"
@@ -369,6 +375,10 @@ export interface SyncConnectionRecord {
   credentialRef: string | null;
   remoteSubject: string | null;
   accountLabel: string | null;
+  deploymentMode: string | null;
+  organizationSlug: string | null;
+  organizationRole: string | null;
+  sessionPartition: string | null;
   enabled: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -1931,6 +1941,35 @@ export async function getSessionProjectContext(
   return session ?? null;
 }
 
+export async function getLatestAgentProviderSession(
+  database: RadiusDatabase,
+  sessionId: string,
+  providerKey: string,
+): Promise<AgentProviderSessionRecord | null> {
+  const [record] = await database.db
+    .select({
+      agentRunId: agentRuns.id,
+      providerKey: agentRuns.providerKey,
+      providerSessionId: agentRuns.providerRunId,
+    })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.sessionId, sessionId),
+        eq(agentRuns.providerKey, providerKey),
+        isNotNull(agentRuns.providerRunId),
+      ),
+    )
+    .orderBy(desc(agentRuns.startedAtMs))
+    .limit(1);
+  if (!record?.providerSessionId) return null;
+  return {
+    agentRunId: record.agentRunId,
+    providerKey: record.providerKey,
+    providerSessionId: record.providerSessionId,
+  };
+}
+
 export async function setSessionPinned(
   database: RadiusDatabase,
   input: SetSessionPinnedInput,
@@ -2327,11 +2366,22 @@ function localChangeEnvelope(
   });
 }
 
+/** The platform details a connection only has once it has signed in. */
+type SyncConnectionPlatformFields =
+  | "deploymentMode"
+  | "organizationSlug"
+  | "organizationRole"
+  | "sessionPartition";
+
 export async function configureSyncConnection(
   database: RadiusDatabase,
-  input: Omit<SyncConnectionRecord, "createdAtMs" | "updatedAtMs"> & {
-    now?: number;
-  },
+  input: Omit<
+    SyncConnectionRecord,
+    "createdAtMs" | "updatedAtMs" | SyncConnectionPlatformFields
+  > &
+    Partial<Pick<SyncConnectionRecord, SyncConnectionPlatformFields>> & {
+      now?: number;
+    },
 ): Promise<SyncConnectionRecord> {
   const now = input.now ?? Date.now();
   await database.db
@@ -2343,6 +2393,10 @@ export async function configureSyncConnection(
       credentialRef: input.credentialRef,
       remoteSubject: input.remoteSubject,
       accountLabel: input.accountLabel,
+      deploymentMode: input.deploymentMode ?? null,
+      organizationSlug: input.organizationSlug ?? null,
+      organizationRole: input.organizationRole ?? null,
+      sessionPartition: input.sessionPartition ?? null,
       enabled: false,
       createdAtMs: now,
       updatedAtMs: now,
@@ -2355,6 +2409,10 @@ export async function configureSyncConnection(
         credentialRef: input.credentialRef,
         remoteSubject: input.remoteSubject,
         accountLabel: input.accountLabel,
+        deploymentMode: input.deploymentMode ?? null,
+        organizationSlug: input.organizationSlug ?? null,
+        organizationRole: input.organizationRole ?? null,
+        sessionPartition: input.sessionPartition ?? null,
         updatedAtMs: now,
       },
     });

@@ -4,10 +4,14 @@ import { randomUUID } from "node:crypto";
 import { acpStreamFromChild } from "./stdio.js";
 import {
   connectAcpRuntime,
+  type AcpAuthenticationHandler,
   type AcpRuntimeHandlers,
+  type AcpRuntimePrompt,
+  type AcpRuntimePromptOptions,
   type AcpRuntimeSession,
+  type AcpRuntimeSessionStart,
 } from "./session.js";
-import type { McpServer } from "@agentclientprotocol/sdk";
+import type { ClientCapabilities, McpServer } from "@agentclientprotocol/sdk";
 import {
   immutableImageReference,
   type AgentReleaseDescriptor,
@@ -25,11 +29,15 @@ export interface StartMicrovmAcpOptions {
   release: AgentReleaseDescriptor;
   paths: MicrovmRuntimePaths;
   handlers: AcpRuntimeHandlers;
+  additionalDirectories?: string[];
+  clientCapabilities?: ClientCapabilities;
   cwd?: string;
   containerId?: string;
   modelId?: string | null;
   mcpServers?: McpServer[];
   onStderr?: (chunk: string) => void;
+  onAuthenticate?: AcpAuthenticationHandler;
+  session?: AcpRuntimeSessionStart;
 }
 
 interface RuntimeProcessExit {
@@ -120,11 +128,15 @@ export class MicrovmAcpRuntime {
 
     try {
       const session = await connectAcpRuntime(acpStreamFromChild(child), {
+        additionalDirectories: options.additionalDirectories,
+        clientCapabilities: options.clientCapabilities,
         cwd: options.cwd ?? options.release.process.statePath,
         handlers: options.handlers,
         clientName: "radius-desktop",
         mcpServers: options.mcpServers,
         modelId: options.modelId,
+        onAuthenticate: options.onAuthenticate,
+        session: options.session,
       });
       return new MicrovmAcpRuntime(child, session, exitPromise, () => stderr);
     } catch (error) {
@@ -134,9 +146,9 @@ export class MicrovmAcpRuntime {
     }
   }
 
-  async prompt(text: string) {
+  async prompt(prompt: AcpRuntimePrompt, options?: AcpRuntimePromptOptions) {
     try {
-      return await this.session.prompt(text);
+      return await this.session.prompt(prompt, options);
     } catch (error) {
       throw runtimeProcessFailure(
         error,

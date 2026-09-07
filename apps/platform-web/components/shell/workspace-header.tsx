@@ -11,6 +11,7 @@ const TITLES: Record<string, string> = {
   "/workspace": "Overview",
   "/workspace/agents": "Agents",
   "/workspace/devices": "Devices",
+  "/workspace/sync": "Sync",
   "/workspace/settings": "Settings",
 };
 

@@ -472,6 +472,35 @@ export const ListInstallationsResponseSchema = z.object({
   ),
 });
 
+// Conversation sync is stored per membership, so the overview is the
+// caller's own devices and conversations in the organization the request was
+// scoped to. Nothing here reveals another member's sync state.
+export const SyncDeviceSummarySchema = z.object({
+  id: uuid,
+  displayName: nonempty,
+  platform: nonempty,
+  appVersion: nonempty,
+  createdAt: timestamp,
+  lastSeenAt: timestamp,
+  revokedAt: timestamp.nullable(),
+});
+
+export const SyncOverviewResponseSchema = z.object({
+  apiVersion: z.literal(RADIUS_PLATFORM_API_VERSION),
+  organization: slug,
+  artifactTransfer: z.boolean(),
+  devices: z.array(SyncDeviceSummarySchema),
+  projects: z.number().int().nonnegative(),
+  sessions: z.number().int().nonnegative(),
+  changes: z.number().int().nonnegative(),
+  latestChangeAt: timestamp.nullable(),
+});
+
+export const RevokeSyncDeviceResponseSchema = z.object({
+  apiVersion: z.literal(RADIUS_PLATFORM_API_VERSION),
+  device: SyncDeviceSummarySchema,
+});
+
 export const PlatformErrorResponseSchema = z.object({
   apiVersion: z.literal(RADIUS_PLATFORM_API_VERSION),
   error: z.object({
@@ -575,5 +604,10 @@ export type ReportAgentInstallationResponse = z.infer<
 >;
 export type ListInstallationsResponse = z.infer<
   typeof ListInstallationsResponseSchema
+>;
+export type SyncDeviceSummary = z.infer<typeof SyncDeviceSummarySchema>;
+export type SyncOverviewResponse = z.infer<typeof SyncOverviewResponseSchema>;
+export type RevokeSyncDeviceResponse = z.infer<
+  typeof RevokeSyncDeviceResponseSchema
 >;
 export type PlatformErrorResponse = z.infer<typeof PlatformErrorResponseSchema>;

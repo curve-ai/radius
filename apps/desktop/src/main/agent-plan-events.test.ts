@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   agentPlanJournalEvents,
   createAgentPlanJournalState,
+  removeAgentPlanJournalEvents,
 } from "./agent-plan-events";
 
 function ids(...values: string[]): () => string {
@@ -130,4 +131,44 @@ test("updates unchanged steps and supersedes a structurally revised plan", () =>
   assert.equal(revised[0]?.eventType, "task_plan");
   if (revised[0]?.eventType !== "task_plan") return;
   assert.equal(revised[0].supersedesPlanId, "plan-1");
+});
+
+test("removes an active plan by skipping unfinished canonical steps", () => {
+  const state = createAgentPlanJournalState();
+  agentPlanJournalEvents(
+    state,
+    {
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Inspect", priority: "high", status: "completed" },
+        { content: "Implement", priority: "high", status: "in_progress" },
+        { content: "Verify", priority: "medium", status: "pending" },
+      ],
+    },
+    ids("plan", "step-1", "step-2", "step-3", "plan-event", "step-1-done"),
+  );
+
+  assert.deepEqual(
+    removeAgentPlanJournalEvents(
+      state,
+      ids("step-2-skipped", "step-3-skipped"),
+    ),
+    [
+      {
+        eventId: "step-2-skipped",
+        eventType: "task_step_update",
+        taskStepId: "step-2",
+        state: "skipped",
+        detail: null,
+      },
+      {
+        eventId: "step-3-skipped",
+        eventType: "task_step_update",
+        taskStepId: "step-3",
+        state: "skipped",
+        detail: null,
+      },
+    ],
+  );
+  assert.equal(state.current, null);
 });

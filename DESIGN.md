@@ -227,12 +227,11 @@ The shell is one coordinated workspace, not a collection of independent pages.
   titles remain non-draggable.
 - The workspace sidebar keeps search plus the New chat, Scheduled, and Connectors
   destinations, followed by local projects and their recent sessions.
-  Choosing a project selects its durable chat context; choosing New chat
-  clears the active session without discarding the active project. Session rows
-  are text-first beneath the folder heading, use the quiet selected surface when
-  active, and disclose longer groups through Show more/less. Project session
-  row surfaces remain full width; nesting comes from left content padding rather
-  than a narrower offset row. They do not render a placeholder status ring. A
+  Session rows are text-first beneath the folder heading, use the quiet selected
+  surface when active, and disclose longer groups through Show more/less.
+  Project session row surfaces remain full width; nesting comes from left
+  content padding rather than a narrower offset row. They do not render a
+  placeholder status ring. A
   muted loader appears at the trailing position only while that session's local
   runtime is actively working. Otherwise a solid brand dot appears only when a
   newer assistant message has not been read on this client, and clears when the
@@ -335,6 +334,17 @@ The shell is one coordinated workspace, not a collection of independent pages.
   the selected level applies to the next prompt. Unsupported agents and models
   do not show a placeholder control. This avoids inventing unsupported
   configuration controls or a local connection flow.
+  Agent-supplied session settings replace the release-derived Model and Thinking
+  rows for that session only. Select and
+  boolean options reuse the same compact category and flyout grammar; unknown
+  categories keep the agent-provided label and order. When the agent advertises
+  legacy ACP modes without a mode configuration option, one compact Mode row
+  provides the fallback selector. Typing `/` opens an
+  accessible command suggestion list above the composer, with arrow-key
+  navigation and Enter selection. Current context usage and cumulative cost,
+  when reported, share one quiet footer label instead of opening another panel.
+  New chats and agents without live ACP feature state retain the release-derived
+  Agent, Model, and Thinking behavior above.
   On the collapsed desktop trigger, resolved Model and Thinking effort appear
   together as muted metadata. A sole Agent name is omitted when both values are
   present because it adds no selection information; multiple Agents retain the
@@ -351,10 +361,8 @@ The shell is one coordinated workspace, not a collection of independent pages.
   checkmarks center against each complete option row. The access popover uses
   a forced 4px outer inset and an additional 4px header inset, aligning its
   heading and Learn more link on an 8px total edge. The project strip opens
-  `ComposerContextMenu` above the input. It lists current
-  projects and a Create new project action using the same complete action-row
-  composition as the right-side tool panel. The menu owns presentation while
-  the project page remains the source of truth for selection and creation.
+  `ComposerContextMenu` above the input and uses the same complete action-row
+  composition as the right-side tool panel.
   Create new project opens the shared dialog; optional source-folder selection
   stays inside that dialog. Selecting a project without linked folders must not
   open the native folder picker. The menu sits 4px above the trigger and its surface uses
@@ -367,7 +375,9 @@ The shell is one coordinated workspace, not a collection of independent pages.
   its prompt, and the full chat canvas accepts file drops plus file-bearing
   clipboard pastes. Attached images appear as removable thumbnail tiles while
   other files use removable filename tiles; previews remain local and
-  ephemeral.
+  ephemeral. Supported attachment tiles remain until the prompt is accepted;
+  unsupported, unreadable, or oversized files produce a contextual composer
+  error without clearing the draft.
 - Selecting a session restores the standard titled header and contextual tool
   panel, then presents its canonical local transcript at the shared
   `max-w-reader` measure. The transcript and composer share the same outer
@@ -524,6 +534,11 @@ The shell is one coordinated workspace, not a collection of independent pages.
   session composer shows its fixed canonical project when one was selected at creation;
   standalone sessions omit the project brow rather than offering project
   reassignment from inside an existing conversation.
+  ACP form and URL elicitations remain memory-only and appear directly above
+  the composer while the run waits. Forms use labeled bounded controls with
+  reviewable values plus explicit submit, decline, and cancel actions. URL
+  requests show the destination and open it only after an explicit user action;
+  Radius never prefetches the target.
   Completed assistant messages expose one quiet Copy markdown action plus their
   local timestamp below the response. Today shows time; earlier in the current
   Monday-based week shows weekday and time; older messages in the current year

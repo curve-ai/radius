@@ -8,12 +8,14 @@ import {
   Hand,
   Paperclip,
   ShieldAlert,
+  SquareTerminal,
   X,
 } from "lucide-react";
 import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -25,6 +27,23 @@ import { attachmentFileKey } from "@renderer/components/ai/attachment-files";
 import { composerAgentTriggerPresentation } from "@renderer/components/ai/composer-agent-trigger";
 import { ComposerContextMenu } from "@renderer/components/ai/composer-context-menu";
 import { ComposerSelectionPanel } from "@renderer/components/ai/composer-selection-panel";
+import type { ComposerSelectionItem } from "@renderer/components/ai/composer-selection-panel";
+import {
+  composerContextUsageLabel,
+  composerLegacyModeFallback,
+  composerSessionConfigByCategory,
+  composerSessionConfigChoices,
+  composerSessionConfigSelectedId,
+  composerSessionConfigValue,
+  composerSessionConfigValueLabel,
+  composerSlashCommandPrompt,
+  composerSlashCommandShouldSubmit,
+  matchingComposerSlashCommands,
+  type ComposerContextUsage,
+  type ComposerSessionConfigOption,
+  type ComposerSessionModes,
+  type ComposerSlashCommand,
+} from "@renderer/components/ai/composer-session-features";
 import {
   ActionToolPanelButton,
   ActionToolPanelGroup,
@@ -32,6 +51,7 @@ import {
   ActionToolPanelItemContent,
   ActionToolPanelItemIcon,
   ActionToolPanelItemLabel,
+  ActionToolPanelItemMeta,
 } from "@renderer/components/ui/action-tool-panel";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -84,6 +104,7 @@ export type ChatComposerProps = {
   className?: string;
   connectedAgents?: readonly ConnectedAgent[];
   connectedModels?: readonly ConnectedModel[];
+  contextUsage?: ComposerContextUsage | null;
   defaultAccessMode?: ChatAccessMode;
   defaultSelectedAgentId?: string;
   defaultValue?: string;
@@ -95,12 +116,20 @@ export type ChatComposerProps = {
   onSelectedAgentChange?: (agentId: string) => void;
   onSelectedModelChange?: (modelId: string) => void;
   onSelectedThinkingEffortChange?: (thinkingEffortId: string) => void;
+  onSessionConfigOptionChange?: (
+    configId: string,
+    value: string | boolean,
+  ) => void;
+  onSessionModeChange?: (modeId: string) => void;
   onSubmit?: (submission: ChatSubmission) => void;
   onValueChange?: (value: string) => void;
   placeholder?: string;
   selectedAgentId?: string;
   selectedModelId?: string;
   selectedThinkingEffortId?: string;
+  sessionConfigOptions?: readonly ComposerSessionConfigOption[];
+  sessionModes?: ComposerSessionModes | null;
+  slashCommands?: readonly ComposerSlashCommand[];
   value?: string;
   workspaceLabel?: string;
   workspaceMenu?: ReactNode;
@@ -201,6 +230,7 @@ export function ChatComposer({
   className,
   connectedAgents = [],
   connectedModels = [],
+  contextUsage = null,
   defaultAccessMode = "project",
   defaultSelectedAgentId,
   defaultValue = "",
@@ -212,12 +242,17 @@ export function ChatComposer({
   onSelectedAgentChange,
   onSelectedModelChange,
   onSelectedThinkingEffortChange,
+  onSessionConfigOptionChange,
+  onSessionModeChange,
   onSubmit,
   onValueChange,
   placeholder = "Do anything",
   selectedAgentId,
   selectedModelId,
   selectedThinkingEffortId,
+  sessionConfigOptions,
+  sessionModes,
+  slashCommands = [],
   value,
   workspaceLabel,
   workspaceMenu,
@@ -229,6 +264,10 @@ export function ChatComposer({
   const [accessPopoverOpen, setAccessPopoverOpen] = useState(false);
   const [agentPopoverOpen, setAgentPopoverOpen] = useState(false);
   const [openAgentSelectionItemId, setOpenAgentSelectionItemId] = useState<
+    string | null
+  >(null);
+  const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
+  const [dismissedSlashPrompt, setDismissedSlashPrompt] = useState<
     string | null
   >(null);
   const [uncontrolledAccessMode, setUncontrolledAccessMode] =
@@ -256,12 +295,42 @@ export function ChatComposer({
     ) ??
     thinkingEfforts[0] ??
     null;
+  const liveModelOption = sessionConfigOptions
+    ? composerSessionConfigByCategory(sessionConfigOptions, "model")
+    : null;
+  const liveThinkingOption = sessionConfigOptions
+    ? composerSessionConfigByCategory(sessionConfigOptions, "thought_level")
+    : null;
+  const legacyModes = composerLegacyModeFallback(
+    sessionConfigOptions,
+    sessionModes,
+  );
   const agentTriggerPresentation = composerAgentTriggerPresentation({
     agentCount: connectedAgents.length,
     agentLabel: selectedAgent?.label ?? null,
-    modelLabel: selectedModel?.label ?? null,
-    thinkingEffortLabel: selectedThinkingEffort?.label ?? null,
+    modelLabel: sessionConfigOptions
+      ? liveModelOption
+        ? composerSessionConfigValueLabel(liveModelOption)
+        : null
+      : (selectedModel?.label ?? null),
+    thinkingEffortLabel: sessionConfigOptions
+      ? liveThinkingOption
+        ? composerSessionConfigValueLabel(liveThinkingOption)
+        : null
+      : (selectedThinkingEffort?.label ?? null),
   });
+  const usageLabel = composerContextUsageLabel(contextUsage);
+  const matchingSlashCommands = useMemo(
+    () =>
+      dismissedSlashPrompt === prompt
+        ? []
+        : matchingComposerSlashCommands(prompt, slashCommands),
+    [dismissedSlashPrompt, prompt, slashCommands],
+  );
+  const resolvedSlashCommandIndex = Math.min(
+    activeSlashCommandIndex,
+    Math.max(0, matchingSlashCommands.length - 1),
+  );
   const hasSubmission = prompt.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasSubmission && Boolean(onSubmit) && !disabled;
   const selectedAccess =
@@ -269,6 +338,94 @@ export function ChatComposer({
     ACCESS_OPTIONS[1];
   const SelectedAccessIcon = selectedAccess.icon;
   const hasWorkspaceBrow = Boolean(workspaceMenu || workspaceLabel);
+  const selectionItems: ComposerSelectionItem[] = [
+    {
+      id: "agent",
+      label: "Agent",
+      valueLabel: selectedAgent?.label ?? "No available agents",
+      options: connectedAgents.map((agent) => ({
+        id: agent.id,
+        label: agent.label,
+      })),
+      selectedOptionId: selectedAgent?.id ?? null,
+      onSelect: selectAgent,
+      emptyState: {
+        actionLabel: "Open setup guide",
+        actionHref: agentSetupGuideHref,
+      },
+    },
+    ...(legacyModes
+      ? [
+          {
+            id: "session-mode",
+            label: "Mode",
+            valueLabel:
+              legacyModes.availableModes.find(
+                (mode) => mode.id === legacyModes.currentModeId,
+              )?.label ?? legacyModes.currentModeId,
+            options: onSessionModeChange
+              ? legacyModes.availableModes.map((mode) => ({
+                  id: mode.id,
+                  label: mode.label,
+                }))
+              : [],
+            selectedOptionId: legacyModes.currentModeId,
+            onSelect: (modeId) => onSessionModeChange?.(modeId),
+            emptyState: { actionLabel: "Agent managed" },
+          } satisfies ComposerSelectionItem,
+        ]
+      : []),
+    ...(sessionConfigOptions
+      ? sessionConfigOptions.map((option): ComposerSelectionItem => ({
+          id: `session-config:${option.id}`,
+          label: option.label,
+          valueLabel: composerSessionConfigValueLabel(option),
+          options: onSessionConfigOptionChange
+            ? composerSessionConfigChoices(option)
+            : [],
+          selectedOptionId: composerSessionConfigSelectedId(option),
+          onSelect: (selectedId) =>
+            onSessionConfigOptionChange?.(
+              option.id,
+              composerSessionConfigValue(option, selectedId),
+            ),
+          emptyState: { actionLabel: "Agent managed" },
+        }))
+      : [
+          ...(selectedAgent && connectedModels.length > 0
+            ? [
+                {
+                  id: "model",
+                  label: "Model",
+                  valueLabel: selectedModel?.label ?? "Default",
+                  options: connectedModels.map((model) => ({
+                    id: model.id,
+                    label: model.label,
+                  })),
+                  selectedOptionId: selectedModel?.id ?? null,
+                  onSelect: selectModel,
+                  emptyState: { actionLabel: "Use agent default" },
+                } satisfies ComposerSelectionItem,
+              ]
+            : []),
+          ...(selectedModel && thinkingEfforts.length > 0
+            ? [
+                {
+                  id: "thinking-effort",
+                  label: "Thinking effort",
+                  valueLabel: selectedThinkingEffort?.label ?? "Default",
+                  options: thinkingEfforts.map((option) => ({
+                    id: option.id,
+                    label: option.label,
+                  })),
+                  selectedOptionId: selectedThinkingEffort?.id ?? null,
+                  onSelect: selectThinkingEffort,
+                  emptyState: { actionLabel: "Use model default" },
+                } satisfies ComposerSelectionItem,
+              ]
+            : []),
+        ]),
+  ];
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -293,6 +450,8 @@ export function ChatComposer({
 
   const updatePrompt = (nextValue: string): void => {
     if (value === undefined) setUncontrolledValue(nextValue);
+    setActiveSlashCommandIndex(0);
+    if (nextValue !== dismissedSlashPrompt) setDismissedSlashPrompt(null);
     onValueChange?.(nextValue);
   };
 
@@ -302,18 +461,18 @@ export function ChatComposer({
     setAccessPopoverOpen(false);
   };
 
-  const selectAgent = (agentId: string): void => {
+  function selectAgent(agentId: string): void {
     if (selectedAgentId === undefined) setUncontrolledAgentId(agentId);
     onSelectedAgentChange?.(agentId);
-  };
+  }
 
-  const selectModel = (modelId: string): void => {
+  function selectModel(modelId: string): void {
     onSelectedModelChange?.(modelId);
-  };
+  }
 
-  const selectThinkingEffort = (thinkingEffortId: string): void => {
+  function selectThinkingEffort(thinkingEffortId: string): void {
     onSelectedThinkingEffortChange?.(thinkingEffortId);
-  };
+  }
 
   const submitPrompt = (): void => {
     if (!canSubmit || !onSubmit) return;
@@ -322,12 +481,44 @@ export function ChatComposer({
     if (value === undefined) setUncontrolledValue("");
   };
 
+  const selectSlashCommand = (command: ComposerSlashCommand): void => {
+    updatePrompt(composerSlashCommandPrompt(command));
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     submitPrompt();
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (matchingSlashCommands.length > 0) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setActiveSlashCommandIndex(
+          (resolvedSlashCommandIndex +
+            direction +
+            matchingSlashCommands.length) %
+            matchingSlashCommands.length,
+        );
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDismissedSlashPrompt(prompt);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        const command = matchingSlashCommands[resolvedSlashCommandIndex];
+        if (!command) return;
+        if (!composerSlashCommandShouldSubmit(prompt, command)) {
+          event.preventDefault();
+          selectSlashCommand(command);
+          return;
+        }
+      }
+    }
     if (
       event.key !== "Enter" ||
       event.shiftKey ||
@@ -342,7 +533,46 @@ export function ChatComposer({
   };
 
   return (
-    <div className={cn("w-full", className)}>
+    <div className={cn("relative w-full", className)}>
+      {matchingSlashCommands.length > 0 ? (
+        <div
+          id={`${promptId}-commands`}
+          role="listbox"
+          aria-label="Agent commands"
+          className="absolute inset-x-0 bottom-full z-30 mb-1 rounded-[1rem] border border-border bg-background p-1 shadow-sm"
+        >
+          <ActionToolPanelGroup className="gap-px p-0">
+            {matchingSlashCommands.map((command, index) => {
+              const selected = index === resolvedSlashCommandIndex;
+              return (
+                <ActionToolPanelButton
+                  key={command.name}
+                  id={`${promptId}-command-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  selected={selected}
+                  className="min-h-9 items-center rounded-md px-2 py-1"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectSlashCommand(command)}
+                >
+                  <ActionToolPanelItemIcon>
+                    <SquareTerminal aria-hidden />
+                  </ActionToolPanelItemIcon>
+                  <ActionToolPanelItemContent>
+                    <ActionToolPanelItemLabel className="truncate">
+                      /{command.name}
+                    </ActionToolPanelItemLabel>
+                  </ActionToolPanelItemContent>
+                  <ActionToolPanelItemMeta className="max-w-[60%] truncate text-sm">
+                    {command.description}
+                  </ActionToolPanelItemMeta>
+                </ActionToolPanelButton>
+              );
+            })}
+          </ActionToolPanelGroup>
+        </div>
+      ) : null}
       {workspaceMenu ? (
         <ComposerContextMenu
           trigger={
@@ -440,6 +670,20 @@ export function ChatComposer({
           autoFocus={autoFocus}
           data-route-autofocus={autoFocus ? "true" : undefined}
           value={prompt}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-controls={
+            matchingSlashCommands.length > 0
+              ? `${promptId}-commands`
+              : undefined
+          }
+          aria-expanded={matchingSlashCommands.length > 0}
+          aria-activedescendant={
+            matchingSlashCommands.length > 0
+              ? `${promptId}-command-${resolvedSlashCommandIndex}`
+              : undefined
+          }
           disabled={disabled}
           placeholder={placeholder}
           className="min-h-10 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/45 disabled:cursor-not-allowed sm:min-h-12"
@@ -573,6 +817,15 @@ export function ChatComposer({
           </Popover>
 
           <div className="ml-auto flex min-w-0 items-center gap-1">
+            {usageLabel ? (
+              <span
+                aria-label={`Session usage: ${usageLabel}`}
+                title={`Session usage: ${usageLabel}`}
+                className="hidden max-w-36 truncate px-1 text-xs text-muted-foreground md:block"
+              >
+                {usageLabel}
+              </span>
+            ) : null}
             <Popover
               open={agentPopoverOpen}
               onOpenChange={(nextOpen) => {
@@ -622,60 +875,7 @@ export function ChatComposer({
                   setOpenAgentSelectionItemId(null);
                   setAgentPopoverOpen(false);
                 }}
-                items={[
-                  {
-                    id: "agent",
-                    label: "Agent",
-                    valueLabel: selectedAgent?.label ?? "No available agents",
-                    options: connectedAgents.map((agent) => ({
-                      id: agent.id,
-                      label: agent.label,
-                    })),
-                    selectedOptionId: selectedAgent?.id ?? null,
-                    onSelect: selectAgent,
-                    emptyState: {
-                      actionLabel: "Open setup guide",
-                      actionHref: agentSetupGuideHref,
-                    },
-                  },
-                  ...(selectedAgent && connectedModels.length > 0
-                    ? [
-                        {
-                          id: "model",
-                          label: "Model",
-                          valueLabel: selectedModel?.label ?? "Default",
-                          options: connectedModels.map((model) => ({
-                            id: model.id,
-                            label: model.label,
-                          })),
-                          selectedOptionId: selectedModel?.id ?? null,
-                          onSelect: selectModel,
-                          emptyState: {
-                            actionLabel: "Use agent default",
-                          },
-                        },
-                      ]
-                    : []),
-                  ...(selectedModel && thinkingEfforts.length > 0
-                    ? [
-                        {
-                          id: "thinking-effort",
-                          label: "Thinking effort",
-                          valueLabel:
-                            selectedThinkingEffort?.label ?? "Default",
-                          options: thinkingEfforts.map((option) => ({
-                            id: option.id,
-                            label: option.label,
-                          })),
-                          selectedOptionId: selectedThinkingEffort?.id ?? null,
-                          onSelect: selectThinkingEffort,
-                          emptyState: {
-                            actionLabel: "Use model default",
-                          },
-                        },
-                      ]
-                    : []),
-                ]}
+                items={selectionItems}
               />
             </Popover>
 

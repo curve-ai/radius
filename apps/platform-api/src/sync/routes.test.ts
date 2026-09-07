@@ -104,3 +104,28 @@ test("a caller in more than one organization must be narrowed to one first", asy
     "SYNC_ORGANIZATION_AMBIGUOUS",
   );
 });
+
+test("the overview and dashboard revocation are scoped before any query runs", async () => {
+  const app = createPlatformApp(services([]), {
+    syncDatabase: unusedDatabase(),
+  });
+  for (const [path, method] of [
+    ["/api/platform/v1/sync/overview", "GET"],
+    [
+      "/api/platform/v1/sync/devices/22222222-2222-4222-8222-222222222222/revoke",
+      "POST",
+    ],
+  ] as const) {
+    const response = await app.request(path, {
+      method,
+      headers: { authorization: "Bearer valid" },
+    });
+    assert.equal(response.status, 403, path);
+    assert.equal(
+      ((await response.json()) as { error: string }).error,
+      "SYNC_ORGANIZATION_AMBIGUOUS",
+    );
+  }
+  const anonymous = await app.request("/api/platform/v1/sync/overview");
+  assert.equal(anonymous.status, 401);
+});
