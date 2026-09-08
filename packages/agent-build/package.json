@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@curve-ai/agent-contracts": "0.0.1",
-    "esbuild": "0.28.0"
+    "esbuild": "0.28.1"
   },
   "devDependencies": {
     "@types/node": "22.19.1",
