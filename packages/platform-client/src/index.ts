@@ -477,7 +477,7 @@ export class RadiusPlatformClient {
   }
 }
 
-async function readBoundedText(
+export async function readBoundedText(
   body: ReadableStream<Uint8Array> | null,
   limit: number,
   overflow: () => Error,

@@ -60,7 +60,12 @@ export type AcpUpdateHandler = (
 export type AcpAuthenticationHandler = (
   authMethods: AuthMethod[],
   signal: AbortSignal,
-) => Promise<string | null | undefined>;
+) => Promise<
+  | string
+  | { methodId: string; credential: { accessToken: string; expiresAt: string } }
+  | null
+  | undefined
+>;
 
 export interface AcpTerminalHandlers {
   create(
@@ -704,10 +709,10 @@ async function authenticateIfRequested(
   handler: AcpAuthenticationHandler | undefined,
 ): Promise<void> {
   const authMethods = initializationResponse.authMethods ?? [];
-  if (!handler || authMethods.length === 0) return;
-
-  const methodId = await handler([...authMethods], connection.signal);
-  if (methodId == null) return;
+  if (!handler) return;
+  const selected = await handler([...authMethods], connection.signal);
+  if (selected == null) return;
+  const methodId = typeof selected === "string" ? selected : selected.methodId;
   const method = authMethods.find((candidate) => candidate.id === methodId);
   if (!method) {
     throw new Error(
@@ -719,7 +724,20 @@ async function authenticateIfRequested(
       `ACP terminal authentication method ${methodId} requires interactive terminal login`,
     );
   }
-  await connection.agent.request(methods.agent.authenticate, { methodId });
+  if (
+    typeof selected !== "string" &&
+    (methodId !== "radius-oauth" ||
+      !selected.credential.accessToken ||
+      Date.parse(selected.credential.expiresAt) <= Date.now() ||
+      !Number.isFinite(Date.parse(selected.credential.expiresAt)))
+  )
+    throw new Error("Invalid Radius agent credential");
+  await connection.agent.request(methods.agent.authenticate, {
+    methodId,
+    ...(typeof selected === "string"
+      ? {}
+      : { _meta: { "ai.radius/auth": selected.credential } }),
+  });
 }
 
 function isMissingSessionError(error: unknown, sessionId: string): boolean {

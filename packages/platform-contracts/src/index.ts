@@ -611,3 +611,63 @@ export type RevokeSyncDeviceResponse = z.infer<
   typeof RevokeSyncDeviceResponseSchema
 >;
 export type PlatformErrorResponse = z.infer<typeof PlatformErrorResponseSchema>;
+
+export const NativeOAuthConfigurationSchema = z
+  .object({
+    issuer: z.string().url(),
+    clientId: z.string().min(1).max(512),
+    redirectUri: z.string().url(),
+    scopes: z
+      .array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/))
+      .min(1)
+      .max(32),
+    resource: z.string().url(),
+    organizationSlug: PlatformOrganizationSlugSchema,
+    displayName: z.string().min(1).max(120),
+    agentId: z.string().min(1).max(120),
+  })
+  .strict();
+
+export const DesktopDistributionSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9.-]{2,100}$/),
+    displayName: z.string().min(1).max(120),
+    signInName: z.string().trim().min(1).max(120).optional(),
+    platformUrl: z.string().url(),
+    organizationSlug: PlatformOrganizationSlugSchema,
+    agentId: z.string().min(1).max(120),
+  })
+  .strict();
+
+export const NativeAuthorizationRequestSchema = z
+  .object({
+    callbackUrl: z.string().url().max(8192),
+    codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
+    state: z.string().min(32).max(128),
+    nonce: z.string().min(32).max(128),
+  })
+  .strict();
+
+export type NativeOAuthConfiguration = z.infer<
+  typeof NativeOAuthConfigurationSchema
+>;
+export type DesktopDistribution = z.infer<typeof DesktopDistributionSchema>;
+export type NativeAuthorizationRequest = z.infer<
+  typeof NativeAuthorizationRequestSchema
+>;
+
+export interface NativeAgentCredential {
+  accessToken: string;
+  expiresAt: string;
+  scopes: string[];
+}
+
+/** Main-process transport only. Never expose this response through preload. */
+export interface NativeAuthorizationResponse {
+  platformSessionToken: string;
+  platformExpiresAt: string;
+  accountId: string;
+  organization: { id: string; slug: string; displayName: string; role: string };
+  agent: NativeAgentCredential;
+  refreshToken?: string;
+}

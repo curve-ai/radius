@@ -185,3 +185,10 @@ Radius is early. Open an issue before starting a substantial feature so protocol
 Radius is available under the [MIT License](LICENSE). Third-party
 components retain their own licenses and
 [notices](THIRD_PARTY_NOTICES.md).
+
+### Company sign-in
+
+Use `bun run auth:setup` or Platform **Settings → Company sign-in → Set up authentication**
+to connect a hosted OIDC provider and generate a company desktop configuration.
+See [vendor authentication](docs/guides/vendor-authentication.md) for client registration,
+SDK integration, automatic sync, and verification.

@@ -189,6 +189,7 @@ export function createPlatformApp(
   services: RadiusPlatformServices,
   options: {
     browserAuth?: PlatformBrowserAuthServices;
+    nativeAuth?: Hono;
     provisioning?: PlatformProvisioningServices;
     deploymentMode?: "managed" | "self_hosted";
     // Conversation sync needs the database directly: it writes 27 projection
@@ -236,6 +237,14 @@ export function createPlatformApp(
     const result = await options.provisioning.provisionOrganization(request);
     return context.json(result);
   });
+
+  if (options.nativeAuth) {
+    app.route("/api/platform/v1/auth/native", options.nativeAuth);
+  } else {
+    app.all("/api/platform/v1/auth/native/*", (context) =>
+      context.json({ error: "NATIVE_AUTH_NOT_CONFIGURED" }, 503),
+    );
+  }
 
   if (options.browserAuth) {
     const browserAuth = options.browserAuth;
@@ -291,10 +300,9 @@ export function createPlatformApp(
       });
     }
     app.get("/api/platform/v1/auth/session", async (context) => {
-      const token = readCookie(
-        context.req.header("cookie"),
-        browserAuth.sessionCookieName,
-      );
+      const token =
+        readBearerToken(context.req.header("authorization")) ??
+        readCookie(context.req.header("cookie"), browserAuth.sessionCookieName);
       if (!token) {
         throw new PlatformApiError(
           401,
@@ -355,7 +363,9 @@ export function createPlatformApp(
       );
     }
     const identity = token
-      ? await services.authenticate(token)
+      ? token.startsWith("radius_sess_") || token.startsWith("radius_native_")
+        ? await services.authenticateBrowserSession(token)
+        : await services.authenticate(token)
       : await services.authenticateBrowserSession(sessionToken!);
     if (!identity)
       return platformError(
@@ -364,17 +374,16 @@ export function createPlatformApp(
         "UNAUTHORIZED",
         "Invalid authentication",
       );
-    const scopedIdentity =
-      options.browserAuth?.organizationForRequest
-        ? {
-            ...identity,
-            response: await requireRequestOrganization(
-              options.browserAuth,
-              requestUrl(context),
-              identity.response,
-            ),
-          }
-        : identity;
+    const scopedIdentity = options.browserAuth?.organizationForRequest
+      ? {
+          ...identity,
+          response: await requireRequestOrganization(
+            options.browserAuth,
+            requestUrl(context),
+            identity.response,
+          ),
+        }
+      : identity;
     context.set("identity", scopedIdentity);
     await next();
   });
@@ -682,7 +691,7 @@ export function createPlatformApp(
 // X-Forwarded-Host and X-Forwarded-Proto rather than in the request line.
 // Only the proxy may reach the API in that mode; a self-hosted API keeps
 // trusting its own request URL.
-function resolveRequestUrl(context: Context, trustProxy: boolean): URL {
+export function resolveRequestUrl(context: Context, trustProxy: boolean): URL {
   const url = new URL(context.req.url);
   if (!trustProxy) return url;
   const host = context.req.header("x-forwarded-host")?.split(",")[0]?.trim();
@@ -752,7 +761,7 @@ async function boundedJson(request: Request): Promise<unknown> {
   }
 }
 
-async function readBoundedText(
+export async function readBoundedText(
   body: ReadableStream<Uint8Array> | null,
   limit: number,
   overflow: () => Error,

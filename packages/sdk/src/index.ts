@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  RequestError,
   agent,
   methods,
   ndJsonStream,
@@ -15,7 +16,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 
+export interface RadiusAgentCredential {
+  readonly accessToken: string;
+  readonly expiresAt: string;
+}
+
 export interface RadiusAgentRunContext {
+  readonly authentication: RadiusAgentCredential | null;
   readonly sessionId: string;
   readonly cwd: string;
   readonly prompt: readonly ContentBlock[];
@@ -57,6 +64,11 @@ export interface RadiusAgentRunResult {
 
 export interface RadiusAgentDefinition {
   name: string;
+  /** Verify issuer, audience, expiry and permissions at your resource server. */
+  authenticate?(
+    credential: RadiusAgentCredential,
+    signal: AbortSignal,
+  ): Promise<void>;
   run(
     context: RadiusAgentRunContext,
   ):
@@ -73,17 +85,75 @@ interface RadiusAgentSession {
 
 export class RadiusAgent {
   readonly app: AgentApp;
+  private connected = false;
+  private credential: RadiusAgentCredential | null = null;
   private readonly sessions = new Map<string, RadiusAgentSession>();
 
   constructor(private readonly definition: RadiusAgentDefinition) {
     if (!definition.name.trim()) throw new Error("Agent name is required");
 
     this.app = agent({ name: definition.name })
+      .onConnect((connection) => {
+        if (definition.authenticate && this.connected) {
+          connection.close(
+            new Error(
+              "Authenticated agents require a separate instance per connection",
+            ),
+          );
+          return;
+        }
+        this.connected = true;
+        void connection.closed.then(() => {
+          this.credential = null;
+          this.sessions.clear();
+          this.connected = false;
+        });
+      })
       .onRequest(methods.agent.initialize, () => ({
         protocolVersion: PROTOCOL_VERSION,
         agentCapabilities: { loadSession: false },
+        ...(definition.authenticate
+          ? {
+              authMethods: [
+                { id: "radius-oauth", name: "Organization sign-in" },
+              ],
+            }
+          : {}),
       }))
+      .onRequest(methods.agent.authenticate, async (context) => {
+        const value = context.params._meta?.["ai.radius/auth"] as
+          Partial<RadiusAgentCredential> | undefined;
+        if (
+          !definition.authenticate ||
+          context.params.methodId !== "radius-oauth" ||
+          !value ||
+          typeof value.accessToken !== "string" ||
+          !value.accessToken ||
+          value.accessToken.length > 16384 ||
+          typeof value.expiresAt !== "string" ||
+          !Number.isFinite(Date.parse(value.expiresAt)) ||
+          Date.parse(value.expiresAt) <= Date.now()
+        )
+          throw RequestError.authRequired({
+            reason: "AGENT_AUTHENTICATION_REQUIRED",
+          });
+        const credential = {
+          accessToken: value.accessToken,
+          expiresAt: value.expiresAt,
+        };
+        this.credential = null;
+        try {
+          await definition.authenticate(credential, context.signal);
+        } catch {
+          throw RequestError.authRequired({
+            reason: "AGENT_AUTHENTICATION_FAILED",
+          });
+        }
+        this.credential = credential;
+        return {};
+      })
       .onRequest(methods.agent.session.new, (context) => {
+        this.assertAuthenticated();
         const sessionId = randomUUID();
         this.sessions.set(sessionId, {
           cwd: context.params.cwd,
@@ -103,8 +173,14 @@ export class RadiusAgent {
       });
   }
 
+  createConnectionApp(): AgentApp {
+    return new RadiusAgent(this.definition).app;
+  }
+
   connect(target: Stream): AgentConnection {
-    return this.app.connect(target);
+    // Authentication and sessions belong to one transport, even when a dev
+    // WebSocket server reuses the same agent definition for multiple clients.
+    return this.createConnectionApp().connect(target);
   }
 
   serveStdio(): AgentConnection {
@@ -113,11 +189,22 @@ export class RadiusAgent {
     return this.connect(ndJsonStream(input, output));
   }
 
+  private assertAuthenticated(): void {
+    if (
+      this.definition.authenticate &&
+      (!this.credential || Date.parse(this.credential.expiresAt) <= Date.now())
+    )
+      throw RequestError.authRequired({
+        reason: "AGENT_AUTHENTICATION_REQUIRED",
+      });
+  }
+
   private async runPrompt(
     sessionId: string,
     prompt: ContentBlock[],
     client: AgentContext,
   ): Promise<{ stopReason: StopReason }> {
+    this.assertAuthenticated();
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown Radius session ${sessionId}`);
 
@@ -149,6 +236,7 @@ export class RadiusAgent {
 
     try {
       const result = await this.definition.run({
+        authentication: this.credential,
         sessionId,
         cwd: session.cwd,
         prompt,
