@@ -27,6 +27,7 @@ import { attachmentFileKey } from "@renderer/components/ai/attachment-files";
 import { composerAgentTriggerPresentation } from "@renderer/components/ai/composer-agent-trigger";
 import { ComposerContextMenu } from "@renderer/components/ai/composer-context-menu";
 import { ComposerSelectionPanel } from "@renderer/components/ai/composer-selection-panel";
+import { FullAccessDialog } from "@renderer/components/ai/full-access-dialog";
 import type { ComposerSelectionItem } from "@renderer/components/ai/composer-selection-panel";
 import {
   composerContextUsageLabel,
@@ -261,7 +262,9 @@ export function ChatComposer({
   const promptId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const accessTriggerRef = useRef<HTMLButtonElement>(null);
   const [accessPopoverOpen, setAccessPopoverOpen] = useState(false);
+  const [fullAccessDialogOpen, setFullAccessDialogOpen] = useState(false);
   const [agentPopoverOpen, setAgentPopoverOpen] = useState(false);
   const [openAgentSelectionItemId, setOpenAgentSelectionItemId] = useState<
     string | null
@@ -456,9 +459,14 @@ export function ChatComposer({
   };
 
   const selectAccessMode = (nextMode: ChatAccessMode): void => {
+    if (disabled) return;
+    setAccessPopoverOpen(false);
+    if (nextMode === "full" && selectedAccessMode !== "full") {
+      setFullAccessDialogOpen(true);
+      return;
+    }
     if (accessMode === undefined) setUncontrolledAccessMode(nextMode);
     onAccessModeChange?.(nextMode);
-    setAccessPopoverOpen(false);
   };
 
   function selectAgent(agentId: string): void {
@@ -721,6 +729,7 @@ export function ChatComposer({
           <Popover open={accessPopoverOpen} onOpenChange={setAccessPopoverOpen}>
             <PopoverTrigger asChild>
               <Button
+                ref={accessTriggerRef}
                 type="button"
                 variant="ghost"
                 size="sm"
@@ -741,6 +750,9 @@ export function ChatComposer({
               align="start"
               sideOffset={8}
               collisionPadding={12}
+              onCloseAutoFocus={(event) => {
+                if (fullAccessDialogOpen) event.preventDefault();
+              }}
               className="w-[32rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem]"
             >
               <div className="flex items-center justify-between gap-4 px-3 pb-2 pt-1">
@@ -894,6 +906,19 @@ export function ChatComposer({
           </div>
         </div>
       </form>
+      <FullAccessDialog
+        applicationName="Radius"
+        learnMoreHref={accessLearnMoreHref}
+        open={fullAccessDialogOpen && !disabled}
+        onOpenChange={setFullAccessDialogOpen}
+        onRestoreFocus={() => accessTriggerRef.current?.focus()}
+        onConfirm={() => {
+          setFullAccessDialogOpen(false);
+          if (disabled) return;
+          if (accessMode === undefined) setUncontrolledAccessMode("full");
+          onAccessModeChange?.("full");
+        }}
+      />
     </div>
   );
 }
