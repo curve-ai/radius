@@ -12,7 +12,8 @@ import {
 } from "@curve-ai/radius-storage";
 
 import { localDeviceIdentity } from "./device-identity";
-import { BoundedLru } from "./bounded-lru";
+import { BoundedLru } from "../shared/bounded-lru";
+import { resolveConnectorCatalogResponseLogos } from "./connector-catalog-logos";
 import { readDesktopPlatformUrl } from "./distribution";
 import { initializeStorage } from "./storage";
 import { platformRequestCredentials } from "./sync";
@@ -160,10 +161,7 @@ export async function listConnectorCatalogForRenderer(
   const parsed = ConnectorCatalogListResponseSchema.parse(
     await response.json(),
   );
-  return {
-    ...parsed,
-    connectors: await resolveCatalogLogos(parsed.connectors),
-  };
+  return resolveConnectorCatalogResponseLogos(parsed, resolveCatalogLogos);
 }
 
 async function getCatalogEntry(id: string): Promise<ConnectorCatalogEntry> {

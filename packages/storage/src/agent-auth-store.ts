@@ -19,9 +19,7 @@ import {
 } from "./schema.js";
 
 export type AuthenticationPurpose =
-  | "vendor_identity"
-  | "model_provider"
-  | "router";
+  "vendor_identity" | "model_provider" | "router";
 export type AuthenticationFlowKind =
   | "oidc_pkce"
   | "oauth_pkce"
@@ -30,10 +28,7 @@ export type AuthenticationFlowKind =
   | "vendor_token_exchange"
   | "provider_native_oauth";
 export type CredentialCustodyKind =
-  | "os_vault"
-  | "encrypted_agent_state"
-  | "managed_exchange"
-  | "none";
+  "os_vault" | "encrypted_agent_state" | "managed_exchange" | "none";
 export type AuthenticationConnectionState =
   | "needs_authentication"
   | "connected"
@@ -85,6 +80,7 @@ export interface InstalledAgentRelease {
   agentId: string;
   releaseId: string;
   installationId: string;
+  updatedAt: string;
 }
 
 export type AgentReleaseInstallErrorCode =
@@ -493,6 +489,7 @@ export async function installAgentRelease(
       agentId: agent.id,
       releaseId: release.id,
       installationId: installation.id,
+      updatedAt: new Date(release.verifiedAtMs).toISOString(),
     };
   });
 }

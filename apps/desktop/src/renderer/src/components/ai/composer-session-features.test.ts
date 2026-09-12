@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  composerContextUsageLabel,
+  composerContextUsagePresentation,
   composerLegacyModeFallback,
   composerSessionConfigChoices,
+  composerSessionModelConfig,
   composerSessionConfigSelectedId,
+  composerSessionThinkingConfig,
   composerSessionConfigValue,
   composerSessionConfigValueLabel,
   composerSlashCommandPrompt,
@@ -65,6 +67,50 @@ test("projects select and boolean options into the compact selector grammar", ()
   assert.equal(composerSessionConfigValue(booleanOption, "true"), true);
 });
 
+test("distinguishes ACP provider, model, and thinking configuration", () => {
+  const providerOption: ComposerSessionConfigOption = {
+    ...modelOption,
+    id: "provider",
+    label: "Provider",
+    currentValue: "codex",
+    options: [
+      {
+        id: "codex",
+        label: "Codex subscription",
+        description: null,
+        groupId: null,
+        groupLabel: null,
+      },
+    ],
+  };
+  const thinkingOption: ComposerSessionConfigOption = {
+    ...modelOption,
+    id: "effort",
+    label: "Thinking effort",
+    category: "thought_level",
+    currentValue: "high",
+    options: [
+      {
+        id: "high",
+        label: "High",
+        description: null,
+        groupId: null,
+        groupLabel: null,
+      },
+    ],
+  };
+
+  assert.equal(
+    composerSessionModelConfig([providerOption, modelOption]),
+    modelOption,
+  );
+  assert.equal(
+    composerSessionThinkingConfig([providerOption, thinkingOption]),
+    thinkingOption,
+  );
+  assert.equal(composerSessionModelConfig([providerOption]), null);
+});
+
 test("filters slash commands only while entering a command name", () => {
   const commands = [
     { name: "review", description: "Review changes", inputHint: "focus" },
@@ -98,28 +144,42 @@ test("filters slash commands only while entering a command name", () => {
   );
 });
 
-test("formats compact bounded context and cost metadata", () => {
-  assert.equal(
-    composerContextUsageLabel({
-      used: 30,
-      size: 120,
+test("formats context-window metadata only from valid ACP token usage", () => {
+  assert.deepEqual(
+    composerContextUsagePresentation({
+      used: 262_000,
+      size: 828_000,
       cost: { amount: 0.25, currency: "USD" },
     }),
-    "25% context, $0.25",
+    {
+      accessibleLabel:
+        "Context window: 32% used, 68% left. 262k of 828k tokens used.",
+      percentageUsed: 32,
+      percentageLeft: 68,
+      usedLabel: "262k",
+      sizeLabel: "828k",
+    },
+  );
+  assert.deepEqual(
+    composerContextUsagePresentation({ used: 150, size: 100, cost: null }),
+    {
+      accessibleLabel:
+        "Context window: 100% used, 0% left. 150 of 100 tokens used.",
+      percentageUsed: 100,
+      percentageLeft: 0,
+      usedLabel: "150",
+      sizeLabel: "100",
+    },
   );
   assert.equal(
-    composerContextUsageLabel({ used: 150, size: 100, cost: null }),
-    "100% context",
-  );
-  assert.equal(
-    composerContextUsageLabel({
+    composerContextUsagePresentation({
       used: 0,
       size: 0,
-      cost: { amount: 2, currency: "invalid" },
+      cost: { amount: 2, currency: "USD" },
     }),
-    "2.00 invalid",
+    null,
   );
-  assert.equal(composerContextUsageLabel(null), null);
+  assert.equal(composerContextUsagePresentation(null), null);
 });
 
 test("uses legacy ACP modes only when live config has no mode category", () => {

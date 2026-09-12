@@ -100,20 +100,27 @@ async function acquireProfileLock(): Promise<() => void> {
   return () => releaseLock?.();
 }
 
-function resolveFxBinary(): string {
+function fxBinaryCandidates(): string[] {
   const configured = process.env.RADIUS_FX_BINARY_PATH?.trim();
-  if (configured) return path.resolve(configured);
+  if (configured) return [path.resolve(configured)];
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, "agents/fx/macos-arm64/fx");
+    return [path.join(process.resourcesPath, "agents/fx/macos-arm64/fx")];
   }
-  return path.join(app.getPath("appData"), "Radius/dev/fx/bin/fx");
+  return [
+    path.resolve(
+      app.getAppPath(),
+      "../runtime-host-macos/.build/provider-assets/fx/macos-arm64/fx",
+    ),
+    path.join(app.getPath("appData"), "Radius/dev/fx/bin/fx"),
+  ];
 }
 
 async function assertFxBinary(): Promise<string> {
-  const binaryPath = resolveFxBinary();
-  const info = await stat(binaryPath).catch(() => null);
-  if (!info?.isFile()) throw new Error("FX_BINARY_NOT_INSTALLED");
-  return binaryPath;
+  for (const binaryPath of fxBinaryCandidates()) {
+    const info = await stat(binaryPath).catch(() => null);
+    if (info?.isFile()) return binaryPath;
+  }
+  throw new Error("FX_BINARY_NOT_INSTALLED");
 }
 
 function minimalFxEnvironment(homePath: string): NodeJS.ProcessEnv {
