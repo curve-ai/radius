@@ -19,6 +19,8 @@ import type { OidcIdentityClaims } from "./oidc.js";
 import {
   DEVELOPMENT_ACCOUNT_ID,
   DEVELOPMENT_AUTH,
+  developmentAuth,
+  isLocalDevelopmentAuth,
 } from "./development-auth.js";
 import {
   readNativeAuthConfiguration,
@@ -221,7 +223,6 @@ export function createNativeAuthRoutes(options: {
     const localOwner =
       options.localDevelopment === true &&
       entry.config.clientId === DEVELOPMENT_AUTH.clientId &&
-      entry.config.issuer === DEVELOPMENT_AUTH.issuer &&
       entry.config.organizationSlug === DEVELOPMENT_AUTH.organizationSlug;
     const policy = localOwner
       ? normalizeOidcProvisioningPolicy({
@@ -320,7 +321,11 @@ export function createNativeAuthRoutes(options: {
 export function nativeEntriesFromEnvironment(
   environment: NodeJS.ProcessEnv,
 ): NativeEntry[] {
-  const entries = readNativeAuthConfiguration(environment);
+  const entries =
+    readNativeAuthConfiguration(environment) ??
+    (isLocalDevelopmentAuth(environment)
+      ? [developmentAuth(environment)]
+      : undefined);
   if (entries === undefined) return [];
   if (!Array.isArray(entries) || entries.length > 256)
     throw new Error(

@@ -4,7 +4,8 @@ Radius uses the OpenID Connect login exposed by its bundled Platform origin. The
 
 Every desktop bundle has one Platform origin and follows the same native auth flow whether Curve or the operator hosts it. An ordinary Radius build targets `http://localhost:3100/`; a branded distribution embeds its Platform origin, application identity, organization, and agent. Radius does not ask the user to choose a hosting mode or type an endpoint after launch.
 
-The Platform URL and the authentication issuer are independent. An organization
+The Platform URL and the authentication issuer are independent. Local contributor
+setup runs Better Auth inside Platform on port 3100. In external mode, an organization
 with a registered native client can omit its issuer to use Curve's hosted Better
 Auth at `https://app.curvehq.sh/api/auth`. A custom Better Auth installation must
 enable its OAuth provider; other OIDC providers use the same public-client flow.
@@ -19,7 +20,7 @@ For each organization's native auth entry, issuer precedence is:
 1. The entry's explicit `issuer`.
 2. Deployment `RADIUS_AUTH_ISSUER`.
 3. Existing deployment `RADIUS_OIDC_ISSUER`.
-4. `https://app.curvehq.sh/api/auth`.
+4. `RADIUS_AUTH_URL` in embedded mode, or `https://app.curvehq.sh/api/auth` in external mode.
 
 Explicit invalid configuration fails startup. Network/discovery errors do not
 switch to the hosted issuer. Issuer identity, including path and trailing slash,
@@ -74,11 +75,23 @@ bun run platform:dev
 bun run auth:check http://localhost:3100/
 ```
 
-The local launcher does not create or migrate an identity provider, bootstrap
-an arbitrary organization, or borrow Cloud database credentials. The packaged
+With `RADIUS_AUTH_MODE=embedded`, Platform mounts Better Auth at `/api/auth`,
+applies its additive `radius_auth` migrations, and registers configured public
+PKCE clients after migration. The contributor fixture supplies the `dev`
+organization and local native client. Other organizations retain explicit
+provisioning and membership policy. No Cloud database credentials are used. The packaged
 desktop connects to its configured Platform; it does not start server services.
 A successful readiness check proves discovery, not a completed login or agent
 authorization.
+
+Embedded mode uses Resend by default for email codes (`RESEND_API_KEY` and
+`AUTH_EMAIL_FROM`); SMTP is an explicit alternative. It hosts sign-in and consent
+on the Platform origin with no additional auth process. A self-hosted dashboard
+may use the same embedded issuer: set `RADIUS_OIDC_ISSUER=RADIUS_AUTH_URL`,
+configure its client ID/redirect and organization policy, and omit its client
+secret to use the automatically registered public PKCE client. Existing Caddy
+configuration must route `/api/auth/*`, `/.well-known/*`, `/auth-ui/*`, `/sign-in`
+and `/consent` to Platform API. See the local guide for optional Mailpit testing.
 
 ## What your provider needs
 

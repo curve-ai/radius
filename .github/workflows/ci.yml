@@ -9,6 +9,35 @@ permissions:
   contents: read
 
 jobs:
+  embedded-auth:
+    name: Embedded auth (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+        env:
+          POSTGRES_USER: radius
+          POSTGRES_PASSWORD: radius-ci-only
+          POSTGRES_DB: radius_development
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U radius -d radius_development"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile --filter @curve-ai/radius-platform-api
+      - run: bun run --cwd apps/platform-api build:auth-ui
+      - run: bun test apps/platform-api/auth-ui/authorization-state.test.ts
+      - run: bun apps/platform-api/scripts/verify-embedded-auth.ts
+        env:
+          DATABASE_URL: postgresql://radius:radius-ci-only@127.0.0.1:5432/radius_development
+
   verify:
     name: Verify (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -16,7 +16,11 @@
   },
   "overrides": {
     "postcss": "8.5.26",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
+    "vite": "7.3.6",
+    "js-yaml": "4.3.2",
+    "@xmldom/xmldom": "0.9.12",
+    "plist": "3.1.1",
     "zod": "4.5.4",
     "fast-uri": "3.1.7"
   },

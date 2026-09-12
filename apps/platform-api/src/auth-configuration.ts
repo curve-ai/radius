@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { authMode, embeddedAuthUrl } from "./embedded-auth-config.js";
 
 /** Public hosted issuer; selecting it never grants organization membership. */
 export const HOSTED_AUTH_ISSUER = "https://app.curvehq.sh/api/auth";
@@ -12,7 +13,9 @@ export function resolveAuthIssuer(
       ? explicit
       : (environment.RADIUS_AUTH_ISSUER ??
         environment.RADIUS_OIDC_ISSUER ??
-        HOSTED_AUTH_ISSUER);
+        (authMode(environment) === "embedded"
+          ? embeddedAuthUrl(environment)
+          : HOSTED_AUTH_ISSUER));
   if (typeof value !== "string" || !value.trim() || value !== value.trim()) {
     throw new Error("Auth issuer must be a non-empty URL");
   }

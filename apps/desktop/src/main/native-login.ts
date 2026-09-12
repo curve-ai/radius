@@ -6,11 +6,14 @@ import type {
   NativeOAuthConfiguration,
 } from "@curve-ai/platform-contracts";
 
+export const NATIVE_LOGIN_TIMEOUT_MS = 15 * 60_000;
+
 /** The provider consumes the authorization code; this listener only captures it. */
 export async function nativeBrowserLogin(
   config: NativeOAuthConfiguration & { authorizationEndpoint: string },
   openBrowser: (url: string) => Promise<void>,
   signal: AbortSignal,
+  options: { timeoutMs?: number } = {},
 ): Promise<NativeAuthorizationRequest> {
   const callback = new URL(config.redirectUri);
   if (
@@ -125,7 +128,7 @@ export async function nativeBrowserLogin(
     const abort = (): void => finish(new Error("AUTH_CANCELLED"));
     const timeout = setTimeout(
       () => finish(new Error("AUTH_TIMEOUT")),
-      5 * 60_000,
+      options.timeoutMs ?? NATIVE_LOGIN_TIMEOUT_MS,
     );
     signal.addEventListener("abort", abort, { once: true });
     server.on("error", () => finish(new Error("AUTH_CALLBACK_UNAVAILABLE")));

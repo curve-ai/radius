@@ -1,5 +1,6 @@
 import type { NativeOAuthConfiguration } from "@curve-ai/platform-contracts";
-import { HOSTED_AUTH_ISSUER } from "./auth-configuration.js";
+import { HOSTED_AUTH_ISSUER, resolveAuthIssuer } from "./auth-configuration.js";
+import { authMode } from "./embedded-auth-config.js";
 
 export const DEVELOPMENT_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 export const DEVELOPMENT_AUTH: NativeOAuthConfiguration = {
@@ -12,6 +13,21 @@ export const DEVELOPMENT_AUTH: NativeOAuthConfiguration = {
   displayName: "Radius Development",
   agentId: "radius-development",
 };
+
+export function developmentAuth(
+  environment: NodeJS.ProcessEnv,
+): NativeOAuthConfiguration {
+  const issuer = resolveAuthIssuer(undefined, environment);
+  return {
+    ...DEVELOPMENT_AUTH,
+    issuer,
+    scopes: ["openid", "profile", "email", "offline_access"],
+    resource:
+      authMode(environment) === "embedded"
+        ? `${new URL(issuer).origin}/radius-development`
+        : DEVELOPMENT_AUTH.resource,
+  };
+}
 
 /** Development bootstrap is allowed only on the launcher's isolated loopback database. */
 export function isLocalDevelopmentAuth(

@@ -1,6 +1,13 @@
 name: radius-platform-dev
 
 services:
+  mailpit:
+    profiles: ["mailpit"]
+    image: axllent/mailpit:v1.29.2@sha256:030f06031ce5c60913ac9363da1ab0d4be6fd2a78147dd0e1ca0fcac665d6b34
+    ports:
+      - "127.0.0.1:${RADIUS_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${RADIUS_MAILPIT_PORT:-8025}:8025"
+
   registry:
     image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
     restart: unless-stopped

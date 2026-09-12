@@ -24,7 +24,7 @@ const platformUrl = readDesktopPlatformUrl();
 let status: DesktopAuthenticationStatus = {
   state: "checking",
   displayName: distribution?.displayName ?? "Radius",
-  signInName: distribution?.signInName ?? "Curve",
+  signInName: distribution?.signInName ?? "Radius",
   organizationName: null,
   errorCode: null,
 };

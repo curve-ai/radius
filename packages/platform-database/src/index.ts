@@ -15,6 +15,7 @@ export {
   type PlatformPoolOptions,
 } from "./client.js";
 export * as platformSchema from "./schema/index.js";
+export * as embeddedAuthSchema from "./schema/auth.js";
 export { migratePlatformDatabase } from "./migrations.js";
 export {
   provisionPlatformOrganization,
