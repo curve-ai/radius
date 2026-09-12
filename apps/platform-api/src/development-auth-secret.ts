@@ -12,6 +12,10 @@ export function ensureDevelopmentAuthSecret(
     !isLocalDevelopmentAuth(environment)
   )
     return;
+  if (process.platform === "win32")
+    throw new Error(
+      "Set BETTER_AUTH_SECRET explicitly on Windows; automatic private-file creation requires POSIX permissions",
+    );
   const directory = resolve(environment.RADIUS_LOCAL_STATE_DIR ?? ".radius");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const filename = resolve(directory, "auth-secret");

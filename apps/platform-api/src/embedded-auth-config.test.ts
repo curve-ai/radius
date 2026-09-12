@@ -51,33 +51,40 @@ test("external mode retains hosted fallback and explicit issuer configuration", 
   );
   assert.throws(() => embeddedAuthSecret({ BETTER_AUTH_SECRET: "short" }));
 });
-test("development signing secret is private and stable across restarts", () => {
-  const directory = mkdtempSync(join(tmpdir(), "radius-auth-secret-"));
-  try {
-    const first: NodeJS.ProcessEnv = {
-      ...local,
-      RADIUS_LOCAL_STATE_DIR: directory,
-    };
-    ensureDevelopmentAuthSecret(first);
-    const second: NodeJS.ProcessEnv = {
-      ...local,
-      RADIUS_LOCAL_STATE_DIR: directory,
-    };
-    ensureDevelopmentAuthSecret(second);
-    assert.equal(first.BETTER_AUTH_SECRET, second.BETTER_AUTH_SECRET);
-    assert.equal(statSync(join(directory, "auth-secret")).mode & 0o777, 0o600);
-    assert.equal(
-      readFileSync(join(directory, "auth-secret"), "utf8"),
-      first.BETTER_AUTH_SECRET,
-    );
-    assert.throws(() =>
-      ensureDevelopmentAuthSecret({
+test(
+  "development signing secret is private and stable across restarts",
+  { skip: process.platform === "win32" },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "radius-auth-secret-"));
+    try {
+      const first: NodeJS.ProcessEnv = {
         ...local,
-        NODE_ENV: "production",
         RADIUS_LOCAL_STATE_DIR: directory,
-      }),
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+      };
+      ensureDevelopmentAuthSecret(first);
+      const second: NodeJS.ProcessEnv = {
+        ...local,
+        RADIUS_LOCAL_STATE_DIR: directory,
+      };
+      ensureDevelopmentAuthSecret(second);
+      assert.equal(first.BETTER_AUTH_SECRET, second.BETTER_AUTH_SECRET);
+      assert.equal(
+        statSync(join(directory, "auth-secret")).mode & 0o777,
+        0o600,
+      );
+      assert.equal(
+        readFileSync(join(directory, "auth-secret"), "utf8"),
+        first.BETTER_AUTH_SECRET,
+      );
+      assert.throws(() =>
+        ensureDevelopmentAuthSecret({
+          ...local,
+          NODE_ENV: "production",
+          RADIUS_LOCAL_STATE_DIR: directory,
+        }),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);

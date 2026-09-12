@@ -49,6 +49,8 @@ and verified sender. Never commit the populated file. The service fails at
 startup if Resend delivery is selected without these values. Local development
 creates one private persistent signing secret at `.radius/auth-secret`; other
 deployments must supply `BETTER_AUTH_SECRET` explicitly.
+On Windows, set `BETTER_AUTH_SECRET` explicitly as well: automatic private-file
+creation requires POSIX permissions. The desktop itself currently targets macOS.
 
 For a contributor without an email-service account, Mailpit is an optional
 local test inbox. Start it explicitly:

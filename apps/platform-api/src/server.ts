@@ -16,10 +16,7 @@ import { normalizeOidcProvisioningPolicy } from "./browser-session.js";
 import { normalizePlatformOidcOptions } from "./oidc.js";
 import { createPostgresPlatformServices } from "./postgres-services.js";
 import { resolveAuthIssuer } from "./auth-configuration.js";
-import {
-  DEVELOPMENT_AUTH,
-  isLocalDevelopmentAuth,
-} from "./development-auth.js";
+import { isLocalDevelopmentAuth } from "./development-auth.js";
 import {
   authMode,
   embeddedAuthSecret,
@@ -120,8 +117,10 @@ if (embedded) {
     runtime.db,
     nativeEntries.map((entry) => entry.config),
     {
+      // Explicit operator configuration identifies Radius's own clients;
+      // unrelated OAuth registrations do not inherit this trust.
       trustedClientIds: new Set(
-        localDevelopment ? [DEVELOPMENT_AUTH.clientId] : [],
+        nativeEntries.map((entry) => entry.config.clientId),
       ),
     },
   );

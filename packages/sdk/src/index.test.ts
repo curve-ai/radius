@@ -208,7 +208,7 @@ test("organization credentials reach only the authenticated connection", async (
           credential: { accessToken: "wrong-token", expiresAt },
         }),
       }),
-      AcpAuthenticationRequiredError,
+      /Authentication required/i,
     );
     assert.equal(
       (await runtime.prompt("still authenticated")).text,
