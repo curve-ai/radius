@@ -5,7 +5,7 @@ services:
     image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5001:5000"
+      - "127.0.0.1:${RADIUS_REGISTRY_PORT:-5001}:5000"
     volumes:
       - radius-registry-data:/var/lib/registry
 
@@ -21,7 +21,7 @@ services:
       - --maxmemory-policy
       - noeviction
     ports:
-      - "127.0.0.1:6381:6379"
+      - "127.0.0.1:${RADIUS_REDIS_PORT:-6381}:6379"
     volumes:
       - radius-platform-jobs-redis:/data
     healthcheck:
@@ -38,15 +38,15 @@ services:
       dockerfile: hosting/postgres/Containerfile
     restart: unless-stopped
     environment:
-      POSTGRES_DB: radius
+      POSTGRES_DB: ${RADIUS_POSTGRES_DATABASE:-radius}
       POSTGRES_USER: radius
       POSTGRES_PASSWORD: ${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}
     ports:
-      - "127.0.0.1:5441:5432"
+      - "127.0.0.1:${RADIUS_POSTGRES_PORT:-5441}:5432"
     volumes:
       - radius-platform-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U radius -d radius"]
+      test: ["CMD-SHELL", "pg_isready -U radius -d $$POSTGRES_DB"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -59,7 +59,7 @@ services:
       dockerfile: apps/platform-api/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/radius
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/${RADIUS_POSTGRES_DATABASE:-radius}
       RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY: ${RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY:-true}
       RADIUS_PLATFORM_ALLOW_INSECURE_SESSIONS: "true"
       RADIUS_PLATFORM_DEV_TOKEN: ${RADIUS_PLATFORM_DEV_TOKEN:-radius-dev-token}
@@ -80,7 +80,7 @@ services:
       dockerfile: apps/platform-jobs/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/radius
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/${RADIUS_POSTGRES_DATABASE:-radius}
       JOBS_REDIS_URL: redis://jobs-redis:6379
       JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-5}
       RADIUS_PLATFORM_REGISTRIES: 127.0.0.1:5001

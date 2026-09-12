@@ -3,6 +3,10 @@ import { createServer } from "node:net";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { nativeEntriesFromEnvironment } from "../apps/platform-api/src/native-auth.js";
+import {
+  DEVELOPMENT_AUTH,
+  isLocalDevelopmentAuth,
+} from "../apps/platform-api/src/development-auth.js";
 
 const environment = { ...process.env };
 if (
@@ -21,6 +25,15 @@ if (environment.RADIUS_NATIVE_AUTH_CONFIG_FILE)
   environment.RADIUS_NATIVE_AUTH_CONFIG_FILE = path.resolve(
     environment.RADIUS_NATIVE_AUTH_CONFIG_FILE,
   );
+const explicitAuth = Object.keys(environment).some(
+  (key) =>
+    key.startsWith("RADIUS_NATIVE_") ||
+    key === "RADIUS_AUTH_ISSUER" ||
+    key.startsWith("RADIUS_OIDC_"),
+);
+if (!explicitAuth && isLocalDevelopmentAuth(environment)) {
+  environment.RADIUS_NATIVE_AUTH_CONFIG = JSON.stringify([DEVELOPMENT_AUTH]);
+}
 if (!nativeEntriesFromEnvironment(environment).length)
   throw new Error(
     "Configure the provisioned organization in .radius/native-auth.json or RADIUS_NATIVE_AUTH_CONFIG before starting the desktop Platform.",

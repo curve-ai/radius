@@ -51,18 +51,21 @@ Membership auto-join stays off unless explicitly enabled by the operator.
 
 ## Local startup
 
+Contributors should begin with the [local development guide](local-development.md).
+It supplies a Compose dependency setup and a development organization/client
+default. The instructions below apply to explicit organization configurations.
+
 Put the organization's public native-client configuration array in
 `.radius/native-auth.json` and configure `DATABASE_URL` for the existing local
 Radius Platform database. Enable sync with `RADIUS_SYNC_ENABLED=true` and a
 server-only `RADIUS_SYNC_CURSOR_SECRET`. Secrets do not belong in the native
 client file.
 
-`bun run dev` checks native-auth readiness before starting Electron. For the
-default `http://localhost:3100/`, if no server is reachable it starts
-`bun run platform:dev`, which discovers `.radius/native-auth.json`, and waits
-for native discovery. It stops that child when the desktop exits. Explicit
-remote endpoints must already be running. A different service occupying port
-3100 is reported and is never terminated automatically.
+`bun run dev` checks native-auth readiness before starting Electron. Start the
+dependencies and `bun run platform:dev` in separate terminals first. Platform
+discovers `.radius/native-auth.json` when no explicit native configuration was
+supplied. A different service occupying port 3100 is reported and is never
+terminated automatically.
 
 To start Platform separately or diagnose a packaged application's server:
 

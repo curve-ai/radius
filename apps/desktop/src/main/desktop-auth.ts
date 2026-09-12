@@ -24,7 +24,7 @@ const platformUrl = readDesktopPlatformUrl();
 let status: DesktopAuthenticationStatus = {
   state: "checking",
   displayName: distribution?.displayName ?? "Radius",
-  signInName: distribution?.signInName ?? "organization",
+  signInName: distribution?.signInName ?? "Curve",
   organizationName: null,
   errorCode: null,
 };
@@ -43,15 +43,16 @@ export function desktopAuthenticationStatus(): DesktopAuthenticationStatus {
 export function assertDesktopAuthenticated(): void {
   assertUsableDesktopSession(status.state, credentials);
 }
-export function platformAgentId(): string {
+export function platformAgentId(): string | null {
   assertDesktopAuthenticated();
   if (!configuration) throw new Error("AUTHENTICATION_REQUIRED");
-  return configuration.agentId;
+  return distribution?.agentId ?? null;
 }
 export function platformAgentCredential(
   agentId: string,
-): NativeAgentCredential {
+): NativeAgentCredential | null {
   assertDesktopAuthenticated();
+  if (!distribution) return null;
   if (agentId !== configuration?.agentId)
     throw new Error("PLATFORM_AGENT_REQUIRED");
   return credentials!.agent;

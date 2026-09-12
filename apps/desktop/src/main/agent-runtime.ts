@@ -861,7 +861,7 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
     agents.push(desktopAgentSummary(release, authentication));
   }
   const agentId = platformAgentId();
-  return agents.filter((agent) => agent.id === agentId);
+  return agentId ? agents.filter((agent) => agent.id === agentId) : agents;
 }
 
 export async function connectAgentAuthentication(
@@ -2298,15 +2298,26 @@ async function runAgentSession(input: {
         ? input.target.release.agentId
         : input.target.connection.agentId,
     );
-    credentialExpiryTimer = setTimeout(
-      () => {
-        input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
-        void runtime?.stop();
-      },
-      Math.max(0, Date.parse(platformCredential.expiresAt) - Date.now()),
-    );
+    if (platformCredential)
+      credentialExpiryTimer = setTimeout(
+        () => {
+          input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
+          void runtime?.stop();
+        },
+        Math.max(0, Date.parse(platformCredential.expiresAt) - Date.now()),
+      );
     const authenticate: AcpAuthenticationHandler = async (methods) => {
       assertDesktopAuthenticated();
+      if (!platformCredential) {
+        const supported = methods.filter(
+          (method) =>
+            method.id !== "radius-oauth" &&
+            !("type" in method && method.type === "terminal"),
+        );
+        if (!supported.length) return null;
+        if (supported.length === 1) return supported[0]!.id;
+        throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
+      }
       if (!methods.some((method) => method.id === "radius-oauth"))
         throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
       return {
@@ -2359,7 +2370,10 @@ async function runAgentSession(input: {
         cwd: input.projectRoots[0] ?? release!.process.statePath,
         mcpServers,
         handlers,
-        onAuthenticate: authenticate,
+        onAuthenticate:
+          !platformCredential && release && isFxRelease(release)
+            ? undefined
+            : authenticate,
         session: sessionStart,
         onStderr: (chunk) => {
           if (process.env.RADIUS_RUNTIME_DEBUG === "1") {

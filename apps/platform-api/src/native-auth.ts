@@ -17,6 +17,10 @@ import {
 import { organizationFromManagedHost } from "./browser-auth.js";
 import type { OidcIdentityClaims } from "./oidc.js";
 import {
+  DEVELOPMENT_ACCOUNT_ID,
+  DEVELOPMENT_AUTH,
+} from "./development-auth.js";
+import {
   readNativeAuthConfiguration,
   resolveAuthIssuer,
 } from "./auth-configuration.js";
@@ -90,6 +94,7 @@ export function createNativeAuthRoutes(options: {
   entries: NativeEntry[];
   managedBaseDomain?: string;
   allowLoopback?: boolean;
+  localDevelopment?: boolean;
 }) {
   const app = new Hono();
   const clients = new Map<string, Promise<oidc.Configuration>>();
@@ -213,11 +218,25 @@ export function createNativeAuthRoutes(options: {
       )
         throw new Error("Identity changed");
     }
+    const localOwner =
+      options.localDevelopment === true &&
+      entry.config.clientId === DEVELOPMENT_AUTH.clientId &&
+      entry.config.issuer === DEVELOPMENT_AUTH.issuer &&
+      entry.config.organizationSlug === DEVELOPMENT_AUTH.organizationSlug;
+    const policy = localOwner
+      ? normalizeOidcProvisioningPolicy({
+          organizationSlug: DEVELOPMENT_AUTH.organizationSlug,
+          bootstrapAccountId: DEVELOPMENT_ACCOUNT_ID,
+          role: "owner",
+          allowedEmails: identityClaims.email ? [identityClaims.email] : [],
+          allowUnprovisionedIdentities: true,
+        })
+      : entry.policy;
     const created = await provisionOidcBrowserSession(
       options.pool,
       identityClaims,
-      entry.policy,
-      { organizationBound: true },
+      policy,
+      { organizationBound: true, localDevelopmentOwner: localOwner },
     );
     const organization = created.identity.organizations.find(
       (org) => org.slug === entry.config.organizationSlug,

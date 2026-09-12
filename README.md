@@ -40,10 +40,21 @@ Requirements:
 - Apple Silicon and macOS 26 or newer when running local agent packages.
 
 ```bash
-bun install
-bun run browser:build
+bun install --frozen-lockfile
+cp .env.example .env.local
+docker compose --env-file .env.local -p radius-local \
+  -f hosting/docker/compose.dev.yml up -d --build postgres jobs-redis registry
+# Separate terminals, from the repository root:
+bun run platform:dev
+bun run platform:jobs:dev
+PORT=3201 bun run platform:web:dev
 bun run dev
 ```
+
+Follow the [local development guide](docs/guides/local-development.md) for
+dependencies, existing-database configuration, default organization/auth,
+example agents, verification, and shutdown. Docker supplies dependencies only;
+the application does not install a database or start Docker itself.
 
 To run the durable open Platform management plane, start the complete
 single-node development stack:

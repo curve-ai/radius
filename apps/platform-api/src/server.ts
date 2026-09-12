@@ -16,6 +16,7 @@ import { normalizeOidcProvisioningPolicy } from "./browser-session.js";
 import { normalizePlatformOidcOptions } from "./oidc.js";
 import { createPostgresPlatformServices } from "./postgres-services.js";
 import { resolveAuthIssuer } from "./auth-configuration.js";
+import { isLocalDevelopmentAuth } from "./development-auth.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
 const databaseUrl = requiredEnvironment("DATABASE_URL");
@@ -24,6 +25,7 @@ const bootstrapDevelopmentAuthority =
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
 // Reject invalid operator configuration before opening storage or starting services.
 const nativeEntries = nativeEntriesFromEnvironment(process.env);
+const localDevelopment = isLocalDevelopmentAuth(process.env);
 
 const runtime = await createPostgresPlatformServices({
   connectionString: databaseUrl,
@@ -64,6 +66,7 @@ const app = createPlatformApp(runtime.services, {
           : undefined,
         allowLoopback:
           process.env.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
+        localDevelopment,
       })
     : undefined,
   browserAuth,
@@ -72,6 +75,7 @@ const app = createPlatformApp(runtime.services, {
   syncDatabase: syncEnabled ? runtime.db : undefined,
 });
 const server = Bun.serve({
+  hostname: process.env.HOST ?? "0.0.0.0",
   port: Number(process.env.PORT ?? 3100),
   fetch: app.fetch,
 });
