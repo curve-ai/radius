@@ -165,7 +165,8 @@ export interface DesktopSyncStatus {
 export interface DesktopAgentSummary {
   id: string;
   label: string;
-  detail?: string;
+  releaseVersion: string | null;
+  updatedAt?: string | null;
   models: Array<{
     id: string;
     label: string;

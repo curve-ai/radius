@@ -869,7 +869,9 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
           preferCachedDuringRuntime: true,
         })
       : null;
-    agents.push(desktopAgentSummary(release, authentication));
+    agents.push(
+      desktopAgentSummary(release, authentication, installation.updatedAt),
+    );
   }
   const distribution = readDistribution();
   return distribution
@@ -889,7 +891,7 @@ export async function connectAgentAuthentication(
     context,
     installation.installationId,
   );
-  return desktopAgentSummary(release, authentication);
+  return desktopAgentSummary(release, authentication, installation.updatedAt);
 }
 
 export async function disconnectAgentAuthentication(
@@ -904,7 +906,7 @@ export async function disconnectAgentAuthentication(
     context,
     installation.installationId,
   );
-  return desktopAgentSummary(release, authentication);
+  return desktopAgentSummary(release, authentication, installation.updatedAt);
 }
 
 export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
@@ -2877,11 +2879,13 @@ async function ensureAgentInstallation(
 function desktopAgentSummary(
   release: AgentReleaseDescriptor,
   authentication: Awaited<ReturnType<typeof getFxAuthenticationStatus>> | null,
+  updatedAt: string,
 ): DesktopAgentSummary {
   return {
     id: release.agentId,
     label: release.displayName,
-    detail: `${release.releaseVersion} · local microVM`,
+    releaseVersion: release.releaseVersion,
+    updatedAt,
     models:
       authentication?.models ??
       release.models.map((model) => ({
@@ -2913,7 +2917,8 @@ function developmentAgentSummary(
   return {
     id: connection.agentId,
     label: connection.displayName,
-    detail: "Development connection",
+    releaseVersion: null,
+    updatedAt: connection.registeredAt,
     models: [],
     defaultModelId: null,
     promptCapabilities: agentPromptCapabilities.get(

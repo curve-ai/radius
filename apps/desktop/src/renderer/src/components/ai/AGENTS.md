@@ -193,8 +193,13 @@
   redirects, bounded HTML-prefix reads for large pages, strict image MIME and
   byte limits, timeouts, metadata cleanup, in-flight
   deduplication, and bounded caching. Keep links inline and retain the authored
-  label and destination exactly. Valid favicons may resolve during streaming
-  with a 160ms blur/opacity transition. Honor site-declared light and dark
+  label and destination exactly. Prefetch favicon metadata when message links
+  mount, including during streaming and outside the viewport. Share bounded
+  caches and in-flight work by HTTPS origin in renderer and main, with bounded
+  concurrency and short-lived negative results. Cached icons render immediately.
+  Reserve a fixed 14px icon slot for eligible HTTPS links, even on failure, so
+  asynchronous results never shift the text. Do not animate favicon entry.
+  Honor site-declared light and dark
   favicon variants when both pass the same bounded image checks, and fall back
   to the conventional root favicon when page metadata cannot be read. Missing
   or broken favicons render no generic placeholder. Reveal the underline only

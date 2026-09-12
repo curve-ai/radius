@@ -1087,7 +1087,6 @@ test("sends native credentials only in authenticate, before creating the session
     runtime.close();
   }
 });
-
 test("closes the connection when the agent negotiates a different protocol version", async () => {
   let newSessionCalls = 0;
   const fakeAgent = agent({ name: "version-mismatch-agent" })

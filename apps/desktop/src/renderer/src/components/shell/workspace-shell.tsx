@@ -60,7 +60,8 @@ export function WorkspaceShell({
   const { activeView } = useWorkspaceNavigation();
   const { activeSession } = useProjects();
   const isNewChat = activeView === "workspace" && activeSession === null;
-  const hasCollapsingTitle = activeView === "connectors";
+  const hasCollapsingTitle =
+    activeView === "connectors" || activeView === "agents";
   const toolPanelAvailable = !isNewChat && activeView !== "connectors";
   const headerTitle =
     activeView === "workspace" && activeSession
@@ -80,6 +81,7 @@ export function WorkspaceShell({
     () => localStorage.getItem(TOOL_PANEL_STORAGE_KEY) !== "false",
   );
   const workbenchRef = useRef<HTMLDivElement>(null);
+  const workspaceScrollRef = useRef<HTMLElement>(null);
   const reduceMotion = useReducedMotion();
   const { viewportWidth, workbenchWidth } = dimensions;
   const desktopToolPanelVisible = actionToolPanelDesktopFits(
@@ -204,13 +206,14 @@ export function WorkspaceShell({
       />
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
       <WorkspaceHistoryControls />
-      <div className="radius-workspace-timeline-scope relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <WorkspaceWindowResizeContext.Provider value={windowResizing}>
           <LayoutGroup id="workspace-tool-panel-layout">
             <WorkspaceHeader
               collapsingTitle={hasCollapsingTitle}
               minimal={isNewChat}
               title={headerTitle}
+              scrollContainerRef={workspaceScrollRef}
               toolPanelAvailable={toolPanelAvailable}
               toolPanelOpen={toolPanelOpen}
               desktopToolPanelVisible={desktopToolPanelVisible}
@@ -228,13 +231,13 @@ export function WorkspaceShell({
               }
             >
               <main
+                ref={workspaceScrollRef}
                 id="main-content"
                 className={cn(
                   "h-full min-h-0 min-w-0 flex-1 outline-none focus:outline-none focus-visible:outline-none",
                   activeView === "workspace"
                     ? "overflow-hidden"
                     : "overflow-x-hidden overflow-y-auto overscroll-contain",
-                  hasCollapsingTitle && "radius-workspace-scroll-timeline",
                 )}
                 tabIndex={-1}
               >

@@ -3,13 +3,13 @@
   "agentId": "fx",
   "providerId": "vercel-labs",
   "displayName": "fx",
-  "releaseVersion": "0.0.5-radius.3",
+  "releaseVersion": "0.0.9-radius.2",
   "protocol": {
     "kind": "acp-stdio",
     "version": 1
   },
   "image": {
-    "reference": "radius.local/fx:0.0.5-radius.3",
+    "reference": "radius.local/fx:0.0.9-radius.2",
     "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "platform": "linux/arm64",
     "translation": "none"
@@ -27,7 +27,11 @@
     "processLimit": 256,
     "openFileLimit": 1024
   },
-  "networkAllowlist": ["chatgpt.com", "auth.openai.com"],
+  "networkAllowlist": [
+    "chatgpt.com",
+    "auth.openai.com",
+    "registry.npmjs.org"
+  ],
   "capabilities": [
     "workspace.files.read",
     "workspace.files.write",
