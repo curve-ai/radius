@@ -10,6 +10,10 @@ import {
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import { UserAvatar } from "@renderer/components/shell/user-avatar";
+import {
+  accountLabel,
+  useAuthentication,
+} from "@renderer/app/auth/authentication-context";
 import { Button } from "@renderer/components/ui/button";
 import {
   Sidebar,
@@ -182,6 +186,8 @@ export function WorkspaceSidebar({
   const { activeView, navigate } = useWorkspaceNavigation();
   const startNewChat = useStartNewChat();
   const { state } = useSidebar();
+  const authentication = useAuthentication();
+  const userLabel = accountLabel(authentication?.profile);
   const collapsed = state === "collapsed";
 
   return (
@@ -283,14 +289,13 @@ export function WorkspaceSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   type="button"
-                  tooltip="Account settings"
+                  tooltip={userLabel}
+                  title={authentication?.profile?.email ?? userLabel}
                   className="h-10"
                   onClick={() => navigate("settings")}
                 >
-                  <UserAvatar size={16} />
-                  <span className="min-w-0 flex-1 truncate">
-                    Local workspace
-                  </span>
+                  <UserAvatar size={24} />
+                  <span className="min-w-0 flex-1 truncate">{userLabel}</span>
                   <span className="sr-only">Open account settings</span>
                 </SidebarMenuButton>
                 <DesktopUpdateAction />

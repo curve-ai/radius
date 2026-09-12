@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
-import { nativeBrowserLogin } from "./native-login";
+import { nativeBrowserLogin, NATIVE_LOGIN_TIMEOUT_MS } from "./native-login";
 
 async function port(): Promise<number> {
   const server = createServer();
@@ -71,4 +71,49 @@ test("cancel closes the listener and rejects without waiting for callback", asyn
     ),
     /AUTH_CANCELLED/,
   );
+});
+
+test("expired sign-in releases its port and a retry rejects the old callback", async () => {
+  assert.equal(NATIVE_LOGIN_TIMEOUT_MS, 15 * 60_000);
+  const redirectUri = `http://127.0.0.1:${await port()}/callback`;
+  const config = {
+    issuer: "https://id.example.com",
+    authorizationEndpoint: "https://id.example.com/authorize",
+    clientId: "desktop",
+    redirectUri,
+    scopes: ["openid"],
+    resource: "https://api.example.com",
+    organizationSlug: "example",
+    displayName: "Example",
+    agentId: "agent",
+  };
+  let oldState = "";
+  await assert.rejects(
+    nativeBrowserLogin(
+      config,
+      async (url) => {
+        oldState = new URL(url).searchParams.get("state")!;
+      },
+      new AbortController().signal,
+      { timeoutMs: 40 },
+    ),
+    /AUTH_TIMEOUT/,
+  );
+  const result = await nativeBrowserLogin(
+    config,
+    async (url) => {
+      const state = new URL(url).searchParams.get("state")!;
+      assert.notEqual(state, oldState);
+      assert.equal(
+        (await fetch(`${redirectUri}?code=late&state=${oldState}`)).status,
+        400,
+      );
+      assert.equal(
+        (await fetch(`${redirectUri}?code=current&state=${state}`)).status,
+        200,
+      );
+    },
+    new AbortController().signal,
+  );
+  assert.equal(new URL(result.callbackUrl).searchParams.get("code"), "current");
 });

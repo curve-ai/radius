@@ -1,8 +1,97 @@
 # Connect your authentication system
 
-Radius can use your hosted OpenID Connect login for a company desktop app. The user signs in once in the system browser. Platform validates that identity and membership, and the desktop passes a separate, short-lived access token to your agent. Your agent API remains responsible for its own permissions.
+Radius uses the OpenID Connect login exposed by its bundled Platform origin. The user signs in once in the system browser. Platform validates that identity and membership, and the desktop passes a separate, short-lived access token to your agent. Your agent API remains responsible for its own permissions.
 
-This is an opt-in company distribution. A generic Radius checkout remains local-only and does not require Curve Cloud. Company builds use a separate local profile, require sign-in before workspace access, and sync automatically with their configured Platform.
+Every desktop bundle has one Platform origin and follows the same native auth flow whether Curve or the operator hosts it. An ordinary Radius build targets `http://localhost:3100/`; a branded distribution embeds its Platform origin, application identity, organization, and agent. Radius does not ask the user to choose a hosting mode or type an endpoint after launch.
+
+The Platform URL and the authentication issuer are independent. Local contributor
+setup runs Better Auth inside Platform on port 3100. In external mode, an organization
+with a registered native client can omit its issuer to use Curve's hosted Better
+Auth at `https://app.curvehq.sh/api/auth`. A custom Better Auth installation must
+enable its OAuth provider; other OIDC providers use the same public-client flow.
+No local identity server or managed Cloud stack is required to use hosted auth.
+The organization, client registration, resource, and membership must still exist;
+an issuer default does not provision them or grant access.
+
+## Configuration resolution
+
+For each organization's native auth entry, issuer precedence is:
+
+1. The entry's explicit `issuer`.
+2. Deployment `RADIUS_AUTH_ISSUER`.
+3. Existing deployment `RADIUS_OIDC_ISSUER`.
+4. `RADIUS_AUTH_URL` in embedded mode, or `https://app.curvehq.sh/api/auth` in external mode.
+
+Explicit invalid configuration fails startup. Network/discovery errors do not
+switch to the hosted issuer. Issuer identity, including path and trailing slash,
+is preserved exactly. Host routing selects the organization's entry; membership
+remains enforced by Platform after login.
+
+Supply the array as `RADIUS_NATIVE_AUTH_CONFIG`, or set
+`RADIUS_NATIVE_AUTH_CONFIG_FILE` to a readable JSON file, but not both. An empty
+array deliberately leaves native auth unconfigured. An organization entry may
+omit only `issuer`; its registered `clientId`, organization, agent, callback,
+resource, and scopes remain required.
+
+For a single organization, the equivalent environment form is:
+
+```dotenv
+RADIUS_NATIVE_CLIENT_ID=registered-public-client-id
+RADIUS_NATIVE_ORGANIZATION=yourcompany
+RADIUS_NATIVE_AGENT_ID=your-agent
+RADIUS_NATIVE_RESOURCE=https://api.yourcompany.com/agent
+# Optional; omitted issuer uses hosted Better Auth.
+# RADIUS_AUTH_ISSUER=https://identity.yourcompany.com/api/auth
+RADIUS_NATIVE_SCOPES=openid profile email
+```
+
+The callback defaults to `http://127.0.0.1:43821/callback`; set
+`RADIUS_NATIVE_REDIRECT_URI` only to the callback registered for that client.
+File/JSON configuration takes precedence over the environment field form.
+Membership auto-join stays off unless explicitly enabled by the operator.
+
+## Local startup
+
+Contributors should begin with the [local development guide](local-development.md).
+It supplies a Compose dependency setup and a development organization/client
+default. The instructions below apply to explicit organization configurations.
+
+Put the organization's public native-client configuration array in
+`.radius/native-auth.json` and configure `DATABASE_URL` for the existing local
+Radius Platform database. Enable sync with `RADIUS_SYNC_ENABLED=true` and a
+server-only `RADIUS_SYNC_CURSOR_SECRET`. Secrets do not belong in the native
+client file.
+
+`bun run dev` checks native-auth readiness before starting Electron. Start the
+dependencies and `bun run platform:dev` in separate terminals first. Platform
+discovers `.radius/native-auth.json` when no explicit native configuration was
+supplied. A different service occupying port 3100 is reported and is never
+terminated automatically.
+
+To start Platform separately or diagnose a packaged application's server:
+
+```sh
+bun run platform:dev
+bun run auth:check http://localhost:3100/
+```
+
+With `RADIUS_AUTH_MODE=embedded`, Platform mounts Better Auth at `/api/auth`,
+applies its additive `radius_auth` migrations, and registers configured public
+PKCE clients after migration. The contributor fixture supplies the `dev`
+organization and local native client. Other organizations retain explicit
+provisioning and membership policy. No Cloud database credentials are used. The packaged
+desktop connects to its configured Platform; it does not start server services.
+A successful readiness check proves discovery, not a completed login or agent
+authorization.
+
+Embedded mode uses Resend by default for email codes (`RESEND_API_KEY` and
+`AUTH_EMAIL_FROM`); SMTP is an explicit alternative. It hosts sign-in and consent
+on the Platform origin with no additional auth process. A self-hosted dashboard
+may use the same embedded issuer: set `RADIUS_OIDC_ISSUER=RADIUS_AUTH_URL`,
+configure its client ID/redirect and organization policy, and omit its client
+secret to use the automatically registered public PKCE client. Existing Caddy
+configuration must route `/api/auth/*`, `/.well-known/*`, `/auth-ui/*`, `/sign-in`
+and `/consent` to Platform API. See the local guide for optional Mailpit testing.
 
 ## What your provider needs
 
@@ -97,14 +186,15 @@ Example `distribution.json`:
 From the Radius repository:
 
 ```sh
+bun run dev
+bun run dev --url http://localhost:3100/
 RADIUS_DISTRIBUTION_CONFIG=/absolute/path/distribution.json bun run dev
-RADIUS_DISTRIBUTION_CONFIG=/absolute/path/distribution.json bun run dev --url http://localhost:3100/
 RADIUS_DISTRIBUTION_CONFIG=/absolute/path/distribution.json bun run make
 ```
 
-Development also finds `.radius/distribution.json` automatically. The `--url` override belongs to the development launcher; packaged applications use the validated build-time configuration. Packaging uses the distribution ID and display name as its application identity. Use a stable ID across updates.
+Development also finds `.radius/distribution.json` automatically. The `--url` override belongs to the development launcher and works with either the standard or a branded bundle. Packaged applications use the validated Platform URL embedded at build time. Without a distribution file, that URL is `http://localhost:3100/`. Packaging a branded distribution uses its ID and display name as the application identity. Use a stable ID across updates.
 
-The selected `agentId` must exist in the bundled releases or the development registry. Authentication setup does not build or download the agent: use the existing agent build/bundling workflow. The configured agent must advertise the `radius-oauth` ACP authentication method. Generic local-only builds keep their existing provider authentication behavior.
+The selected `agentId` must exist in the bundled releases or the development registry. Authentication setup does not build or download the agent: use the existing agent build/bundling workflow. The configured agent must advertise the `radius-oauth` ACP authentication method. For the standard bundle, the desktop accepts the organization and agent returned by the native auth configuration at its local Platform origin. A branded distribution additionally pins both values and rejects a mismatched server response.
 
 Company data lives in a separate `Radius-<distribution-id>` Application Support folder. This first version binds that profile to one account after connection. Signing in as another account is rejected; signing out does not delete encrypted history or silently upload it to the next account. Multi-account profile switching is not implemented.
 

@@ -288,11 +288,19 @@ The shell is one coordinated workspace, not a collection of independent pages.
   changes must also update Electron `nativeTheme` so the native material and
   semantic tokens resolve to the same appearance.
 - The sticky header owns the current view title and contextual tool controls.
-- Long catalog views use an iOS-style large-title transition. Connectors begins
-  with the regular-weight `type-lg` title in the page; as it scrolls beneath the
-  48px shell header, the compact `type-base` title follows the scroll position
-  with a 24-72px opacity/translate transition. Scrolling back reverses the same
-  path. Reduced motion keeps the opacity cue and removes positional movement.
+- Long catalog views use an iOS-style large-title transition. Connectors and
+  Agents begin with a regular-weight `type-lg` title in the page; as it scrolls
+  beneath the 48px shell header, the compact `type-base` title follows the scroll
+  position with a 24-72px opacity/translate transition while the header's bottom
+  hairline fades in over the same range. Scrolling back reverses the same path.
+  Reduced motion keeps the opacity cues and removes positional movement. The
+  Agents introduction and installed-agent rows remain borderless, without
+  secondary intro, section-title, or footer copy. Each agent uses one compact
+  metadata line: a 32px icon, 16px name, release version, persisted release
+  update date, and the trailing action. Authentication detail, model count,
+  status decoration, and runtime implementation labels stay out of this surface.
+  When no valid update timestamp is available, the row says `Updated recently`
+  and does not invent a date or expose an invalid tooltip.
   Installing a remote connector leaves it in the existing Needs setup rows.
   Finish setup is a real compact row action: it may open the system browser for
   authorization, stays disabled with a Connecting label while the IPC request
@@ -341,8 +349,11 @@ The shell is one coordinated workspace, not a collection of independent pages.
   legacy ACP modes without a mode configuration option, one compact Mode row
   provides the fallback selector. Typing `/` opens an
   accessible command suggestion list above the composer, with arrow-key
-  navigation and Enter selection. Current context usage and cumulative cost,
-  when reported, share one quiet footer label instead of opening another panel.
+  navigation and Enter selection. Valid ACP-reported context-window usage
+  appears as a compact circular meter in the footer. Pointer hover or keyboard
+  focus reveals the percentage used and remaining plus the used and total token
+  counts in the shared tooltip treatment. Without valid ACP token usage, Radius
+  shows no context indicator or inferred substitute.
   New chats and agents without live ACP feature state retain the release-derived
   Agent, Model, and Thinking behavior above.
   On the collapsed desktop trigger, resolved Model and Thinking effort appear
@@ -474,8 +485,9 @@ The shell is one coordinated workspace, not a collection of independent pages.
   page is large, caps all image bytes, allowlists image MIME types, sends no
   cookies or referrer, deduplicates in-flight work, and stores results in a
   bounded process cache. Web links retain exactly the label and destination the
-  agent authored. Valid favicons may resolve during streaming and enter with a
-  160ms blur/opacity transition. Site-declared light and dark variants follow
+  agent authored. HTTPS links reserve a fixed 14px icon slot from their first
+  render so asynchronous favicon loading never shifts the text. Favicons appear
+  without an entry animation. Site-declared light and dark variants follow
   the active color scheme, while an independently bounded root-favicon lookup
   survives unavailable page metadata; missing or broken favicons leave no placeholder
   glyph. Link underlines appear only on hover or keyboard focus. Project file
@@ -658,6 +670,16 @@ designed and approved.
 
 Motion communicates feedback, hierarchy, or a state transition. It is not
 ambient decoration.
+
+- Startup uses an opaque, theme-matched canvas with the company's text
+  wordmark centered. Its loading-only shimmer uses a translating masked
+  highlight over a static wordmark, on the existing 1.4s linear cadence.
+  It becomes a static wordmark under reduced motion.
+- The startup surface fades out over 160ms. The workspace enters with opacity
+  and an 8px vertical offset over 240ms using `[0.23, 1, 0.32, 1]`. Reduced
+  motion uses a 100ms fade without translation. This entrance is not repeated
+  for ordinary navigation. The workspace wrapper remains transparent so
+  native sidebar material is preserved.
 
 - Reuse the motion helpers in `components/ui/motion.ts` and
   `components/ui/motion-features.ts`.

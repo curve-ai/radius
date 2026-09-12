@@ -73,6 +73,11 @@ export interface ProjectSessionSummary {
   working: boolean;
 }
 
+export interface SessionWorkingStateUpdate {
+  sessionId: string;
+  working: boolean;
+}
+
 export interface ProjectRootSummary {
   id: string;
   name: string;
@@ -108,6 +113,7 @@ export interface SessionTranscriptStreamUpdate {
 }
 export const SESSION_TRANSCRIPT_STREAM_CHANNEL =
   "radius:session-transcript-stream";
+export const SESSION_WORKING_STATE_CHANNEL = "radius:session-working-state";
 export const SESSION_RUN_ACTIVITY_DETAIL = {
   connectingAgent: "Connecting to the development agent",
   resumingWork: "Continuing with approved access",
@@ -141,31 +147,11 @@ export interface SaveComposerDraftInput {
   content: string;
 }
 
-export interface PlatformConnectionSummary {
-  baseUrl: string;
-  /** A label only. Nothing in the app branches on it. */
-  mode: "managed" | "self_hosted";
-  organizationSlug: string | null;
-  organizationName: string | null;
-  role: string | null;
-  accountId: string | null;
-}
-
-export interface DesktopSyncStatus {
-  state: "disabled" | "idle" | "syncing" | "error";
-  providerKey: string | null;
-  endpointUrl: string | null;
-  lastSuccessAt: string | null;
-  errorCode: string | null;
-  connection: PlatformConnectionSummary | null;
-  /** What a pending connect attempt is waiting on, for the connect screen. */
-  progress: string | null;
-}
-
 export interface DesktopAgentSummary {
   id: string;
   label: string;
-  detail?: string;
+  releaseVersion: string | null;
+  updatedAt?: string | null;
   models: Array<{
     id: string;
     label: string;
@@ -441,14 +427,6 @@ export interface OpenSessionFileInput {
   sessionId: string;
 }
 
-/**
- * Curve Cloud onboards at a fixed origin this build was made for and finds
- * the organization's workspace itself. A self-hosted platform is wherever the
- * operator put it, so the user says where.
- */
-export type PlatformConnectionInput =
-  { kind: "cloud" } | { kind: "self-hosted"; url: string };
-
 export interface RadiusApi {
   authenticationStatus(): Promise<
     import("./auth-types").DesktopAuthenticationStatus
@@ -471,6 +449,9 @@ export interface RadiusApi {
   clearComposerDraft(context: ComposerDraftContext): Promise<void>;
   onSessionTranscriptStream(
     listener: (update: SessionTranscriptStreamUpdate) => void,
+  ): () => void;
+  onSessionWorkingStateChanged(
+    listener: (update: SessionWorkingStateUpdate) => void,
   ): () => void;
   chooseProjectFolder(): Promise<ProjectFolderSelection | null>;
   createProject(input: {
@@ -545,11 +526,6 @@ export interface RadiusApi {
     artifactId: string;
   }): Promise<MarkdownMediaResolution>;
   cancelAgentSession(sessionId: string): Promise<void>;
-  syncStatus(): Promise<DesktopSyncStatus>;
-  syncNow(): Promise<DesktopSyncStatus>;
-  setSyncEnabled(enabled: boolean): Promise<DesktopSyncStatus>;
-  connectPlatform(input: PlatformConnectionInput): Promise<DesktopSyncStatus>;
-  disconnectPlatform(): Promise<DesktopSyncStatus>;
   updateStatus(): Promise<DesktopUpdateStatus>;
   checkForUpdates(): Promise<DesktopUpdateStatus>;
   performUpdate(): Promise<DesktopUpdateStatus>;

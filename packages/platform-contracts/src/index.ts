@@ -670,4 +670,6 @@ export interface NativeAuthorizationResponse {
   organization: { id: string; slug: string; displayName: string; role: string };
   agent: NativeAgentCredential;
   refreshToken?: string;
+  /** Verified identity presentation only, not an authorization decision. */
+  profile?: { displayName: string | null; email: string | null };
 }

@@ -115,9 +115,18 @@ export async function provisionOidcBrowserSession(
   pool: PlatformPool,
   claims: OidcIdentityClaims,
   policy: OidcProvisioningPolicy,
-  options: { organizationBound?: boolean } = {},
+  options: {
+    organizationBound?: boolean;
+    localDevelopmentOwner?: boolean;
+  } = {},
 ): Promise<CreatedBrowserSession> {
   return withPlatformTransaction(pool, async (client) => {
+    if (options.localDevelopmentOwner) {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        ["radius-local-development-owner"],
+      );
+    }
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       [`oidc:${claims.issuer}:${claims.subject}`],
@@ -148,6 +157,14 @@ export async function provisionOidcBrowserSession(
     if (!accountId || !accountIdentityId) {
       assertClaimsAllowed(claims, policy);
       accountId = policy.bootstrapAccountId ?? randomUUID();
+      if (options.localDevelopmentOwner) {
+        const bound = await client.query(
+          "SELECT 1 FROM radius_platform.account_identities WHERE account_id = $1 LIMIT 1",
+          [accountId],
+        );
+        if (bound.rows.length)
+          throw new Error("Local development belongs to another identity");
+      }
       if (policy.bootstrapAccountId) {
         const account = await client.query(
           `SELECT 1 FROM radius_platform.accounts

@@ -2,6 +2,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { DesktopAuthenticationStatus } from "../../../../auth-types";
 import { Button } from "@renderer/components/ui/button";
 import cityscape from "@renderer/assets/auth-cityscape.webp";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+} from "@renderer/components/ui/motion";
+import { AuthenticationContext } from "./authentication-context";
+import { StartupScreen, STARTUP_EASE } from "./startup-screen";
+import { authenticationSurface } from "./startup-state";
 
 const messages: Record<string, string> = {
   AUTH_CANCELLED: "Sign-in was cancelled. You can try again when you’re ready.",
@@ -20,6 +28,13 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
     null,
   );
   const [failed, setFailed] = useState(false);
+  const [minimumElapsed, setMinimumElapsed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+  const reduced = useReducedMotion();
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMinimumElapsed(true), 180);
+    return () => window.clearTimeout(timer);
+  }, []);
   useEffect(() => {
     let active = true;
     const read = (): void =>
@@ -31,13 +46,13 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
               current.displayName === value.displayName &&
               current.signInName === value.signInName &&
               current.organizationName === value.organizationName &&
-              current.errorCode === value.errorCode
+              current.errorCode === value.errorCode &&
+              current.profile?.displayName === value.profile?.displayName &&
+              current.profile?.email === value.profile?.email
                 ? current
                 : value,
             );
             setFailed(false);
-            // Local-only mode is fixed by the bundle and cannot sign out.
-            if (value.state === "local") window.clearInterval(interval);
           }
         },
         () => {
@@ -50,8 +65,7 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
       active = false;
       window.clearInterval(interval);
     };
-  }, []);
-  if (status?.state === "local" || status?.state === "ready") return children;
+  }, [retryKey]);
   const waiting = status?.state === "awaiting-browser";
   const preparing =
     !status || status.state === "checking" || status.state === "preparing";
@@ -59,8 +73,9 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
     ? "Continue in your browser"
     : preparing
       ? "Getting ready"
-      : `Sign in to ${status.displayName}`;
-  const signInName = status?.signInName ?? "Curve";
+      : `Sign in to ${status?.displayName ?? "Radius"}`;
+  const signInName = status?.signInName ?? "Radius";
+  const surface = authenticationSurface(status?.state, minimumElapsed);
   const detail = waiting
     ? `Finish signing in with ${signInName}. We’ll bring you back here when you’re ready.`
     : preparing
@@ -68,7 +83,7 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
       : `Use your ${signInName} account to continue.`;
   const act = (action: () => Promise<unknown>): void =>
     void action().catch(() => setFailed(true));
-  return (
+  const signInPanel = (
     <div className="flex h-dvh flex-col bg-background text-foreground">
       <header
         className="h-12 shrink-0 [app-region:drag]"
@@ -137,5 +152,46 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
         </div>
       </main>
     </div>
+  );
+  return (
+    <AuthenticationContext.Provider value={status}>
+      <AnimatePresence initial={false} mode="wait">
+        {surface === "startup" ? (
+          <StartupScreen
+            key="startup"
+            label={status?.displayName ?? "Radius"}
+            failed={failed}
+            retry={() => {
+              setFailed(false);
+              setRetryKey((key) => key + 1);
+            }}
+          />
+        ) : surface === "workspace" ? (
+          <motion.div
+            key="workspace"
+            className="radius-authenticated-workspace"
+            initial={{
+              opacity: 0,
+              transform: reduced ? "none" : "translateY(8px)",
+            }}
+            animate={{ opacity: 1, transform: "none" }}
+            exit={{ opacity: 0, transition: { duration: 0 } }}
+            transition={{ duration: reduced ? 0.1 : 0.24, ease: STARTUP_EASE }}
+          >
+            {children}
+          </motion.div>
+        ) : (
+          <motion.div
+            key="sign-in"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduced ? 0.1 : 0.16, ease: STARTUP_EASE }}
+          >
+            {signInPanel}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </AuthenticationContext.Provider>
   );
 }

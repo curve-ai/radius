@@ -6,7 +6,7 @@ import { resolveLocalArtifactPath } from "@curve-ai/radius-sync-core";
 import { app } from "electron";
 
 import type { MarkdownMediaResolution } from "../radius-api";
-import { BoundedLru } from "./bounded-lru";
+import { BoundedLru } from "../shared/bounded-lru";
 import {
   MAX_LOCAL_IMAGE_BYTES,
   readBoundedImageFile,

@@ -1,4 +1,21 @@
-import type { NativeAuthorizationResponse } from "@curve-ai/platform-contracts";
+import type {
+  DesktopDistribution,
+  NativeAuthorizationResponse,
+  NativeOAuthConfiguration,
+} from "@curve-ai/platform-contracts";
+
+export function assertBundleMatchesPlatform(
+  distribution: DesktopDistribution | null,
+  configuration: NativeOAuthConfiguration,
+): void {
+  if (
+    distribution &&
+    (configuration.organizationSlug !== distribution.organizationSlug ||
+      configuration.agentId !== distribution.agentId)
+  ) {
+    throw new Error("AUTH_CONFIGURATION_INVALID");
+  }
+}
 
 export function assertProfileIdentity(
   previousAccountId: string | null | undefined,

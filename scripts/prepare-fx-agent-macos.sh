@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-fx_version="0.0.5"
+fx_version="0.0.9"
 mac_archive="fx-macos-aarch64.tar.gz"
 linux_archive="fx-linux-aarch64.tar.gz"
-mac_sha256="2b98cc1a85c1cf5ea213f1df71cca79f7cbff65793d2a87282c04ca019cbd1c1"
-linux_sha256="8bbcde6a41256c4fac4e0a022291cf02740419e27afabde3b8f45e7a4e393edb"
+mac_sha256="45fe7b05238b8e5ae7b2c2caeab86218af9bd016e99b8c2b4b363baaa4cab7ee"
+linux_sha256="741eb64e832d168309025fb9e84a0ccb1b842043d796f18898ed06c65d83a498"
 ca_bundle_sha256="f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9"
 release_base="https://github.com/vercel-labs/fx/releases/download/v${fx_version}"
 

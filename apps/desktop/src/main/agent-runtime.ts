@@ -1,7 +1,7 @@
-import { readDistribution } from "./distribution";
 import {
   assertDesktopAuthenticated,
-  distributionAgentCredential,
+  platformAgentCredential,
+  platformAgentId,
 } from "./desktop-auth";
 import {
   clearComposerDraft,
@@ -63,6 +63,7 @@ import type {
   DesktopAgentSummary,
   DesktopRuntimeStatus,
   SessionTranscriptStreamUpdate,
+  SessionWorkingStateUpdate,
   SetAgentSessionConfigOptionInput,
   StartAgentPromptInput,
   StartAgentPromptResult,
@@ -73,6 +74,7 @@ import type {
 import {
   SESSION_RUN_ACTIVITY_DETAIL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
+  SESSION_WORKING_STATE_CHANNEL,
 } from "../radius-api";
 import { splitGeneratedImageLinks } from "../generated-image-link";
 import {
@@ -221,17 +223,6 @@ interface ActiveMcpPermissionContext {
   allowedTools: Set<string>;
   oneTimeTools: Map<string, number>;
 }
-
-const selectProtocolAuthentication: AcpAuthenticationHandler = async (
-  methods,
-) => {
-  const supported = methods.filter(
-    (method) => !("type" in method && method.type === "terminal"),
-  );
-  if (supported.length === 0) return null;
-  if (supported.length === 1) return supported[0]!.id;
-  throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
-};
 
 function resolveMcpPermissionTool(
   context: ActiveMcpPermissionContext,
@@ -841,12 +832,21 @@ export function isAgentSessionWorking(sessionId: string): boolean {
   return workingSessions.has(sessionId);
 }
 
+function broadcastSessionWorkingState(update: SessionWorkingStateUpdate): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(SESSION_WORKING_STATE_CHANNEL, update);
+  }
+}
+
 function markSessionWorking(sessionId: string): void {
+  if (workingSessions.has(sessionId)) return;
   workingSessions.add(sessionId);
+  broadcastSessionWorkingState({ sessionId, working: true });
 }
 
 function clearSessionWorking(sessionId: string): void {
-  workingSessions.delete(sessionId);
+  if (!workingSessions.delete(sessionId)) return;
+  broadcastSessionWorkingState({ sessionId, working: false });
 }
 
 export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
@@ -869,12 +869,12 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
           preferCachedDuringRuntime: true,
         })
       : null;
-    agents.push(desktopAgentSummary(release, authentication));
+    agents.push(
+      desktopAgentSummary(release, authentication, installation.updatedAt),
+    );
   }
-  const distribution = readDistribution();
-  return distribution
-    ? agents.filter((agent) => agent.id === distribution.agentId)
-    : agents;
+  const agentId = platformAgentId();
+  return agentId ? agents.filter((agent) => agent.id === agentId) : agents;
 }
 
 export async function connectAgentAuthentication(
@@ -889,7 +889,7 @@ export async function connectAgentAuthentication(
     context,
     installation.installationId,
   );
-  return desktopAgentSummary(release, authentication);
+  return desktopAgentSummary(release, authentication, installation.updatedAt);
 }
 
 export async function disconnectAgentAuthentication(
@@ -904,7 +904,7 @@ export async function disconnectAgentAuthentication(
     context,
     installation.installationId,
   );
-  return desktopAgentSummary(release, authentication);
+  return desktopAgentSummary(release, authentication, installation.updatedAt);
 }
 
 export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
@@ -940,7 +940,7 @@ export async function startAgentPrompt(
   rawInput: StartAgentPromptInput,
 ): Promise<StartAgentPromptResult> {
   assertDesktopAuthenticated();
-  distributionAgentCredential(rawInput.agentId);
+  platformAgentCredential(rawInput.agentId);
   const input = parsePromptInput(rawInput);
   const prompt = input.prompt.trim();
   const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
@@ -1201,7 +1201,9 @@ export function stopAgentRuntime(): void {
   }
   runningSessions.clear();
   runningTerminalManagers.clear();
-  workingSessions.clear();
+  for (const sessionId of [...workingSessions]) {
+    clearSessionWorking(sessionId);
+  }
   agentSessionFeatures.clear();
   agentSessionConfigOverrides.clear();
   agentSessionModeOverrides.clear();
@@ -2306,33 +2308,41 @@ async function runAgentSession(input: {
         );
       },
     };
-    const companyCredential = distributionAgentCredential(
+    const platformCredential = platformAgentCredential(
       input.target.kind === "release"
         ? input.target.release.agentId
         : input.target.connection.agentId,
     );
-    if (companyCredential)
+    if (platformCredential)
       credentialExpiryTimer = setTimeout(
         () => {
           input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
           void runtime?.stop();
         },
-        Math.max(0, Date.parse(companyCredential.expiresAt) - Date.now()),
+        Math.max(0, Date.parse(platformCredential.expiresAt) - Date.now()),
       );
-    const authenticate: AcpAuthenticationHandler = companyCredential
-      ? async (methods) => {
-          assertDesktopAuthenticated();
-          if (!methods.some((method) => method.id === "radius-oauth"))
-            throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
-          return {
-            methodId: "radius-oauth",
-            credential: {
-              accessToken: companyCredential.accessToken,
-              expiresAt: companyCredential.expiresAt,
-            },
-          };
-        }
-      : selectProtocolAuthentication;
+    const authenticate: AcpAuthenticationHandler = async (methods) => {
+      assertDesktopAuthenticated();
+      if (!platformCredential) {
+        const supported = methods.filter(
+          (method) =>
+            method.id !== "radius-oauth" &&
+            !("type" in method && method.type === "terminal"),
+        );
+        if (!supported.length) return null;
+        if (supported.length === 1) return supported[0]!.id;
+        throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
+      }
+      if (!methods.some((method) => method.id === "radius-oauth"))
+        throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
+      return {
+        methodId: "radius-oauth",
+        credential: {
+          accessToken: platformCredential.accessToken,
+          expiresAt: platformCredential.expiresAt,
+        },
+      };
+    };
     let acpSession: AcpRuntimeSession;
     const sessionStart = input.providerSessionId
       ? ({ kind: "auto", sessionId: input.providerSessionId } as const)
@@ -2376,7 +2386,7 @@ async function runAgentSession(input: {
         mcpServers,
         handlers,
         onAuthenticate:
-          !companyCredential && release && isFxRelease(release)
+          !platformCredential && release && isFxRelease(release)
             ? undefined
             : authenticate,
         session: sessionStart,
@@ -2877,11 +2887,13 @@ async function ensureAgentInstallation(
 function desktopAgentSummary(
   release: AgentReleaseDescriptor,
   authentication: Awaited<ReturnType<typeof getFxAuthenticationStatus>> | null,
+  updatedAt: string,
 ): DesktopAgentSummary {
   return {
     id: release.agentId,
     label: release.displayName,
-    detail: `${release.releaseVersion} · local microVM`,
+    releaseVersion: release.releaseVersion,
+    updatedAt,
     models:
       authentication?.models ??
       release.models.map((model) => ({
@@ -2913,7 +2925,8 @@ function developmentAgentSummary(
   return {
     id: connection.agentId,
     label: connection.displayName,
-    detail: "Development connection",
+    releaseVersion: null,
+    updatedAt: connection.registeredAt,
     models: [],
     defaultModelId: null,
     promptCapabilities: agentPromptCapabilities.get(

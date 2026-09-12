@@ -726,7 +726,7 @@ export function WorkspaceSessionList(): ReactNode {
                   onClick={startRecentChat}
                 >
                   <SquarePen
-                    className="size-3.5"
+                    className="size-3"
                     strokeWidth={1.75}
                     aria-hidden
                   />

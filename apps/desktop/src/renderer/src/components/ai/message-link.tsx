@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { MarkdownLinkPreviewResolution } from "../../../../radius-api";
+import { markdownLinkOrigin } from "../../../../shared/markdown-link-preview-cache";
+import { messageLinkPreviewCache } from "./message-link-preview-cache";
 import { MessageFileIcon } from "./message-file-icon";
 import { messageFileName } from "./message-file-icon-utils";
 import { isMessageFileHref } from "./message-link-utils";
@@ -17,58 +19,35 @@ export function MessageLink({
   href: string;
   sessionId?: string;
 }): ReactNode {
-  const containerRef = useRef<HTMLSpanElement>(null);
-  const requestedRef = useRef(false);
-  const [resolution, setResolution] =
-    useState<MarkdownLinkPreviewResolution | null>(null);
+  const origin = markdownLinkOrigin(href);
+  const [loaded, setLoaded] = useState<{
+    origin: string;
+    result: MarkdownLinkPreviewResolution;
+  } | null>(null);
+  const resolution =
+    loaded?.origin === origin
+      ? loaded?.result
+      : messageLinkPreviewCache.get(href);
   const [failedFavicons, setFailedFavicons] = useState<readonly string[]>([]);
   const file = isMessageFileHref(href);
 
   useEffect(() => {
-    if (file || !href.startsWith("https://")) return undefined;
+    if (file || !origin) return undefined;
     let active = true;
-    requestedRef.current = false;
-    const load = (): void => {
-      if (requestedRef.current) return;
-      requestedRef.current = true;
-      void window.radius.resolveMarkdownLinkPreview(href).then(
-        (result) => {
-          if (active) setResolution(result);
-        },
-        () => {
-          if (active) setResolution({ state: "unavailable" });
-        },
-      );
-    };
-    if (!("IntersectionObserver" in window) || !containerRef.current) {
-      load();
-      return () => {
-        active = false;
-      };
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          load();
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "160px" },
-    );
-    observer.observe(containerRef.current);
+    // Warm every mounted message link, including those below the viewport.
+    // The shared cache coalesces origins and bounds concurrent preload calls.
+    void messageLinkPreviewCache.resolve(href).then((result) => {
+      if (active) setLoaded({ origin, result });
+    });
     return () => {
       active = false;
-      observer.disconnect();
     };
-  }, [file, href]);
+  }, [file, href, origin]);
 
   if (file) {
     const fileName = messageFileName(href);
     return (
-      <span
-        ref={containerRef}
-        className="inline-flex min-w-0 items-baseline gap-1"
-      >
+      <span className="inline-flex min-w-0 items-baseline gap-1">
         <MessageFileIcon fileName={fileName} />
         <a
           href={href}
@@ -101,7 +80,7 @@ export function MessageLink({
   const visibleFaviconDark =
     faviconDark && !failedFavicons.includes(faviconDark) ? faviconDark : null;
   return (
-    <span ref={containerRef} className="inline">
+    <span className="inline">
       <a
         href={href}
         title={href}
@@ -109,27 +88,34 @@ export function MessageLink({
         rel="noreferrer"
         className={`inline-flex min-w-0 items-baseline gap-1 ${LINK_CLASS_NAME}`}
       >
-        {visibleFavicon ? (
-          <picture className="inline-flex size-3.5 shrink-0 self-center">
-            {visibleFaviconDark && visibleFaviconDark !== visibleFavicon ? (
-              <source
-                media="(prefers-color-scheme: dark)"
-                srcSet={visibleFaviconDark}
-              />
+        {origin ? (
+          <span
+            aria-hidden
+            className="inline-flex size-3.5 shrink-0 self-center"
+          >
+            {visibleFavicon ? (
+              <picture className="inline-flex size-3.5">
+                {visibleFaviconDark && visibleFaviconDark !== visibleFavicon ? (
+                  <source
+                    media="(prefers-color-scheme: dark)"
+                    srcSet={visibleFaviconDark}
+                  />
+                ) : null}
+                <img
+                  src={visibleFavicon}
+                  alt=""
+                  aria-hidden
+                  className="size-3.5 rounded-[3px] object-contain"
+                  onError={(event) => {
+                    const failed = event.currentTarget.currentSrc;
+                    setFailedFavicons((current) =>
+                      current.includes(failed) ? current : [...current, failed],
+                    );
+                  }}
+                />
+              </picture>
             ) : null}
-            <img
-              src={visibleFavicon}
-              alt=""
-              aria-hidden
-              className="radius-message-favicon size-3.5 rounded-[3px] object-contain"
-              onError={(event) => {
-                const failed = event.currentTarget.currentSrc;
-                setFailedFavicons((current) =>
-                  current.includes(failed) ? current : [...current, failed],
-                );
-              }}
-            />
-          </picture>
+          </span>
         ) : null}
         <span>{children}</span>
       </a>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BoundedLru } from "./bounded-lru";
+import { BoundedLru } from "../shared/bounded-lru";
 
 test("evicts least-recent entries by count and byte budget", () => {
   const cache = new BoundedLru<string>(2, 6);

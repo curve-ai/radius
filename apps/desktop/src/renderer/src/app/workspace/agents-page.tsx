@@ -1,10 +1,4 @@
-import {
-  Bot,
-  CircleAlert,
-  CircleCheck,
-  RefreshCw,
-  ShieldCheck,
-} from "lucide-react";
+import { Bot, CircleAlert, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@renderer/components/ui/button";
@@ -19,22 +13,23 @@ import type { DesktopAgentSummary } from "../../../../radius-api";
 import { agentErrorMessage } from "./agent-errors";
 
 const AGENT_AUTH_STATE_EASE = [0.23, 1, 0.32, 1] as const;
+const AGENT_UPDATED_AT_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
 
-function authenticationLabel(agent: DesktopAgentSummary): string {
-  switch (agent.authentication.state) {
-    case "connected":
-      return agent.models.length > 0
-        ? `${agent.authentication.detail}. ${agent.models.length} models available.`
-        : agent.authentication.detail;
-    case "expired":
-      return "Codex authentication expired. Sign in again to continue.";
-    case "error":
-      return "Codex authentication needs attention.";
-    case "not_required":
-      return "Ready on this Mac.";
-    case "needs_authentication":
-      return "Sign in to a Codex subscription to use fx on this Mac.";
-  }
+function agentUpdatedMetadata(updatedAt?: string | null): {
+  label: string;
+  title?: string;
+} {
+  if (!updatedAt) return { label: "Updated recently" };
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return { label: "Updated recently" };
+  return {
+    label: `Updated ${AGENT_UPDATED_AT_FORMATTER.format(date)}`,
+    title: date.toLocaleString(),
+  };
 }
 
 export function AgentsPage(): ReactNode {
@@ -132,13 +127,7 @@ export function AgentsPage(): ReactNode {
   return (
     <section className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 sm:pt-12">
       <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h2 className="type-md-lg text-foreground">Agents</h2>
-          <p className="mt-2 max-w-2xl text-base text-muted-foreground">
-            Agents delivered to this Radius installation appear here. Sign in
-            only when an agent requires an account on this Mac.
-          </p>
-        </div>
+        <h2 className="min-w-0 type-lg text-foreground">Agents</h2>
         <Button
           type="button"
           size="icon"
@@ -165,20 +154,15 @@ export function AgentsPage(): ReactNode {
         </div>
       ) : null}
 
-      <section className="mt-9" aria-labelledby="installed-agents-heading">
-        <h3
-          id="installed-agents-heading"
-          className="type-md-sm text-foreground"
-        >
-          Installed
-        </h3>
-        <div className="mt-3 border-t border-border">
+      <section className="mt-7" aria-label="Installed agents">
+        <div>
           {loading && agents.length === 0 ? (
-            <div className="flex min-h-20 items-center gap-3 border-b border-border py-3">
-              <Skeleton className="size-10 shrink-0 rounded-md" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-3 w-64 max-w-full" />
+            <div className="flex min-h-14 items-center gap-2.5 py-2">
+              <Skeleton className="size-8 shrink-0 rounded-md" />
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Skeleton className="h-5 w-20 shrink-0" />
+                <Skeleton className="h-3 w-24 shrink-0" />
+                <Skeleton className="h-3 w-52 max-w-full" />
               </div>
               <Skeleton className="h-8 w-20 rounded-full" />
             </div>
@@ -195,41 +179,32 @@ export function AgentsPage(): ReactNode {
                 agent.authentication.state === "connected" ||
                 agent.authentication.state === "not_required";
               const pending = pendingAgentId === agent.id;
-              const StatusIcon = connected ? CircleCheck : ShieldCheck;
               const authenticationStateKey = agent.authentication.state;
               const actionStateKey = `${authenticationStateKey}:${pending ? "pending" : "settled"}`;
+              const updated = agentUpdatedMetadata(agent.updatedAt);
               return (
                 <div
                   key={agent.id}
-                  className="flex min-h-20 items-center gap-3 border-b border-border py-3"
+                  className="flex min-h-14 items-center gap-2.5 py-2"
                 >
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <Bot className="size-5" aria-hidden />
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <Bot className="size-4" aria-hidden />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-medium text-foreground">
-                        {agent.label}
-                      </p>
+                  <div className="relative flex min-w-0 flex-1 items-center gap-2">
+                    <p className="min-w-0 truncate text-base font-medium text-foreground">
+                      {agent.label}
+                    </p>
+                    {agent.releaseVersion ? (
                       <span className="shrink-0 text-xs text-muted-foreground">
-                        {agent.detail}
+                        {agent.releaseVersion}
                       </span>
-                    </div>
-                    <div className="relative mt-1 min-h-5">
-                      <AnimatePresence initial={false} mode="popLayout">
-                        <motion.p
-                          key={`status:${authenticationStateKey}`}
-                          {...authStateMotionProps}
-                          className="flex items-center gap-1.5 text-sm text-muted-foreground"
-                        >
-                          <StatusIcon
-                            className="size-3.5 shrink-0"
-                            aria-hidden
-                          />
-                          <span>{authenticationLabel(agent)}</span>
-                        </motion.p>
-                      </AnimatePresence>
-                    </div>
+                    ) : null}
+                    <span
+                      className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+                      title={updated.title}
+                    >
+                      {updated.label}
+                    </span>
                   </div>
                   <div className="relative flex min-h-8 w-36 shrink-0 justify-end">
                     <AnimatePresence initial={false} mode="popLayout">
@@ -270,15 +245,6 @@ export function AgentsPage(): ReactNode {
           )}
         </div>
       </section>
-
-      <div className="mt-8 flex items-start gap-3 border-t border-border pt-5 text-sm text-muted-foreground">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
-        <p className="max-w-2xl">
-          Radius encrypts reusable credentials with the operating system. Agent
-          runtimes receive a temporary profile only while authenticating or
-          working.
-        </p>
-      </div>
     </section>
   );
 }

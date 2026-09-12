@@ -16,7 +16,11 @@
   },
   "overrides": {
     "postcss": "8.5.26",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
+    "vite": "7.3.6",
+    "js-yaml": "4.3.2",
+    "@xmldom/xmldom": "0.9.12",
+    "plist": "3.1.1",
     "zod": "4.5.4",
     "fast-uri": "3.1.7"
   },
@@ -56,7 +60,7 @@
     "release:npm:pack": "bun run build:packages && bun scripts/npm-release.ts --output .radius/releases/npm",
     "release:npm:verify": "bun run build:packages && bun scripts/npm-release.ts --verify",
     "release:python:verify": "python3 scripts/verify-python-release.py",
-    "platform:dev": "bun run --cwd apps/platform-api dev",
+    "platform:dev": "bun scripts/platform-dev.ts",
     "platform:web:dev": "bun run --cwd apps/platform-web dev",
     "platform:web:build": "bun run --cwd apps/platform-web build",
     "platform:jobs:dev": "bun run --cwd apps/platform-jobs dev",
@@ -75,6 +79,7 @@
     "typecheck": "bun run --cwd packages/browser-protocol typecheck && bun run --cwd apps/browser-native-host typecheck && bun run --cwd apps/browser-extension typecheck && bun run --cwd packages/browser-tools typecheck && bun run --cwd packages/agent-contracts typecheck && bun run --cwd packages/agent-build typecheck && bun run --cwd packages/platform-contracts typecheck && bun run --cwd packages/platform-client typecheck && bun run --cwd packages/platform-job-contracts typecheck && bun run --cwd packages/platform-providers typecheck && bun run --cwd packages/platform-database typecheck && bun run --cwd apps/platform-api typecheck && bun run --cwd apps/platform-jobs typecheck && bun run --cwd apps/platform-web typecheck && bun run --cwd packages/runtime typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/connector-protocol typecheck && bun run --cwd packages/mcp-connector typecheck && bun run --cwd packages/tool-broker typecheck && bun run --cwd packages/sync-protocol typecheck && bun run --cwd packages/storage typecheck && bun run --cwd packages/sync-core typecheck && bun run --cwd packages/scheduler typecheck && bun run --cwd apps/desktop typecheck",
     "package": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop package",
     "make": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop make",
-    "auth:setup": "bun scripts/configure-desktop-auth.ts"
+    "auth:setup": "bun scripts/configure-desktop-auth.ts",
+    "auth:check": "bun scripts/check-platform-auth.ts"
   }
 }

@@ -63,6 +63,28 @@ export function composerSessionConfigByCategory(
   return options.find((option) => option.category === category) ?? null;
 }
 
+export function composerSessionModelConfig(
+  options: readonly ComposerSessionConfigOption[],
+): ComposerSessionConfigOption | null {
+  return (
+    options.find((option) => option.id === "model") ??
+    options.find(
+      (option) =>
+        option.category === "model" && option.label.toLowerCase() === "model",
+    ) ??
+    null
+  );
+}
+
+export function composerSessionThinkingConfig(
+  options: readonly ComposerSessionConfigOption[],
+): ComposerSessionConfigOption | null {
+  return (
+    options.find((option) => option.id === "effort") ??
+    composerSessionConfigByCategory(options, "thought_level")
+  );
+}
+
 export function composerLegacyModeFallback(
   configOptions: readonly ComposerSessionConfigOption[] | undefined,
   modes: ComposerSessionModes | null | undefined,
@@ -101,35 +123,46 @@ export function composerSlashCommandShouldSubmit(
   return command.inputHint === null && prompt === `/${command.name}`;
 }
 
-export function composerContextUsageLabel(
-  usage: ComposerContextUsage | null,
-): string | null {
-  if (!usage) return null;
-  const parts: string[] = [];
-  if (
-    Number.isFinite(usage.used) &&
-    Number.isFinite(usage.size) &&
-    usage.size > 0
-  ) {
-    const percentage = Math.round(
-      Math.min(1, Math.max(0, usage.used / usage.size)) * 100,
-    );
-    parts.push(`${percentage}% context`);
-  }
-  if (usage.cost && Number.isFinite(usage.cost.amount)) {
-    parts.push(formatCost(usage.cost.amount, usage.cost.currency));
-  }
-  return parts.length > 0 ? parts.join(", ") : null;
+export interface ComposerContextUsagePresentation {
+  accessibleLabel: string;
+  percentageUsed: number;
+  percentageLeft: number;
+  sizeLabel: string;
+  usedLabel: string;
 }
 
-function formatCost(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-      maximumFractionDigits: amount < 1 ? 3 : 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(amount < 1 ? 3 : 2)} ${currency}`.trim();
+export function composerContextUsagePresentation(
+  usage: ComposerContextUsage | null,
+): ComposerContextUsagePresentation | null {
+  if (
+    !usage ||
+    !Number.isFinite(usage.used) ||
+    !Number.isFinite(usage.size) ||
+    usage.used < 0 ||
+    usage.size <= 0
+  ) {
+    return null;
   }
+  const percentageUsed = Math.round(
+    Math.min(1, Math.max(0, usage.used / usage.size)) * 100,
+  );
+  const percentageLeft = 100 - percentageUsed;
+  const usedLabel = formatTokenCount(usage.used);
+  const sizeLabel = formatTokenCount(usage.size);
+  return {
+    accessibleLabel: `Context window: ${percentageUsed}% used, ${percentageLeft}% left. ${usedLabel} of ${sizeLabel} tokens used.`,
+    percentageUsed,
+    percentageLeft,
+    sizeLabel,
+    usedLabel,
+  };
+}
+
+function formatTokenCount(value: number): string {
+  if (value < 1_000) return Math.round(value).toLocaleString();
+  const unit = value >= 1_000_000 ? "m" : "k";
+  const divisor = value >= 1_000_000 ? 1_000_000 : 1_000;
+  const scaled = value / divisor;
+  const fractionDigits = scaled < 10 && !Number.isInteger(scaled) ? 1 : 0;
+  return `${scaled.toFixed(fractionDigits).replace(/\.0$/, "")}${unit}`;
 }

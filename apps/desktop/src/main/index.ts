@@ -2,11 +2,11 @@ import { mkdirSync } from "node:fs";
 import { readDistribution } from "./distribution";
 import {
   assertDesktopAuthenticated,
+  cancelPlatformSignIn,
   desktopAuthenticationStatus,
   initializeDesktopAuthentication,
-  signInToDistribution,
-  signOutOfDistribution,
-  cancelDistributionSignIn,
+  signInToPlatform,
+  signOutOfPlatform,
 } from "./desktop-auth";
 import {
   app,
@@ -72,15 +72,7 @@ import {
 } from "./composer-drafts";
 import { resolveSessionArtifactImage } from "./session-artifacts";
 import { openSessionFile } from "./session-file-links";
-import {
-  connectPlatform,
-  disconnectPlatform,
-  getSyncStatus,
-  initializeSync,
-  runSyncNow,
-  setSyncEnabled,
-  stopSync,
-} from "./sync";
+import { stopSync } from "./sync";
 import {
   checkDesktopUpdate,
   getDesktopUpdateStatus,
@@ -159,16 +151,6 @@ const publicChannels = new Set([
 ]);
 const handleRadiusIpc: typeof ipcMain.handle = (channel, listener) => {
   ipcMain.handle(channel, (event, ...args) => {
-    if (
-      distribution &&
-      [
-        "radius:connect-platform",
-        "radius:disconnect-platform",
-        "radius:set-sync-enabled",
-        "radius:sync-now",
-      ].includes(channel)
-    )
-      throw new Error("DISTRIBUTION_MANAGED_CONNECTION");
     if (!publicChannels.has(channel)) assertDesktopAuthenticated();
     return listener(event, ...args);
   });
@@ -406,22 +388,13 @@ app.whenReady().then(async () => {
     handleRadiusIpc("radius:cancel-agent-session", (_event, sessionId) =>
       cancelAgentSession(typeof sessionId === "string" ? sessionId : ""),
     );
-    handleRadiusIpc("radius:sync-status", getSyncStatus);
-    handleRadiusIpc("radius:sync-now", runSyncNow);
-    handleRadiusIpc("radius:set-sync-enabled", (_event, enabled) =>
-      setSyncEnabled(enabled === true),
-    );
-    handleRadiusIpc("radius:connect-platform", (_event, input) =>
-      connectPlatform(input),
-    );
-    handleRadiusIpc("radius:disconnect-platform", disconnectPlatform);
     handleRadiusIpc(DESKTOP_UPDATE_CHANNELS.status, getDesktopUpdateStatus);
     handleRadiusIpc(DESKTOP_UPDATE_CHANNELS.check, checkDesktopUpdate);
     handleRadiusIpc(DESKTOP_UPDATE_CHANNELS.perform, performDesktopUpdate);
     handleRadiusIpc("radius:auth-status", desktopAuthenticationStatus);
-    handleRadiusIpc("radius:auth-sign-in", signInToDistribution);
-    handleRadiusIpc("radius:auth-sign-out", signOutOfDistribution);
-    handleRadiusIpc("radius:auth-cancel", cancelDistributionSignIn);
+    handleRadiusIpc("radius:auth-sign-in", signInToPlatform);
+    handleRadiusIpc("radius:auth-sign-out", signOutOfPlatform);
+    handleRadiusIpc("radius:auth-cancel", cancelPlatformSignIn);
     createWindow();
     void initializeDesktopAuthentication(stopAgentRuntime);
     await initializeDevelopmentAgentConnections(() => {
@@ -443,13 +416,6 @@ app.whenReady().then(async () => {
         error,
       );
     });
-    if (!distribution)
-      void initializeSync(storageContext).catch((error) => {
-        console.error(
-          "[sync] Radius could not initialize synchronization",
-          error,
-        );
-      });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown storage error";
