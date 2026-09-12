@@ -10,7 +10,11 @@ import {
   type PromptRequest,
 } from "@agentclientprotocol/sdk";
 
-import { connectAcpRuntime } from "./session.js";
+import {
+  AcpAuthenticationRequiredError,
+  AcpProtocolVersionMismatchError,
+  connectAcpRuntime,
+} from "./session.js";
 
 test("streams messages and bridges an exact permission decision", async () => {
   const sessionId = "runtime-test-session";
@@ -1079,6 +1083,145 @@ test("sends native credentials only in authenticate, before creating the session
   });
   try {
     assert.deepEqual(sequence, ["authenticate", "session"]);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("closes the connection when the agent negotiates a different protocol version", async () => {
+  let newSessionCalls = 0;
+  const fakeAgent = agent({ name: "version-mismatch-agent" })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION + 1,
+      agentCapabilities: {},
+    }))
+    .onRequest(methods.agent.session.new, () => {
+      newSessionCalls += 1;
+      return { sessionId: "must-not-start" };
+    });
+
+  await assert.rejects(
+    connectAcpRuntime(fakeAgent, {
+      cwd: "/tmp/radius-version-mismatch",
+      handlers: {
+        onPermissionRequest: async () => ({ outcome: "cancelled" }),
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AcpProtocolVersionMismatchError);
+      assert.equal(error.requestedVersion, PROTOCOL_VERSION);
+      assert.equal(error.agentVersion, PROTOCOL_VERSION + 1);
+      return true;
+    },
+  );
+  assert.equal(newSessionCalls, 0);
+});
+
+test("reports auth_required from session/new with the advertised methods", async () => {
+  const fakeAgent = agent({ name: "auth-required-agent" })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: {},
+      authMethods: [
+        { id: "browser", name: "Sign in with browser" },
+        { id: "api-key", name: "API key" },
+      ],
+    }))
+    .onRequest(methods.agent.session.new, () => {
+      throw RequestError.authRequired();
+    });
+
+  await assert.rejects(
+    connectAcpRuntime(fakeAgent, {
+      cwd: "/tmp/radius-auth-required",
+      handlers: {
+        onPermissionRequest: async () => ({ outcome: "cancelled" }),
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AcpAuthenticationRequiredError);
+      assert.deepEqual(
+        error.authMethods.map((method) => method.id),
+        ["browser", "api-key"],
+      );
+      assert.match(error.message, /browser, api-key/);
+      assert.ok(error.cause instanceof RequestError);
+      return true;
+    },
+  );
+});
+
+test("reports auth_required from session/load with the advertised methods", async () => {
+  const fakeAgent = agent({ name: "auth-required-load-agent" })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: { loadSession: true },
+      authMethods: [{ id: "browser", name: "Sign in with browser" }],
+    }))
+    .onRequest(methods.agent.session.load, () => {
+      throw RequestError.authRequired();
+    });
+
+  await assert.rejects(
+    connectAcpRuntime(fakeAgent, {
+      cwd: "/tmp/radius-auth-required-load",
+      session: { kind: "load", sessionId: "previous-session" },
+      handlers: {
+        onPermissionRequest: async () => ({ outcome: "cancelled" }),
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AcpAuthenticationRequiredError);
+      assert.deepEqual(
+        error.authMethods.map((method) => method.id),
+        ["browser"],
+      );
+      return true;
+    },
+  );
+});
+
+test("leaves other session/new failures untouched", async () => {
+  const fakeAgent = agent({ name: "other-failure-agent" })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: {},
+    }))
+    .onRequest(methods.agent.session.new, () => {
+      throw RequestError.internalError({ reason: "boom" });
+    });
+
+  await assert.rejects(
+    connectAcpRuntime(fakeAgent, {
+      cwd: "/tmp/radius-other-failure",
+      handlers: {
+        onPermissionRequest: async () => ({ outcome: "cancelled" }),
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(!(error instanceof AcpAuthenticationRequiredError));
+      assert.ok(error instanceof RequestError);
+      return true;
+    },
+  );
+});
+
+test("exposes the negotiated protocol version", async () => {
+  const fakeAgent = agent({ name: "version-agent" })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: {},
+    }))
+    .onRequest(methods.agent.session.new, () => ({ sessionId: "s" }));
+
+  const runtime = await connectAcpRuntime(fakeAgent, {
+    cwd: "/tmp/radius-version",
+    handlers: {
+      onPermissionRequest: async () => ({ outcome: "cancelled" }),
+    },
+  });
+  try {
+    assert.equal(runtime.protocolVersion, PROTOCOL_VERSION);
   } finally {
     runtime.close();
   }

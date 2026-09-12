@@ -5,7 +5,12 @@ main process and an agent running in a Radius-owned microVM.
 
 It currently provides:
 
-- a stable ACP v1 client based on `@agentclientprotocol/sdk` `1.4.0`;
+- a stable ACP v1 client based on `@agentclientprotocol/sdk` `1.4.0`. The
+  dependency is pinned to the exact `1.4.0` tarball in `package.json` rather
+  than a semver range on purpose: `websocket.ts` imports from the package's
+  `experimental/` entry points, which carry no compatibility promise, so a
+  patch bump can break the transport. Bump it deliberately, alongside
+  `packages/sdk`, which pins the same tarball for the same reason;
 - typed session initialization, prompt streaming, permission requests,
   cancellation, and shutdown;
 - child-process stdin/stdout transport without a shell or callback port;
