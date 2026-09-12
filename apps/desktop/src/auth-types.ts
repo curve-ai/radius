@@ -1,6 +1,5 @@
 export interface DesktopAuthenticationStatus {
   state:
-    | "local"
     | "checking"
     | "signed-out"
     | "awaiting-browser"

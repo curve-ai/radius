@@ -36,8 +36,6 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
                 : value,
             );
             setFailed(false);
-            // Local-only mode is fixed by the bundle and cannot sign out.
-            if (value.state === "local") window.clearInterval(interval);
           }
         },
         () => {
@@ -51,7 +49,7 @@ export function AuthGate({ children }: { children: ReactNode }): ReactNode {
       window.clearInterval(interval);
     };
   }, []);
-  if (status?.state === "local" || status?.state === "ready") return children;
+  if (status?.state === "ready") return children;
   const waiting = status?.state === "awaiting-browser";
   const preparing =
     !status || status.state === "checking" || status.state === "preparing";

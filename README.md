@@ -20,7 +20,8 @@ ownership of their model or reasoning loop.
   deployment, promotion, and rollback.
 - Open customer dashboard, control-plane API, deployment workers, and
   self-hosting assets.
-- Optional, provider-neutral synchronization contracts and local-only defaults.
+- Provider-neutral synchronization against the bundle's Platform origin, which
+  defaults to a local self-host at `http://localhost:3100/`.
 - Durable local schedules with persisted missed-run and dispatch recovery.
 - Public security model and architecture decisions.
 

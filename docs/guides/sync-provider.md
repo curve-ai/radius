@@ -173,23 +173,17 @@ Do not promise multi-device merge behavior until each mutable record type has an
 approved conflict policy. Append-only records, editable metadata, schedules,
 deletion tombstones, and binary artifacts have different requirements.
 
-## Configuration shape
+## Desktop configuration
 
-The current developer connection path is opt-in through Electron-main-process
-environment variables:
+The desktop app derives sync from the same Platform origin and native session
+as sign-in. That origin is embedded in the application bundle and defaults to
+`http://localhost:3100/` for an ordinary Radius build. There is no separate
+sync endpoint, developer-token environment path, or cloud-versus-self-hosted
+selection in the desktop.
 
-```text
-RADIUS_SYNC_ENDPOINT=https://northwind.example.test
-RADIUS_SYNC_TOKEN=radius_pat_<platform developer token>
-```
-
-The endpoint is a platform base URL; sync itself lives at
-`/api/platform/v1/sync/` beneath it. The token never crosses the preload
-boundary. This environment path is for headless development and self-host
-conformance, not the sign-in UX: the app itself signs in through a window and
-authenticates with the `radius_platform_session` cookie instead. A future
-provider registry should express intent without embedding credentials and may
-resemble:
+Sync lives at `/api/platform/v1/sync/` beneath the bundled Platform origin. The
+native Platform session stays in Electron main and never crosses the preload
+boundary. A future provider registry for non-desktop clients may resemble:
 
 ```json
 {

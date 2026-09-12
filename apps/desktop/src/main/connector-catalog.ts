@@ -13,6 +13,7 @@ import {
 
 import { localDeviceIdentity } from "./device-identity";
 import { BoundedLru } from "./bounded-lru";
+import { readDesktopPlatformUrl } from "./distribution";
 import { initializeStorage } from "./storage";
 import { platformRequestCredentials } from "./sync";
 
@@ -29,18 +30,7 @@ const logoCache = new BoundedLru<string | null>(
 const logoRequests = new Map<string, Promise<string | null>>();
 
 function catalogBaseUrl(): URL {
-  const configured =
-    process.env.RADIUS_CONNECTOR_CATALOG_URL?.trim() ||
-    "http://localhost:3100/api/connector-catalog/v1/";
-  const url = new URL(configured.endsWith("/") ? configured : `${configured}/`);
-  const loopback =
-    url.hostname === "localhost" ||
-    url.hostname === "127.0.0.1" ||
-    url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !(loopback && url.protocol === "http:")) {
-    throw new Error("CONNECTOR_CATALOG_URL_INVALID");
-  }
-  return url;
+  return new URL("api/connector-catalog/v1/", readDesktopPlatformUrl());
 }
 
 async function catalogFetch(pathname: string): Promise<Response> {

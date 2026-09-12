@@ -105,6 +105,9 @@ The React renderer is unprivileged. Electron owns operating-system integration b
   Authorization Code + PKCE, allowlisted provisioning, hashed browser sessions,
   dashboard session integration, and role-aware organization administration.
 - [`sync-v1-data-model.md`](sync-v1-data-model.md) — accepted typed local schema, public envelope, artifact model, authority rules, and migration plan.
+- [`adr/009-bundled-desktop-platform.md`](adr/009-bundled-desktop-platform.md)
+  — one Platform origin per desktop bundle, with the local self-host as the
+  default and one native client path for managed and self-hosted deployments.
 - [`../guides/sync-provider.md`](../guides/sync-provider.md) — implement a compatible service and connect a cloned Radius application.
 - [`../guides/bundling-fx.md`](../guides/bundling-fx.md) — prepare, package,
   and verify the built-in FX agent for the Apple Silicon desktop release.

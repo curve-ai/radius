@@ -3,9 +3,6 @@ import path from "node:path";
 
 import {
   configureSyncConnection,
-  disableSyncConnections,
-  enableSyncConnection,
-  getEnabledSyncConnection,
   getMostRecentSyncConnection,
   type SyncConnectionRecord,
 } from "@curve-ai/radius-storage";
@@ -13,53 +10,22 @@ import { HttpSyncProvider, SyncEngine } from "@curve-ai/radius-sync-core";
 import { app } from "electron";
 import { assertProfileIdentity } from "./desktop-auth-policy";
 
-import { connectViaCloud } from "./cloud-onboarding";
 import {
   deviceDisplayName,
   loadSyncDeviceIdentity,
   rotateSyncDeviceIdentity,
 } from "./device-identity";
-import {
-  PLATFORM_PARTITION,
-  platformDeploymentMode,
-  platformFetch,
-  platformIdentity,
-  platformLogout,
-  signInToPlatform,
-  trySilentPlatformSignIn,
-  type PlatformOrganization,
-} from "./platform-connection";
-import {
-  platformBaseFromEndpoint,
-  platformSyncEndpoint,
-  validatedPlatformUrl,
-} from "./platform-endpoint";
+import { platformSyncEndpoint } from "./platform-endpoint";
 import type { StorageContext } from "./storage";
-import type {
-  DesktopSyncStatus,
-  PlatformConnectionInput,
-  PlatformConnectionSummary,
-} from "../radius-api";
 
 const SYNC_REQUEST_TIMEOUT_MS = 30_000;
 const PROVIDER_KEY = "radius-platform";
-const ENVIRONMENT_CREDENTIAL = "environment:RADIUS_SYNC_TOKEN";
 
 type AccessTokenProvider = (signal?: AbortSignal) => Promise<string>;
 
-let status: DesktopSyncStatus = {
-  state: "disabled",
-  providerKey: null,
-  endpointUrl: null,
-  lastSuccessAt: null,
-  errorCode: null,
-  connection: null,
-  progress: null,
-};
 let storageContext: StorageContext | null = null;
 let timer: NodeJS.Timeout | null = null;
 let runPromise: Promise<void> | null = null;
-let manualRun: (() => Promise<void>) | null = null;
 let activeAbortController: AbortController | null = null;
 let connectionGeneration = 0;
 let onNativeAuthenticationLost: (() => void) | null = null;
@@ -88,27 +54,6 @@ function withTimeout(
   };
 }
 
-function connectionSummary(
-  connection: SyncConnectionRecord,
-): PlatformConnectionSummary {
-  return {
-    baseUrl: platformBaseFromEndpoint(connection.endpointUrl),
-    mode: connection.deploymentMode === "managed" ? "managed" : "self_hosted",
-    organizationSlug: connection.organizationSlug,
-    organizationName: connection.accountLabel,
-    role: connection.organizationRole,
-    accountId: connection.remoteSubject,
-  };
-}
-
-export function getSyncStatus(): DesktopSyncStatus {
-  return { ...status };
-}
-
-function setProgress(message: string | null): void {
-  status = { ...status, progress: message };
-}
-
 /**
  * Stops the schedule and cancels anything in flight, without waiting for it.
  * Safe to call from inside a run: waiting there would mean the run awaiting
@@ -117,7 +62,6 @@ function setProgress(message: string | null): void {
 function haltActiveSync(): void {
   if (timer) clearInterval(timer);
   timer = null;
-  manualRun = null;
   const controller = activeAbortController;
   activeAbortController = null;
   controller?.abort();
@@ -133,8 +77,7 @@ async function stopActiveSync(): Promise<void> {
 async function startConnection(
   context: StorageContext,
   connection: SyncConnectionRecord,
-  getAccessToken: AccessTokenProvider | null,
-  registerFirst = false,
+  getAccessToken: AccessTokenProvider,
 ): Promise<void> {
   const generation = ++connectionGeneration;
   await stopActiveSync();
@@ -146,29 +89,16 @@ async function startConnection(
     activeAbortController === abortController &&
     !abortController.signal.aborted;
 
-  const summary = connectionSummary(connection);
-  const providerState = {
-    providerKey: connection.providerKey,
-    endpointUrl: connection.endpointUrl,
-    connection: summary,
-  };
-
   const identity = await loadSyncDeviceIdentity(context.vault);
-  // A token connection is headless and has no session partition to speak of;
-  // everything else authenticates with the platform cookie, which only the
-  // partition's own fetch will send.
-  const transport = getAccessToken ? globalThis.fetch : platformFetch;
   const provider = new HttpSyncProvider({
-    endpoint: platformSyncEndpoint(summary.baseUrl),
+    endpoint: platformSyncEndpoint(connection.endpointUrl),
     identity: {
       ...identity,
       displayName: deviceDisplayName(),
       platform: process.platform,
       appVersion: process.env.npm_package_version || "0.0.1",
     },
-    ...(getAccessToken
-      ? { getAccessToken: () => getAccessToken(abortController.signal) }
-      : {}),
+    getAccessToken: () => getAccessToken(abortController.signal),
     rotateIdentity: async () => {
       const rotated = await rotateSyncDeviceIdentity(context.vault);
       return {
@@ -178,7 +108,7 @@ async function startConnection(
         appVersion: process.env.npm_package_version || "0.0.1",
       };
     },
-    fetch: withTimeout(abortController, transport),
+    fetch: withTimeout(abortController, globalThis.fetch),
   });
   const engine = new SyncEngine();
   let deviceRegistered = false;
@@ -188,7 +118,6 @@ async function startConnection(
     if (runPromise) return runPromise;
     const promise = (async () => {
       if (!ownsConnection()) return;
-      status = { ...status, state: "syncing", errorCode: null };
       try {
         if (!deviceRegistered) {
           await provider.registerDevice();
@@ -201,14 +130,6 @@ async function startConnection(
           provider,
           { artifactRoot: path.join(app.getPath("userData"), "artifacts") },
         );
-        if (!ownsConnection()) return;
-        status = {
-          state: "idle",
-          ...providerState,
-          lastSuccessAt: new Date().toISOString(),
-          errorCode: null,
-          progress: null,
-        };
       } catch (error) {
         if (!ownsConnection()) return;
         const errorCode =
@@ -221,8 +142,12 @@ async function startConnection(
         ) {
           haltActiveSync();
           onNativeAuthenticationLost?.();
+        } else {
+          console.error(
+            "[sync] Radius could not finish synchronization",
+            error,
+          );
         }
-        status = { ...status, state: "error", errorCode, progress: null };
       }
     })();
     runPromise = promise;
@@ -232,242 +157,12 @@ async function startConnection(
     return promise;
   };
 
-  status = {
-    state: "idle",
-    ...providerState,
-    lastSuccessAt: null,
-    errorCode: null,
-    progress: null,
-  };
-  manualRun = run;
-  if (registerFirst) {
-    await provider.registerDevice();
-    deviceRegistered = true;
-    void run();
-  } else await run();
+  await provider.registerDevice();
+  deviceRegistered = true;
+  void run();
   if (!ownsConnection()) return;
   timer = setInterval(() => void run(), 30_000);
   timer.unref();
-}
-
-/**
- * Headless installations set `RADIUS_SYNC_TOKEN` to a platform developer
- * token. Everything else rides the browser session in the Electron partition
- * and has no token at all.
- */
-function accessTokenProvider(
-  connection: SyncConnectionRecord,
-): AccessTokenProvider | null {
-  if (connection.credentialRef === "distribution:oauth")
-    return async () => {
-      const stored =
-        await storageContext?.vault.getSecret("distribution:oauth");
-      if (!stored) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-      const value = JSON.parse(stored) as {
-        platformSessionToken: string;
-        platformExpiresAt: string;
-      };
-      if (
-        !value.platformSessionToken ||
-        Date.parse(value.platformExpiresAt) <= Date.now()
-      )
-        throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-      return value.platformSessionToken;
-    };
-  if (connection.credentialRef !== ENVIRONMENT_CREDENTIAL) return null;
-  const token = process.env.RADIUS_SYNC_TOKEN?.trim();
-  if (!token) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-  return async () => token;
-}
-
-function canResume(connection: SyncConnectionRecord): boolean {
-  if (connection.credentialRef === ENVIRONMENT_CREDENTIAL) {
-    return Boolean(process.env.RADIUS_SYNC_TOKEN?.trim());
-  }
-  return connection.sessionPartition === PLATFORM_PARTITION;
-}
-
-export async function initializeSync(context: StorageContext): Promise<void> {
-  storageContext = context;
-  const endpoint = process.env.RADIUS_SYNC_ENDPOINT?.trim();
-  const token = process.env.RADIUS_SYNC_TOKEN?.trim();
-  if (endpoint && token) {
-    try {
-      const baseUrl = platformBaseFromEndpoint(endpoint);
-      const connection = await configureSyncConnection(context.database, {
-        id: stableUuid(`${PROVIDER_KEY}\0${baseUrl}`),
-        providerKey: PROVIDER_KEY,
-        endpointUrl: baseUrl,
-        credentialRef: ENVIRONMENT_CREDENTIAL,
-        remoteSubject: null,
-        accountLabel: null,
-        deploymentMode: null,
-        organizationSlug: null,
-        organizationRole: null,
-        sessionPartition: null,
-        enabled: true,
-      });
-      await startConnection(context, connection, async () => token);
-    } catch (error) {
-      status = {
-        state: "error",
-        providerKey: PROVIDER_KEY,
-        endpointUrl: endpoint,
-        lastSuccessAt: null,
-        errorCode:
-          error instanceof Error ? error.message : "SYNC_CONFIGURATION_FAILED",
-        connection: null,
-        progress: null,
-      };
-    }
-    return;
-  }
-
-  const connection = await getEnabledSyncConnection(context.database);
-  if (!connection || !canResume(connection)) {
-    status = {
-      state: "disabled",
-      providerKey: connection?.providerKey ?? null,
-      endpointUrl: connection?.endpointUrl ?? null,
-      lastSuccessAt: null,
-      errorCode: null,
-      connection: connection ? connectionSummary(connection) : null,
-      progress: null,
-    };
-    return;
-  }
-  await startConnection(context, connection, accessTokenProvider(connection));
-}
-
-/**
- * Signs in to a Radius platform and starts syncing against it. Curve Cloud
- * finds the workspace on the user's behalf; a self-hosted platform is the
- * address they typed. From the point of sign-in the two are the same API.
- */
-export async function connectPlatform(
-  input: PlatformConnectionInput,
-): Promise<DesktopSyncStatus> {
-  if (!storageContext) throw new Error("STORAGE_NOT_READY");
-
-  let baseUrl: string;
-  if (input.kind === "cloud") {
-    const workspace = await connectViaCloud(__CLOUD_URL__, (message) =>
-      setProgress(message),
-    );
-    baseUrl = workspace.baseUrl;
-  } else {
-    baseUrl = validatedPlatformUrl(input.url).toString();
-  }
-  setProgress(null);
-
-  // Confirm this is a platform before opening a sign-in window at it, so a
-  // wrong address fails with a useful message instead of a blank window.
-  const mode = await platformDeploymentMode(baseUrl);
-
-  // Reconnecting to a platform this partition still holds a session for needs
-  // no sign-in at all.
-  let identity = await platformIdentity(baseUrl).catch(() => null);
-  if (!identity && !(await trySilentPlatformSignIn(baseUrl))) {
-    await signInToPlatform(baseUrl);
-  }
-  identity ??= await platformIdentity(baseUrl);
-  // Managed hosts scope the session to the organization that owns the host,
-  // so the list holds one entry. A self-hosted platform serves one
-  // organization too; take the first either way.
-  const organization = identity.organizations[0] as PlatformOrganization;
-
-  const connection = await configureSyncConnection(storageContext.database, {
-    id: stableUuid(`${PROVIDER_KEY}\0${baseUrl}`),
-    providerKey: PROVIDER_KEY,
-    endpointUrl: baseUrl,
-    credentialRef: `platform-session:${PLATFORM_PARTITION}`,
-    remoteSubject: identity.accountId,
-    accountLabel: organization.displayName,
-    deploymentMode: mode,
-    organizationSlug: organization.slug,
-    organizationRole: organization.role,
-    sessionPartition: PLATFORM_PARTITION,
-    enabled: true,
-  });
-  await startConnection(storageContext, connection, null);
-  return getSyncStatus();
-}
-
-export async function runSyncNow(): Promise<DesktopSyncStatus> {
-  if (manualRun) {
-    await manualRun();
-    return getSyncStatus();
-  }
-  // A fatal error halted the schedule, so there is no run left to repeat.
-  // Retrying means starting the connection again, which registers the device
-  // afresh and reports honestly whether the session still works.
-  await startStoredConnection();
-  return getSyncStatus();
-}
-
-/**
- * Starts the connection the user last set up. Refuses rather than starting a
- * connection whose credentials are gone, so the caller can say that signing
- * in again is the only way forward.
- */
-async function startStoredConnection(): Promise<void> {
-  if (!storageContext) throw new Error("STORAGE_NOT_READY");
-  const connection = await getMostRecentSyncConnection(storageContext.database);
-  if (!connection) throw new Error("SYNC_PROVIDER_REQUIRED");
-  if (!canResume(connection)) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-  await enableSyncConnection(storageContext.database, connection.id);
-  await startConnection(
-    storageContext,
-    { ...connection, enabled: true },
-    accessTokenProvider(connection),
-  );
-}
-
-export async function setSyncEnabled(
-  enabled: boolean,
-): Promise<DesktopSyncStatus> {
-  if (!storageContext) throw new Error("STORAGE_NOT_READY");
-  if (!enabled) {
-    await stopSync();
-    const connection = await getMostRecentSyncConnection(
-      storageContext.database,
-    );
-    await disableSyncConnections(storageContext.database);
-    status = {
-      state: "disabled",
-      providerKey: connection?.providerKey ?? null,
-      endpointUrl: connection?.endpointUrl ?? null,
-      lastSuccessAt: null,
-      errorCode: null,
-      connection: connection ? connectionSummary(connection) : null,
-      progress: null,
-    };
-    return getSyncStatus();
-  }
-
-  await startStoredConnection();
-  return getSyncStatus();
-}
-
-/** Forgets the platform session and stops syncing, leaving local data alone. */
-export async function disconnectPlatform(): Promise<DesktopSyncStatus> {
-  if (!storageContext) throw new Error("STORAGE_NOT_READY");
-  const connection = await getMostRecentSyncConnection(storageContext.database);
-  await stopSync();
-  await disableSyncConnections(storageContext.database);
-  if (connection?.sessionPartition) {
-    await platformLogout(platformBaseFromEndpoint(connection.endpointUrl));
-  }
-  status = {
-    state: "disabled",
-    providerKey: null,
-    endpointUrl: null,
-    lastSuccessAt: null,
-    errorCode: null,
-    connection: null,
-    progress: null,
-  };
-  return getSyncStatus();
 }
 
 export async function stopSync(): Promise<void> {
@@ -476,10 +171,9 @@ export async function stopSync(): Promise<void> {
 }
 
 /**
- * How to authenticate a request to the platform outside the sync engine. It
- * is the same choice `startConnection` makes: a headless installation carries
- * a token on the global fetch, and a signed-in one rides the session cookie,
- * which only the partition's own fetch will send.
+ * How to authenticate a request to the bundle's Platform outside the sync
+ * engine. Native auth always supplies a bearer token, regardless of who hosts
+ * that Platform.
  */
 export interface PlatformRequestCredentials {
   fetch: typeof globalThis.fetch;
@@ -489,25 +183,34 @@ export interface PlatformRequestCredentials {
 export async function platformRequestCredentials(
   signal?: AbortSignal,
 ): Promise<PlatformRequestCredentials> {
+  signal?.throwIfAborted();
   if (!storageContext) throw new Error("STORAGE_NOT_READY");
   const connection = await getMostRecentSyncConnection(storageContext.database);
   if (!connection) throw new Error("PLATFORM_CONNECTION_REQUIRED");
-  const provider = accessTokenProvider(connection);
-  if (!provider) {
-    if (!canResume(connection))
-      throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
-    return { fetch: platformFetch, headers: {} };
-  }
+  if (connection.credentialRef !== "distribution:oauth")
+    throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+  const stored = await storageContext.vault.getSecret("distribution:oauth");
+  signal?.throwIfAborted();
+  if (!stored) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+  const value = JSON.parse(stored) as {
+    platformSessionToken: string;
+    platformExpiresAt: string;
+  };
+  if (
+    !value.platformSessionToken ||
+    Date.parse(value.platformExpiresAt) <= Date.now()
+  )
+    throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
   return {
     fetch: globalThis.fetch,
-    headers: { authorization: `Bearer ${await provider(signal)}` },
+    headers: { authorization: `Bearer ${value.platformSessionToken}` },
   };
 }
 
-/** Distribution startup supplies its validated native session; no UI sync switch. */
+/** Auth startup supplies one native session for the bundle's Platform. */
 export async function connectNativePlatform(
   context: StorageContext,
-  distribution: import("@curve-ai/platform-contracts").DesktopDistribution,
+  platformUrl: string,
   session: import("@curve-ai/platform-contracts").NativeAuthorizationResponse,
   getToken: AccessTokenProvider,
   onAuthenticationLost: () => void,
@@ -517,19 +220,17 @@ export async function connectNativePlatform(
   const previous = await getMostRecentSyncConnection(context.database);
   assertProfileIdentity(previous?.remoteSubject, session.accountId);
   const connection = await configureSyncConnection(context.database, {
-    id: stableUuid(
-      `${PROVIDER_KEY}\0${distribution.platformUrl}\0${session.accountId}`,
-    ),
+    id: stableUuid(`${PROVIDER_KEY}\0${platformUrl}\0${session.accountId}`),
     providerKey: PROVIDER_KEY,
-    endpointUrl: distribution.platformUrl,
+    endpointUrl: platformUrl,
     credentialRef: "distribution:oauth",
     remoteSubject: session.accountId,
     accountLabel: session.organization.displayName,
     organizationSlug: session.organization.slug,
     organizationRole: session.organization.role,
-    deploymentMode: await platformDeploymentMode(distribution.platformUrl),
+    deploymentMode: null,
     sessionPartition: null,
     enabled: true,
   });
-  await startConnection(context, connection, getToken, true);
+  await startConnection(context, connection, getToken);
 }

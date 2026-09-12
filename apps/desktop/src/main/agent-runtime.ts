@@ -1,7 +1,7 @@
-import { readDistribution } from "./distribution";
 import {
   assertDesktopAuthenticated,
-  distributionAgentCredential,
+  platformAgentCredential,
+  platformAgentId,
 } from "./desktop-auth";
 import {
   clearComposerDraft,
@@ -221,17 +221,6 @@ interface ActiveMcpPermissionContext {
   allowedTools: Set<string>;
   oneTimeTools: Map<string, number>;
 }
-
-const selectProtocolAuthentication: AcpAuthenticationHandler = async (
-  methods,
-) => {
-  const supported = methods.filter(
-    (method) => !("type" in method && method.type === "terminal"),
-  );
-  if (supported.length === 0) return null;
-  if (supported.length === 1) return supported[0]!.id;
-  throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
-};
 
 function resolveMcpPermissionTool(
   context: ActiveMcpPermissionContext,
@@ -871,10 +860,8 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
       : null;
     agents.push(desktopAgentSummary(release, authentication));
   }
-  const distribution = readDistribution();
-  return distribution
-    ? agents.filter((agent) => agent.id === distribution.agentId)
-    : agents;
+  const agentId = platformAgentId();
+  return agents.filter((agent) => agent.id === agentId);
 }
 
 export async function connectAgentAuthentication(
@@ -940,7 +927,7 @@ export async function startAgentPrompt(
   rawInput: StartAgentPromptInput,
 ): Promise<StartAgentPromptResult> {
   assertDesktopAuthenticated();
-  distributionAgentCredential(rawInput.agentId);
+  platformAgentCredential(rawInput.agentId);
   const input = parsePromptInput(rawInput);
   const prompt = input.prompt.trim();
   const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
@@ -2306,33 +2293,30 @@ async function runAgentSession(input: {
         );
       },
     };
-    const companyCredential = distributionAgentCredential(
+    const platformCredential = platformAgentCredential(
       input.target.kind === "release"
         ? input.target.release.agentId
         : input.target.connection.agentId,
     );
-    if (companyCredential)
-      credentialExpiryTimer = setTimeout(
-        () => {
-          input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
-          void runtime?.stop();
+    credentialExpiryTimer = setTimeout(
+      () => {
+        input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
+        void runtime?.stop();
+      },
+      Math.max(0, Date.parse(platformCredential.expiresAt) - Date.now()),
+    );
+    const authenticate: AcpAuthenticationHandler = async (methods) => {
+      assertDesktopAuthenticated();
+      if (!methods.some((method) => method.id === "radius-oauth"))
+        throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
+      return {
+        methodId: "radius-oauth",
+        credential: {
+          accessToken: platformCredential.accessToken,
+          expiresAt: platformCredential.expiresAt,
         },
-        Math.max(0, Date.parse(companyCredential.expiresAt) - Date.now()),
-      );
-    const authenticate: AcpAuthenticationHandler = companyCredential
-      ? async (methods) => {
-          assertDesktopAuthenticated();
-          if (!methods.some((method) => method.id === "radius-oauth"))
-            throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
-          return {
-            methodId: "radius-oauth",
-            credential: {
-              accessToken: companyCredential.accessToken,
-              expiresAt: companyCredential.expiresAt,
-            },
-          };
-        }
-      : selectProtocolAuthentication;
+      };
+    };
     let acpSession: AcpRuntimeSession;
     const sessionStart = input.providerSessionId
       ? ({ kind: "auto", sessionId: input.providerSessionId } as const)
@@ -2375,10 +2359,7 @@ async function runAgentSession(input: {
         cwd: input.projectRoots[0] ?? release!.process.statePath,
         mcpServers,
         handlers,
-        onAuthenticate:
-          !companyCredential && release && isFxRelease(release)
-            ? undefined
-            : authenticate,
+        onAuthenticate: authenticate,
         session: sessionStart,
         onStderr: (chunk) => {
           if (process.env.RADIUS_RUNTIME_DEBUG === "1") {

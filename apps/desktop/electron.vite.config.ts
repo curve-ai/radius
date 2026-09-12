@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import {
+  DEFAULT_DESKTOP_PLATFORM_URL,
+  resolveDesktopPlatformUrl,
+} from "./src/main/distribution";
 
 const distributionPath = process.env.RADIUS_DISTRIBUTION_CONFIG;
 const distribution = distributionPath
@@ -11,16 +15,19 @@ const distribution = distributionPath
       JSON.parse(readFileSync(distributionPath, "utf8")),
     )
   : null;
-const cloudDefines = {
+const platformUrl = resolveDesktopPlatformUrl(
+  process.env.RADIUS_PLATFORM_URL ??
+    distribution?.platformUrl ??
+    DEFAULT_DESKTOP_PLATFORM_URL,
+);
+const bundleDefines = {
   __DESKTOP_DISTRIBUTION__: JSON.stringify(distribution),
-  __CLOUD_URL__: JSON.stringify(
-    process.env.CLOUD_URL ?? "https://app.curvehq.sh",
-  ),
+  __DESKTOP_PLATFORM_URL__: JSON.stringify(platformUrl),
 };
 
 export default defineConfig({
   main: {
-    define: cloudDefines,
+    define: bundleDefines,
     build: {
       externalizeDeps: {
         include: ["@libsql/client", "drizzle-orm"],
@@ -43,7 +50,6 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
-    define: cloudDefines,
     resolve: {
       alias: {
         "@renderer": resolve("src/renderer/src"),

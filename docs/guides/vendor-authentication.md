@@ -1,8 +1,8 @@
 # Connect your authentication system
 
-Radius can use your hosted OpenID Connect login for a company desktop app. The user signs in once in the system browser. Platform validates that identity and membership, and the desktop passes a separate, short-lived access token to your agent. Your agent API remains responsible for its own permissions.
+Radius uses the OpenID Connect login exposed by its bundled Platform origin. The user signs in once in the system browser. Platform validates that identity and membership, and the desktop passes a separate, short-lived access token to your agent. Your agent API remains responsible for its own permissions.
 
-This is an opt-in company distribution. A generic Radius checkout remains local-only and does not require Curve Cloud. Company builds use a separate local profile, require sign-in before workspace access, and sync automatically with their configured Platform.
+Every desktop bundle has one Platform origin and follows the same native auth flow whether Curve or the operator hosts it. An ordinary Radius build targets `http://localhost:3100/`; a branded distribution embeds its Platform origin, application identity, organization, and agent. Radius does not ask the user to choose a hosting mode or type an endpoint after launch.
 
 ## What your provider needs
 
@@ -97,14 +97,15 @@ Example `distribution.json`:
 From the Radius repository:
 
 ```sh
+bun run dev
+bun run dev --url http://localhost:3100/
 RADIUS_DISTRIBUTION_CONFIG=/absolute/path/distribution.json bun run dev
-RADIUS_DISTRIBUTION_CONFIG=/absolute/path/distribution.json bun run dev --url http://localhost:3100/
 RADIUS_DISTRIBUTION_CONFIG=/absolute/path/distribution.json bun run make
 ```
 
-Development also finds `.radius/distribution.json` automatically. The `--url` override belongs to the development launcher; packaged applications use the validated build-time configuration. Packaging uses the distribution ID and display name as its application identity. Use a stable ID across updates.
+Development also finds `.radius/distribution.json` automatically. The `--url` override belongs to the development launcher and works with either the standard or a branded bundle. Packaged applications use the validated Platform URL embedded at build time. Without a distribution file, that URL is `http://localhost:3100/`. Packaging a branded distribution uses its ID and display name as the application identity. Use a stable ID across updates.
 
-The selected `agentId` must exist in the bundled releases or the development registry. Authentication setup does not build or download the agent: use the existing agent build/bundling workflow. The configured agent must advertise the `radius-oauth` ACP authentication method. Generic local-only builds keep their existing provider authentication behavior.
+The selected `agentId` must exist in the bundled releases or the development registry. Authentication setup does not build or download the agent: use the existing agent build/bundling workflow. The configured agent must advertise the `radius-oauth` ACP authentication method. For the standard bundle, the desktop accepts the organization and agent returned by the native auth configuration at its local Platform origin. A branded distribution additionally pins both values and rejects a mismatched server response.
 
 Company data lives in a separate `Radius-<distribution-id>` Application Support folder. This first version binds that profile to one account after connection. Signing in as another account is rejected; signing out does not delete encrypted history or silently upload it to the next account. Multi-account profile switching is not implemented.
 

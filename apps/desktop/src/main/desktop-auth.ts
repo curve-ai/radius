@@ -1,4 +1,5 @@
 import {
+  assertBundleMatchesPlatform,
   assertProfileIdentity,
   assertUsableDesktopSession,
 } from "./desktop-auth-policy";
@@ -8,23 +9,26 @@ import {
   NativeOAuthConfigurationSchema,
   type NativeAuthorizationResponse,
   type NativeAgentCredential,
+  type NativeOAuthConfiguration,
 } from "@curve-ai/platform-contracts";
 import { getMostRecentSyncConnection } from "@curve-ai/radius-storage";
 import type { DesktopAuthenticationStatus } from "../auth-types";
 import { initializeStorage } from "./storage";
-import { readDistribution } from "./distribution";
+import { readDesktopPlatformUrl, readDistribution } from "./distribution";
 import { nativeBrowserLogin } from "./native-login";
 import { connectNativePlatform, stopSync } from "./sync";
 
 const SECRET = "distribution:oauth";
 const distribution = readDistribution();
+const platformUrl = readDesktopPlatformUrl();
 let status: DesktopAuthenticationStatus = {
-  state: distribution ? "checking" : "local",
+  state: "checking",
   displayName: distribution?.displayName ?? "Radius",
-  signInName: distribution?.signInName ?? "Curve",
+  signInName: distribution?.signInName ?? "organization",
   organizationName: null,
   errorCode: null,
 };
+let configuration: NativeOAuthConfiguration | null = null;
 let credentials: NativeAuthorizationResponse | null = null;
 let attempt: AbortController | null = null;
 let pending: Promise<void> | null = null;
@@ -37,22 +41,25 @@ export function desktopAuthenticationStatus(): DesktopAuthenticationStatus {
   return { ...status };
 }
 export function assertDesktopAuthenticated(): void {
-  if (!distribution) return;
   assertUsableDesktopSession(status.state, credentials);
 }
-export function distributionAgentCredential(
-  agentId: string,
-): NativeAgentCredential | null {
-  if (!distribution) return null;
+export function platformAgentId(): string {
   assertDesktopAuthenticated();
-  if (agentId !== distribution.agentId)
-    throw new Error("DISTRIBUTION_AGENT_REQUIRED");
+  if (!configuration) throw new Error("AUTHENTICATION_REQUIRED");
+  return configuration.agentId;
+}
+export function platformAgentCredential(
+  agentId: string,
+): NativeAgentCredential {
+  assertDesktopAuthenticated();
+  if (agentId !== configuration?.agentId)
+    throw new Error("PLATFORM_AGENT_REQUIRED");
   return credentials!.agent;
 }
 
 async function request(path: string, init: RequestInit = {}): Promise<unknown> {
   const response = await fetch(
-    new URL(`api/platform/v1/auth/native/${path}`, distribution!.platformUrl),
+    new URL(`api/platform/v1/auth/native/${path}`, platformUrl),
     {
       ...init,
       redirect: "error",
@@ -81,15 +88,34 @@ async function readAuthenticationJson(response: Response): Promise<unknown> {
     ),
   );
 }
+
+async function loadConfiguration(
+  signal: AbortSignal,
+): Promise<NativeOAuthConfiguration & { authorizationEndpoint: string }> {
+  const raw = (await request("config", { signal })) as Record<string, unknown>;
+  const next = NativeOAuthConfigurationSchema.parse(
+    Object.fromEntries(
+      Object.entries(raw).filter(([key]) => key !== "authorizationEndpoint"),
+    ),
+  );
+  if (typeof raw.authorizationEndpoint !== "string") {
+    throw new Error("AUTH_CONFIGURATION_INVALID");
+  }
+  assertBundleMatchesPlatform(distribution, next);
+  configuration = next;
+  return { ...next, authorizationEndpoint: raw.authorizationEndpoint };
+}
+
 function parseCredentials(value: unknown): NativeAuthorizationResponse {
   const candidate = value as NativeAuthorizationResponse;
   if (
+    !configuration ||
     !candidate ||
     typeof candidate.platformSessionToken !== "string" ||
     !/^radius_native_[A-Za-z0-9_-]+$/.test(candidate.platformSessionToken) ||
     typeof candidate.accountId !== "string" ||
     !candidate.organization ||
-    candidate.organization.slug !== distribution!.organizationSlug ||
+    candidate.organization.slug !== configuration.organizationSlug ||
     !candidate.agent ||
     typeof candidate.agent.accessToken !== "string" ||
     !candidate.agent.accessToken ||
@@ -119,7 +145,7 @@ async function accept(value: unknown, signal: AbortSignal): Promise<void> {
   };
   await connectNativePlatform(
     storage,
-    distribution!,
+    platformUrl,
     next,
     async () => {
       if (
@@ -210,8 +236,8 @@ export async function initializeDesktopAuthentication(
   stopRuntime: () => void,
 ): Promise<void> {
   stopAgentRuntime = stopRuntime;
-  if (!distribution) return;
   await run(async (signal) => {
+    const activeConfiguration = await loadConfiguration(signal);
     const stored = await (await initializeStorage()).vault.getSecret(SECRET);
     if (!stored) {
       status = { ...status, state: "signed-out" };
@@ -221,7 +247,7 @@ export async function initializeDesktopAuthentication(
     if (Date.parse(previous.platformExpiresAt) <= Date.now())
       throw new Error("AUTH_SESSION_EXPIRED");
     const response = await fetch(
-      new URL("api/platform/v1/auth/session", distribution.platformUrl),
+      new URL("api/platform/v1/auth/session", platformUrl),
       {
         headers: { Authorization: `Bearer ${previous.platformSessionToken}` },
         redirect: "error",
@@ -236,7 +262,7 @@ export async function initializeDesktopAuthentication(
     if (
       identity.accountId !== previous.accountId ||
       !identity.organizations?.some(
-        (org) => org.slug === distribution.organizationSlug,
+        (org) => org.slug === activeConfiguration.organizationSlug,
       )
     )
       throw new Error("AUTH_PROFILE_MISMATCH");
@@ -245,28 +271,13 @@ export async function initializeDesktopAuthentication(
     } else await accept(previous, signal);
   });
 }
-export async function signInToDistribution(): Promise<DesktopAuthenticationStatus> {
-  if (!distribution) return desktopAuthenticationStatus();
+export async function signInToPlatform(): Promise<DesktopAuthenticationStatus> {
   await run(async (signal) => {
     status = { ...status, state: "checking", errorCode: null };
-    const raw = (await request("config", { signal })) as Record<
-      string,
-      unknown
-    >;
-    const config = NativeOAuthConfigurationSchema.parse(
-      Object.fromEntries(
-        Object.entries(raw).filter(([key]) => key !== "authorizationEndpoint"),
-      ),
-    );
-    if (
-      config.organizationSlug !== distribution.organizationSlug ||
-      config.agentId !== distribution.agentId ||
-      typeof raw.authorizationEndpoint !== "string"
-    )
-      throw new Error("AUTH_CONFIGURATION_INVALID");
+    const config = await loadConfiguration(signal);
     status = { ...status, state: "awaiting-browser" };
     const authorization = await nativeBrowserLogin(
-      { ...config, authorizationEndpoint: raw.authorizationEndpoint },
+      config,
       (url) => shell.openExternal(url),
       signal,
     );
@@ -282,7 +293,7 @@ export async function signInToDistribution(): Promise<DesktopAuthenticationStatu
   });
   return desktopAuthenticationStatus();
 }
-export async function signOutOfDistribution(): Promise<DesktopAuthenticationStatus> {
+export async function signOutOfPlatform(): Promise<DesktopAuthenticationStatus> {
   attempt?.abort();
   await pending;
   if (renewal) clearTimeout(renewal);
@@ -291,7 +302,7 @@ export async function signOutOfDistribution(): Promise<DesktopAuthenticationStat
   credentials = null;
   status = {
     ...status,
-    state: distribution ? "signed-out" : "local",
+    state: "signed-out",
     errorCode: null,
     organizationName: null,
   };
@@ -305,7 +316,7 @@ export async function signOutOfDistribution(): Promise<DesktopAuthenticationStat
     }).catch(() => {});
   return desktopAuthenticationStatus();
 }
-export function cancelDistributionSignIn(): void {
+export function cancelPlatformSignIn(): void {
   attempt?.abort();
 }
 app.on("before-quit", () => {
