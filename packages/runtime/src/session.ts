@@ -823,6 +823,15 @@ async function authenticateIfRequested(
 function isMissingSessionError(error: unknown, sessionId: string): boolean {
   if (!(error instanceof RequestError)) return false;
   const message = error.message.toLowerCase();
+  // FX reports a missing continuation without echoing the requested ID.
+  // Only accept this exact response to session/load or session/resume;
+  // unrelated invalid-parameter and authentication failures must still fail.
+  if (
+    error.code === -32602 &&
+    message === "session not found" &&
+    error.data == null
+  )
+    return true;
   const normalizedSessionId = sessionId.toLowerCase();
   const data = error.data;
   const dataMatches =

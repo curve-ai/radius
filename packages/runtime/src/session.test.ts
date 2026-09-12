@@ -559,6 +559,56 @@ test("auto continuation falls through only missing-session protocol errors", asy
   }
 });
 
+test("auto continuation recovers FX missing sessions without hiding other errors", async () => {
+  for (const [code, message, shouldRecover] of [
+    [-32602, "Session not found", true],
+    [-32602, "Invalid working directory", false],
+    [-32603, "Session not found", false],
+    [-32000, "Session not found", false],
+  ] as const) {
+    let newSessionCalls = 0;
+    const fakeAgent = agent({ name: "fx-continuation-error-agent" })
+      .onRequest(methods.agent.initialize, () => ({
+        protocolVersion: PROTOCOL_VERSION,
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { resume: {} },
+        },
+      }))
+      .onRequest(methods.agent.session.resume, () => {
+        throw new RequestError(code, message);
+      })
+      .onRequest(methods.agent.session.load, () => {
+        throw new RequestError(code, message);
+      })
+      .onRequest(methods.agent.session.new, () => {
+        newSessionCalls += 1;
+        return { sessionId: "replacement-fx-session" };
+      });
+    const connecting = connectAcpRuntime(fakeAgent, {
+      cwd: "/tmp/radius-fx-continuation",
+      session: { kind: "auto", sessionId: "old-fx-session" },
+      handlers: {
+        onPermissionRequest: async () => ({ outcome: "cancelled" }),
+      },
+    });
+    if (shouldRecover) {
+      const runtime = await connecting;
+      try {
+        assert.equal(runtime.lifecycle, "new");
+        assert.equal(runtime.sessionId, "replacement-fx-session");
+      } finally {
+        runtime.close();
+      }
+    } else {
+      await assert.rejects(connecting, (error: unknown) =>
+        error instanceof RequestError && error.code === code,
+      );
+    }
+    assert.equal(newSessionCalls, shouldRecover ? 1 : 0);
+  }
+});
+
 test("auto continuation preserves unrelated protocol failures", async () => {
   let loadCalls = 0;
   let newSessionCalls = 0;
