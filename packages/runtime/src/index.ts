@@ -1,4 +1,6 @@
 export {
+  AcpAuthenticationRequiredError,
+  AcpProtocolVersionMismatchError,
   AcpRuntimeSession,
   connectAcpRuntime,
   type AcpAuthenticationHandler,

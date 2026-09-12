@@ -170,6 +170,46 @@ interface RuntimeUpdateState {
   replaying: boolean;
 }
 
+/**
+ * The agent answered `initialize` with a protocol version Radius does not speak.
+ * ACP says the client SHOULD close the connection in that case, and Radius does.
+ */
+export class AcpProtocolVersionMismatchError extends Error {
+  readonly requestedVersion: number;
+  readonly agentVersion: number;
+
+  constructor(requestedVersion: number, agentVersion: number) {
+    super(
+      `The agent negotiated ACP protocol version ${agentVersion}; Radius speaks version ${requestedVersion}`,
+    );
+    this.name = "AcpProtocolVersionMismatchError";
+    this.requestedVersion = requestedVersion;
+    this.agentVersion = agentVersion;
+  }
+}
+
+/**
+ * The agent refused `session/new` or `session/load` with ACP `auth_required`.
+ * Carries the methods the agent advertised at `initialize` so the caller can
+ * say what the agent wants instead of reporting a generic failure.
+ */
+export class AcpAuthenticationRequiredError extends Error {
+  readonly authMethods: AuthMethod[];
+
+  constructor(authMethods: AuthMethod[], cause: RequestError) {
+    const offered =
+      authMethods.length > 0
+        ? authMethods.map((method) => method.id).join(", ")
+        : "none";
+    super(
+      `The agent requires ACP authentication before starting a session (advertised methods: ${offered})`,
+      { cause },
+    );
+    this.name = "AcpAuthenticationRequiredError";
+    this.authMethods = [...authMethods];
+  }
+}
+
 export class AcpRuntimeSession {
   readonly sessionId: string;
   readonly initializationResponse: InitializeResponse;
@@ -195,6 +235,10 @@ export class AcpRuntimeSession {
     this.sessionId = sessionId;
     this.configOptions = [...(sessionState.configOptions ?? [])];
     this.modes = sessionState.modes;
+  }
+
+  get protocolVersion(): number {
+    return this.initializationResponse.protocolVersion;
   }
 
   get agentCapabilities(): AgentCapabilities {
@@ -349,6 +393,12 @@ export class AcpRuntimeSession {
           },
         },
       );
+      if (initializationResponse.protocolVersion !== PROTOCOL_VERSION) {
+        throw new AcpProtocolVersionMismatchError(
+          PROTOCOL_VERSION,
+          initializationResponse.protocolVersion,
+        );
+      }
       await authenticateIfRequested(
         connection,
         initializationResponse,
@@ -377,10 +427,14 @@ export class AcpRuntimeSession {
       };
       switch (start.kind) {
         case "new": {
-          const response = await connection.agent.request<
-            NewSessionResponse,
-            NewSessionRequest
-          >(methods.agent.session.new, commonRequest);
+          const response = await requireAuthenticated(
+            initializationResponse,
+            () =>
+              connection.agent.request<NewSessionResponse, NewSessionRequest>(
+                methods.agent.session.new,
+                commonRequest,
+              ),
+          );
           sessionId = response.sessionId;
           updateState.expectedSessionId = sessionId;
           lifecycle = "new";
@@ -393,9 +447,13 @@ export class AcpRuntimeSession {
           }
           updateState.replaying = true;
           try {
-            sessionState = await connection.agent.request(
-              methods.agent.session.load,
-              { ...commonRequest, sessionId: start.sessionId },
+            sessionState = await requireAuthenticated(
+              initializationResponse,
+              () =>
+                connection.agent.request(methods.agent.session.load, {
+                  ...commonRequest,
+                  sessionId: start.sessionId,
+                }),
             );
           } finally {
             updateState.replaying = false;
@@ -701,6 +759,28 @@ function supportsAdditionalDirectories(
     initializationResponse.agentCapabilities?.sessionCapabilities
       ?.additionalDirectories != null
   );
+}
+
+const ACP_AUTH_REQUIRED_CODE = -32000;
+
+async function requireAuthenticated<T>(
+  initializationResponse: InitializeResponse,
+  request: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await request();
+  } catch (error) {
+    if (
+      error instanceof RequestError &&
+      error.code === ACP_AUTH_REQUIRED_CODE
+    ) {
+      throw new AcpAuthenticationRequiredError(
+        initializationResponse.authMethods ?? [],
+        error,
+      );
+    }
+    throw error;
+  }
 }
 
 async function authenticateIfRequested(

@@ -413,9 +413,11 @@ agent response
 
 - Radius never owns the agent process, package manager, file watcher, or hot
   reload policy.
-- The development endpoint must be `ws://` or `wss://` on loopback. Radius uses
-  ACP's official WebSocket transport and may attach a bearer value read from a
-  named environment variable.
+- The development endpoint must be `ws://` or `wss://` on loopback. ACP
+  specifies stdio only; WebSocket is an `experimental/` export of the
+  `@agentclientprotocol/sdk` package, not a spec transport. Radius uses that
+  experimental export and may attach a bearer value read from a named
+  environment variable.
 - The CLI writes one mode-0600 registration beneath Radius user data, launches
   or focuses Radius, watches only the Radius config file, and deletes the
   registration on termination.
