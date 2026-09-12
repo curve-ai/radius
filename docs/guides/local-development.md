@@ -125,11 +125,13 @@ In another terminal, register that process with the running desktop:
 
 ```sh
 bun run --cwd packages/cli build
-(cd examples/typescript-agent && bun ../../packages/cli/dist/cli.js dev)
+(cd examples/typescript-agent && node ../../packages/cli/dist/cli.js dev)
 ```
 
 The CLI reads `examples/typescript-agent/radius.config.ts`. Its `dev` command
 registers the independently running agent; it does not start the agent process.
+Use Node for the CLI executable; its TypeScript configuration loader uses Node's
+module hooks. The agent itself can run through the example's Bun scripts.
 Use the desktop to select the example and send a prompt. For immutable agent
 packaging and the macOS runtime, see the [example README](../../examples/typescript-agent/README.md)
 and [FX bundling guide](bundling-fx.md).
