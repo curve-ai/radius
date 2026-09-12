@@ -42,7 +42,8 @@ services:
       - ${RADIUS_REGISTRY_AUTH_FILE:?set RADIUS_REGISTRY_AUTH_FILE}:/auth/htpasswd:ro
       - radius-registry-data:/var/lib/registry
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5001/debug/health"]
+      test:
+        ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5001/debug/health"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -95,6 +96,10 @@ services:
       RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE: "true"
       RADIUS_PLATFORM_REGISTRY_USERNAME: ${RADIUS_REGISTRY_USERNAME:?set RADIUS_REGISTRY_USERNAME}
       RADIUS_PLATFORM_REGISTRY_PASSWORD: ${RADIUS_REGISTRY_PASSWORD:?set RADIUS_REGISTRY_PASSWORD}
+      RADIUS_NATIVE_AUTH_CONFIG: ${RADIUS_NATIVE_AUTH_CONFIG:-}
+      RADIUS_NATIVE_AUTO_JOIN: ${RADIUS_NATIVE_AUTO_JOIN:-false}
+      RADIUS_SYNC_ENABLED: ${RADIUS_SYNC_ENABLED:-false}
+      RADIUS_SYNC_CURSOR_SECRET: ${RADIUS_SYNC_CURSOR_SECRET:-}
       RADIUS_OIDC_ISSUER: ${RADIUS_OIDC_ISSUER:?set RADIUS_OIDC_ISSUER}
       RADIUS_OIDC_CLIENT_ID: ${RADIUS_OIDC_CLIENT_ID:?set RADIUS_OIDC_CLIENT_ID}
       RADIUS_OIDC_CLIENT_SECRET: ${RADIUS_OIDC_CLIENT_SECRET:-}

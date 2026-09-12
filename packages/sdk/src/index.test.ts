@@ -161,3 +161,60 @@ test("serves the same agent over authenticated loopback WebSocket", async () => 
     await server.close();
   }
 });
+
+test("organization credentials reach only the authenticated connection", async () => {
+  const expiresAt = new Date(Date.now() + 300_000).toISOString();
+  const secured = defineAgent({
+    name: "secured-agent",
+    authenticate: async (credential) => {
+      if (credential.accessToken !== "vendor-token")
+        throw new Error("Rejected token");
+    },
+    run: (context) =>
+      context.authentication ? "Authenticated query completed" : "unexpected",
+  });
+  const server = await serveDevelopmentAgent(secured, { port: 0 });
+  const handlers = {
+    onPermissionRequest: async () => ({ outcome: "cancelled" as const }),
+  };
+  let runtime: Awaited<ReturnType<typeof connectAcpRuntime>> | undefined;
+  try {
+    runtime = await connectAcpRuntime(acpStreamFromWebSocket(server.endpoint), {
+      cwd: "/tmp/secured-agent",
+      handlers,
+      onAuthenticate: async () => ({
+        methodId: "radius-oauth",
+        credential: { accessToken: "vendor-token", expiresAt },
+      }),
+    });
+    assert.equal(
+      (await runtime.prompt("test")).text,
+      "Authenticated query completed",
+    );
+    await assert.rejects(
+      connectAcpRuntime(acpStreamFromWebSocket(server.endpoint), {
+        cwd: "/tmp/other-agent",
+        handlers,
+      }),
+      /Authentication required/i,
+    );
+    await assert.rejects(
+      connectAcpRuntime(acpStreamFromWebSocket(server.endpoint), {
+        cwd: "/tmp/other-agent",
+        handlers,
+        onAuthenticate: async () => ({
+          methodId: "radius-oauth",
+          credential: { accessToken: "wrong-token", expiresAt },
+        }),
+      }),
+      /Authentication required/i,
+    );
+    assert.equal(
+      (await runtime.prompt("still authenticated")).text,
+      "Authenticated query completed",
+    );
+  } finally {
+    runtime?.close();
+    await server.close();
+  }
+});

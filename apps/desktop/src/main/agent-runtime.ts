@@ -1,3 +1,8 @@
+import { readDistribution } from "./distribution";
+import {
+  assertDesktopAuthenticated,
+  distributionAgentCredential,
+} from "./desktop-auth";
 import {
   clearComposerDraft,
   createSession,
@@ -866,7 +871,10 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
       : null;
     agents.push(desktopAgentSummary(release, authentication));
   }
-  return agents;
+  const distribution = readDistribution();
+  return distribution
+    ? agents.filter((agent) => agent.id === distribution.agentId)
+    : agents;
 }
 
 export async function connectAgentAuthentication(
@@ -931,6 +939,8 @@ export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
 export async function startAgentPrompt(
   rawInput: StartAgentPromptInput,
 ): Promise<StartAgentPromptResult> {
+  assertDesktopAuthenticated();
+  distributionAgentCredential(rawInput.agentId);
   const input = parsePromptInput(rawInput);
   const prompt = input.prompt.trim();
   const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
@@ -1738,6 +1748,7 @@ async function runAgentSession(input: {
   const capabilities =
     release?.capabilities ?? developmentConnection!.capabilities;
   let runtime: RunningAgentRuntime | null = null;
+  let credentialExpiryTimer: NodeJS.Timeout | null = null;
   let fxProfile: FxRuntimeProfileLease | null = null;
   let browserTools: BrowserToolServer | null = null;
   let browserToolProviderId: string | null = null;
@@ -2295,6 +2306,33 @@ async function runAgentSession(input: {
         );
       },
     };
+    const companyCredential = distributionAgentCredential(
+      input.target.kind === "release"
+        ? input.target.release.agentId
+        : input.target.connection.agentId,
+    );
+    if (companyCredential)
+      credentialExpiryTimer = setTimeout(
+        () => {
+          input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
+          void runtime?.stop();
+        },
+        Math.max(0, Date.parse(companyCredential.expiresAt) - Date.now()),
+      );
+    const authenticate: AcpAuthenticationHandler = companyCredential
+      ? async (methods) => {
+          assertDesktopAuthenticated();
+          if (!methods.some((method) => method.id === "radius-oauth"))
+            throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
+          return {
+            methodId: "radius-oauth",
+            credential: {
+              accessToken: companyCredential.accessToken,
+              expiresAt: companyCredential.expiresAt,
+            },
+          };
+        }
+      : selectProtocolAuthentication;
     let acpSession: AcpRuntimeSession;
     const sessionStart = input.providerSessionId
       ? ({ kind: "auto", sessionId: input.providerSessionId } as const)
@@ -2314,7 +2352,7 @@ async function runAgentSession(input: {
           mcpServers,
           handlers,
           clientName: "radius-desktop-development",
-          onAuthenticate: selectProtocolAuthentication,
+          onAuthenticate: authenticate,
           session: sessionStart,
         },
       );
@@ -2338,9 +2376,9 @@ async function runAgentSession(input: {
         mcpServers,
         handlers,
         onAuthenticate:
-          release && isFxRelease(release)
+          !companyCredential && release && isFxRelease(release)
             ? undefined
-            : selectProtocolAuthentication,
+            : authenticate,
         session: sessionStart,
         onStderr: (chunk) => {
           if (process.env.RADIUS_RUNTIME_DEBUG === "1") {
@@ -2552,6 +2590,7 @@ async function runAgentSession(input: {
     });
     input.startup.reject(error);
   } finally {
+    if (credentialExpiryTimer) clearTimeout(credentialExpiryTimer);
     clearStreamingSessionMessage(input.sessionId);
     clearSessionWorking(input.sessionId);
     runningSessions.delete(input.sessionId);

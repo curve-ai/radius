@@ -1046,3 +1046,40 @@ async function sendTestTurn(
     optionId: "allow-once",
   });
 }
+
+test("sends native credentials only in authenticate, before creating the session", async () => {
+  const sequence: string[] = [];
+  const expiresAt = new Date(Date.now() + 300000).toISOString();
+  const fakeAgent = agent({ name: "native-auth-agent" })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: {},
+      authMethods: [{ id: "radius-oauth", name: "Sign in" }],
+    }))
+    .onRequest(methods.agent.authenticate, (context) => {
+      sequence.push("authenticate");
+      assert.deepEqual(context.params._meta?.["ai.radius/auth"], {
+        accessToken: "agent-token",
+        expiresAt,
+      });
+      return {};
+    })
+    .onRequest(methods.agent.session.new, (context) => {
+      sequence.push("session");
+      assert.ok(!JSON.stringify(context.params).includes("agent-token"));
+      return { sessionId: "authenticated" };
+    });
+  const runtime = await connectAcpRuntime(fakeAgent, {
+    cwd: "/tmp/native-auth",
+    handlers: { onPermissionRequest: async () => ({ outcome: "cancelled" }) },
+    onAuthenticate: async () => ({
+      methodId: "radius-oauth",
+      credential: { accessToken: "agent-token", expiresAt },
+    }),
+  });
+  try {
+    assert.deepEqual(sequence, ["authenticate", "session"]);
+  } finally {
+    runtime.close();
+  }
+});

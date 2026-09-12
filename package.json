@@ -27,7 +27,7 @@
     "esbuild"
   ],
   "scripts": {
-    "dev": "bun run browser:build && bun run --cwd apps/desktop dev",
+    "dev": "bun run browser:build && bun scripts/desktop-dev.ts",
     "browser:build": "bun run --cwd packages/browser-protocol build && bun run --cwd apps/browser-extension build && bun run --cwd apps/browser-native-host build && bun run --cwd packages/browser-tools build",
     "runtime:build": "bash scripts/build-runtime-host-macos.sh",
     "runtime:prepare-assets": "bash scripts/prepare-runtime-assets-macos.sh",
@@ -74,6 +74,7 @@
     "test": "bun run --cwd packages/browser-protocol test && bun run --cwd apps/browser-native-host test && bun run --cwd apps/browser-extension test && bun run --cwd packages/browser-tools test && bun run --cwd packages/agent-contracts test && bun run --cwd packages/agent-build test && bun run --cwd packages/platform-contracts test && bun run --cwd packages/platform-client test && bun run --cwd packages/platform-job-contracts test && bun run --cwd packages/platform-providers test && bun run --cwd packages/platform-database test && bun run --cwd apps/platform-api test && bun run --cwd apps/platform-jobs test && bun run --cwd packages/runtime test && bun run --cwd packages/sdk test && bun run --cwd packages/cli test && bun run sdk:python:test && bun run --cwd packages/connector-protocol test && bun run --cwd packages/mcp-connector test && bun run --cwd packages/tool-broker test && bun run --cwd packages/sync-protocol test && bun run --cwd packages/storage test && bun run --cwd packages/sync-core test && bun run --cwd packages/scheduler test && bun run --cwd apps/desktop test",
     "typecheck": "bun run --cwd packages/browser-protocol typecheck && bun run --cwd apps/browser-native-host typecheck && bun run --cwd apps/browser-extension typecheck && bun run --cwd packages/browser-tools typecheck && bun run --cwd packages/agent-contracts typecheck && bun run --cwd packages/agent-build typecheck && bun run --cwd packages/platform-contracts typecheck && bun run --cwd packages/platform-client typecheck && bun run --cwd packages/platform-job-contracts typecheck && bun run --cwd packages/platform-providers typecheck && bun run --cwd packages/platform-database typecheck && bun run --cwd apps/platform-api typecheck && bun run --cwd apps/platform-jobs typecheck && bun run --cwd apps/platform-web typecheck && bun run --cwd packages/runtime typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/connector-protocol typecheck && bun run --cwd packages/mcp-connector typecheck && bun run --cwd packages/tool-broker typecheck && bun run --cwd packages/sync-protocol typecheck && bun run --cwd packages/storage typecheck && bun run --cwd packages/sync-core typecheck && bun run --cwd packages/scheduler typecheck && bun run --cwd apps/desktop typecheck",
     "package": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop package",
-    "make": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop make"
+    "make": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop make",
+    "auth:setup": "bun scripts/configure-desktop-auth.ts"
   }
 }

@@ -23,6 +23,10 @@ import type { StartAgentPromptInput } from "../radius-api";
 import type { ResolveToolApprovalInput } from "../radius-api";
 
 const radiusApi = {
+  authenticationStatus: () => ipcRenderer.invoke("radius:auth-status"),
+  signIn: () => ipcRenderer.invoke("radius:auth-sign-in"),
+  signOut: () => ipcRenderer.invoke("radius:auth-sign-out"),
+  cancelSignIn: () => ipcRenderer.invoke("radius:auth-cancel"),
   platform: process.platform,
   handleTitlebarDoubleClick: () =>
     ipcRenderer.invoke("radius:handle-titlebar-double-click"),

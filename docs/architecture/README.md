@@ -153,3 +153,5 @@ Curve-specific marketing, infrastructure operations, credentials, customer
 details, and internal delivery plans remain outside this repository. The full
 customer Platform and self-host implementation belong here and must depend only
 on public contracts and injected providers.
+
+- [Vendor authentication setup](../guides/vendor-authentication.md) — company desktop configuration, hosted OIDC login, agent credentials, and verification.

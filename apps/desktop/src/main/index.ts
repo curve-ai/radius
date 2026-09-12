@@ -1,3 +1,13 @@
+import { mkdirSync } from "node:fs";
+import { readDistribution } from "./distribution";
+import {
+  assertDesktopAuthenticated,
+  desktopAuthenticationStatus,
+  initializeDesktopAuthentication,
+  signInToDistribution,
+  signOutOfDistribution,
+  cancelDistributionSignIn,
+} from "./desktop-auth";
 import {
   app,
   BrowserWindow,
@@ -105,6 +115,16 @@ if (requestedUserDataPath) {
   app.setPath("userData", path.resolve(requestedUserDataPath));
 }
 
+const distribution = readDistribution();
+if (distribution) {
+  const profile = path.join(
+    app.getPath("appData"),
+    `Radius-${distribution.id}`,
+  );
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+  app.setPath("userData", profile);
+}
+
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 
@@ -126,6 +146,32 @@ const isSafeExternalUrl = (value: string): boolean => {
       url.hostname === "127.0.0.1" ||
       url.hostname === "[::1]")
   );
+};
+
+const publicChannels = new Set([
+  "radius:auth-status",
+  "radius:auth-sign-in",
+  "radius:auth-sign-out",
+  "radius:auth-cancel",
+  "radius:handle-titlebar-double-click",
+  "radius:set-native-theme",
+  "radius:storage-status",
+]);
+const handleRadiusIpc: typeof ipcMain.handle = (channel, listener) => {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (
+      distribution &&
+      [
+        "radius:connect-platform",
+        "radius:disconnect-platform",
+        "radius:set-sync-enabled",
+        "radius:sync-now",
+      ].includes(channel)
+    )
+      throw new Error("DISTRIBUTION_MANAGED_CONNECTION");
+    if (!publicChannels.has(channel)) assertDesktopAuthenticated();
+    return listener(event, ...args);
+  });
 };
 
 const createWindow = (): void => {
@@ -178,7 +224,7 @@ const createWindow = (): void => {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
-  app.setAppUserModelId("ai.curve.radius");
+  app.setAppUserModelId(distribution?.id ?? "ai.curve.radius");
   try {
     const storageContext = await initializeStorage();
     void reportPlatformClientInstallation(storageContext).catch((error) => {
@@ -190,8 +236,8 @@ app.whenReady().then(async () => {
     await initializeBundledAgents().catch((error) => {
       console.error("[agents] Radius could not prepare bundled agents", error);
     });
-    ipcMain.handle("radius:storage-status", () => ({ ready: true as const }));
-    ipcMain.handle("radius:handle-titlebar-double-click", (event) => {
+    handleRadiusIpc("radius:storage-status", () => ({ ready: true as const }));
+    handleRadiusIpc("radius:handle-titlebar-double-click", (event) => {
       const window = BrowserWindow.fromWebContents(event.sender);
       if (!window) return;
 
@@ -220,17 +266,17 @@ app.whenReady().then(async () => {
         window.maximize();
       }
     });
-    ipcMain.handle(
+    handleRadiusIpc(
       "radius:show-native-control-menu",
       showNativeControlMenuForRenderer,
     );
-    ipcMain.handle("radius:write-clipboard-text", (_event, text) => {
+    handleRadiusIpc("radius:write-clipboard-text", (_event, text) => {
       if (typeof text !== "string") {
         throw new TypeError("CLIPBOARD_TEXT_INVALID");
       }
       clipboard.writeText(text);
     });
-    ipcMain.handle("radius:set-native-theme", (_event, preference) => {
+    handleRadiusIpc("radius:set-native-theme", (_event, preference) => {
       if (
         preference !== "system" &&
         preference !== "light" &&
@@ -241,138 +287,143 @@ app.whenReady().then(async () => {
       nativeTheme.themeSource = preference;
       return nativeTheme.shouldUseDarkColors;
     });
-    ipcMain.handle("radius:list-projects", listProjectSidebar);
-    ipcMain.handle("radius:list-recent-sessions", listRecentSidebar);
-    ipcMain.handle(
+    handleRadiusIpc("radius:list-projects", listProjectSidebar);
+    handleRadiusIpc("radius:list-recent-sessions", listRecentSidebar);
+    handleRadiusIpc(
       "radius:list-session-transcript",
       listSessionTranscriptForRenderer,
     );
-    ipcMain.handle("radius:get-composer-draft", (_event, context) =>
+    handleRadiusIpc("radius:get-composer-draft", (_event, context) =>
       getComposerDraftForRenderer(context),
     );
-    ipcMain.handle("radius:save-composer-draft", (_event, input) =>
+    handleRadiusIpc("radius:save-composer-draft", (_event, input) =>
       saveComposerDraftForRenderer(input),
     );
-    ipcMain.handle("radius:clear-composer-draft", (_event, context) =>
+    handleRadiusIpc("radius:clear-composer-draft", (_event, context) =>
       clearComposerDraftForRenderer(context),
     );
-    ipcMain.handle(
+    handleRadiusIpc(
       "radius:choose-project-folder",
       chooseProjectFolderForRenderer,
     );
-    ipcMain.handle("radius:create-project", createProjectFromRenderer);
-    ipcMain.handle(
+    handleRadiusIpc("radius:create-project", createProjectFromRenderer);
+    handleRadiusIpc(
       "radius:discard-project-folder-selection",
       discardProjectFolderSelection,
     );
-    ipcMain.handle("radius:add-project-folder", addProjectFolderForRenderer);
-    ipcMain.handle(
+    handleRadiusIpc("radius:add-project-folder", addProjectFolderForRenderer);
+    handleRadiusIpc(
       "radius:remove-project-folder",
       removeProjectFolderForRenderer,
     );
-    ipcMain.handle("radius:rename-project", renameProjectFromRenderer);
-    ipcMain.handle("radius:rename-session", renameSessionFromRenderer);
-    ipcMain.handle("radius:reveal-project", revealProjectInFinder);
-    ipcMain.handle("radius:set-session-pinned", setSessionPinnedFromRenderer);
-    ipcMain.handle(
+    handleRadiusIpc("radius:rename-project", renameProjectFromRenderer);
+    handleRadiusIpc("radius:rename-session", renameSessionFromRenderer);
+    handleRadiusIpc("radius:reveal-project", revealProjectInFinder);
+    handleRadiusIpc("radius:set-session-pinned", setSessionPinnedFromRenderer);
+    handleRadiusIpc(
       "radius:set-session-archived",
       setSessionArchivedFromRenderer,
     );
-    ipcMain.handle("radius:list-connectors", listConnectorsForRenderer);
-    ipcMain.handle("radius:list-connector-tools", (_event, installationId) =>
+    handleRadiusIpc("radius:list-connectors", listConnectorsForRenderer);
+    handleRadiusIpc("radius:list-connector-tools", (_event, installationId) =>
       listConnectorToolsForRenderer(installationId),
     );
-    ipcMain.handle("radius:list-connector-catalog", (_event, query) =>
+    handleRadiusIpc("radius:list-connector-catalog", (_event, query) =>
       listConnectorCatalogForRenderer(query),
     );
-    ipcMain.handle("radius:install-catalog-connector", (_event, id) =>
+    handleRadiusIpc("radius:install-catalog-connector", (_event, id) =>
       installCatalogConnectorForRenderer(id),
     );
-    ipcMain.handle("radius:install-connector", (_event, input) =>
+    handleRadiusIpc("radius:install-connector", (_event, input) =>
       installConnectorForRenderer(input),
     );
-    ipcMain.handle("radius:connect-connector", (_event, installationId) =>
+    handleRadiusIpc("radius:connect-connector", (_event, installationId) =>
       connectConnectorForRenderer(installationId),
     );
-    ipcMain.handle("radius:disconnect-connector", (_event, providerId) =>
+    handleRadiusIpc("radius:disconnect-connector", (_event, providerId) =>
       disconnectConnectorForRenderer(providerId),
     );
-    ipcMain.handle("radius:delete-connector", (_event, installationId) =>
+    handleRadiusIpc("radius:delete-connector", (_event, installationId) =>
       deleteConnectorForRenderer(installationId),
     );
-    ipcMain.handle("radius:list-agents", listDesktopAgents);
-    ipcMain.handle("radius:connect-agent-authentication", (_event, agentId) =>
+    handleRadiusIpc("radius:list-agents", listDesktopAgents);
+    handleRadiusIpc("radius:connect-agent-authentication", (_event, agentId) =>
       connectAgentAuthentication(typeof agentId === "string" ? agentId : ""),
     );
-    ipcMain.handle(
+    handleRadiusIpc(
       "radius:disconnect-agent-authentication",
       (_event, agentId) =>
         disconnectAgentAuthentication(
           typeof agentId === "string" ? agentId : "",
         ),
     );
-    ipcMain.handle("radius:runtime-status", getDesktopRuntimeStatus);
-    ipcMain.handle("radius:get-agent-session-features", (_event, input) =>
+    handleRadiusIpc("radius:runtime-status", getDesktopRuntimeStatus);
+    handleRadiusIpc("radius:get-agent-session-features", (_event, input) =>
       getAgentSessionFeatures(input),
     );
-    ipcMain.handle("radius:set-agent-session-config-option", (_event, input) =>
+    handleRadiusIpc("radius:set-agent-session-config-option", (_event, input) =>
       setAgentSessionConfigOption(input),
     );
-    ipcMain.handle("radius:set-agent-session-mode", (_event, input) =>
+    handleRadiusIpc("radius:set-agent-session-mode", (_event, input) =>
       setAgentSessionMode(input),
     );
-    ipcMain.handle("radius:browser-status", getBrowserConnectionStatus);
-    ipcMain.handle("radius:reveal-browser-extension", revealBrowserExtension);
-    ipcMain.handle("radius:start-agent-prompt", (_event, input) =>
+    handleRadiusIpc("radius:browser-status", getBrowserConnectionStatus);
+    handleRadiusIpc("radius:reveal-browser-extension", revealBrowserExtension);
+    handleRadiusIpc("radius:start-agent-prompt", (_event, input) =>
       startAgentPrompt(input),
     );
-    ipcMain.handle("radius:resolve-tool-approval", (_event, input) =>
+    handleRadiusIpc("radius:resolve-tool-approval", (_event, input) =>
       resolveToolApproval(input),
     );
-    ipcMain.handle(
+    handleRadiusIpc(
       "radius:list-pending-agent-elicitations",
       (_event, sessionId) =>
         listPendingAgentElicitations(
           typeof sessionId === "string" ? sessionId : "",
         ),
     );
-    ipcMain.handle("radius:resolve-agent-elicitation", (_event, input) =>
+    handleRadiusIpc("radius:resolve-agent-elicitation", (_event, input) =>
       resolveAgentElicitation(input),
     );
-    ipcMain.handle("radius:list-mcp-approval-grants", () =>
+    handleRadiusIpc("radius:list-mcp-approval-grants", () =>
       listMcpApprovalsForRenderer(),
     );
-    ipcMain.handle("radius:revoke-mcp-approval", (_event, input) =>
+    handleRadiusIpc("radius:revoke-mcp-approval", (_event, input) =>
       revokeMcpApprovalForRenderer(input),
     );
-    ipcMain.handle("radius:resolve-markdown-media", (_event, url) =>
+    handleRadiusIpc("radius:resolve-markdown-media", (_event, url) =>
       resolveMarkdownMedia(url),
     );
-    ipcMain.handle("radius:resolve-markdown-link-preview", (_event, url) =>
+    handleRadiusIpc("radius:resolve-markdown-link-preview", (_event, url) =>
       resolveMarkdownLinkPreview(url),
     );
-    ipcMain.handle("radius:resolve-session-artifact-image", (_event, input) =>
+    handleRadiusIpc("radius:resolve-session-artifact-image", (_event, input) =>
       resolveSessionArtifactImage(input),
     );
-    ipcMain.handle("radius:open-session-file", (_event, input) =>
+    handleRadiusIpc("radius:open-session-file", (_event, input) =>
       openSessionFile(input),
     );
-    ipcMain.handle("radius:cancel-agent-session", (_event, sessionId) =>
+    handleRadiusIpc("radius:cancel-agent-session", (_event, sessionId) =>
       cancelAgentSession(typeof sessionId === "string" ? sessionId : ""),
     );
-    ipcMain.handle("radius:sync-status", getSyncStatus);
-    ipcMain.handle("radius:sync-now", runSyncNow);
-    ipcMain.handle("radius:set-sync-enabled", (_event, enabled) =>
+    handleRadiusIpc("radius:sync-status", getSyncStatus);
+    handleRadiusIpc("radius:sync-now", runSyncNow);
+    handleRadiusIpc("radius:set-sync-enabled", (_event, enabled) =>
       setSyncEnabled(enabled === true),
     );
-    ipcMain.handle("radius:connect-platform", (_event, input) =>
+    handleRadiusIpc("radius:connect-platform", (_event, input) =>
       connectPlatform(input),
     );
-    ipcMain.handle("radius:disconnect-platform", disconnectPlatform);
-    ipcMain.handle(DESKTOP_UPDATE_CHANNELS.status, getDesktopUpdateStatus);
-    ipcMain.handle(DESKTOP_UPDATE_CHANNELS.check, checkDesktopUpdate);
-    ipcMain.handle(DESKTOP_UPDATE_CHANNELS.perform, performDesktopUpdate);
+    handleRadiusIpc("radius:disconnect-platform", disconnectPlatform);
+    handleRadiusIpc(DESKTOP_UPDATE_CHANNELS.status, getDesktopUpdateStatus);
+    handleRadiusIpc(DESKTOP_UPDATE_CHANNELS.check, checkDesktopUpdate);
+    handleRadiusIpc(DESKTOP_UPDATE_CHANNELS.perform, performDesktopUpdate);
+    handleRadiusIpc("radius:auth-status", desktopAuthenticationStatus);
+    handleRadiusIpc("radius:auth-sign-in", signInToDistribution);
+    handleRadiusIpc("radius:auth-sign-out", signOutOfDistribution);
+    handleRadiusIpc("radius:auth-cancel", cancelDistributionSignIn);
     createWindow();
+    void initializeDesktopAuthentication(stopAgentRuntime);
     await initializeDevelopmentAgentConnections(() => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send(AGENTS_CHANGED_CHANNEL);
@@ -392,12 +443,13 @@ app.whenReady().then(async () => {
         error,
       );
     });
-    void initializeSync(storageContext).catch((error) => {
-      console.error(
-        "[sync] Radius could not initialize synchronization",
-        error,
-      );
-    });
+    if (!distribution)
+      void initializeSync(storageContext).catch((error) => {
+        console.error(
+          "[sync] Radius could not initialize synchronization",
+          error,
+        );
+      });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown storage error";

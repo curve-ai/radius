@@ -30,7 +30,9 @@ export async function serveDevelopmentAgent(
     throw new Error("Radius development agents must listen on loopback");
   }
   const route = normalizeAcpPath(options.path ?? "/acp");
-  const acpServer = new AcpServer({ agent: agent.app });
+  const acpServer = new AcpServer({
+    createAgent: () => agent.createConnectionApp(),
+  });
   const httpHandler = createNodeHttpHandler(acpServer);
   const webSocketServer = new WebSocketServer({ noServer: true });
   const upgrade = createNodeWebSocketUpgradeHandler(acpServer, webSocketServer);

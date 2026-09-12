@@ -56,3 +56,17 @@ system while setting `rsc: false` and Electron renderer aliases.
 
 The renderer remains Electron Vite. It does not import Cloud code or require a
 Cloud account; provider connection remains optional and user initiated.
+
+## Company authentication screens (2026-09-09)
+
+Alexey explicitly requested OpenCapital's internal auth experience as the reference.
+The source was read and copied from the local leincapital checkout for adaptation:
+`capbase_nextjs_app/components/auth/auth-shell.tsx` (SHA-256
+`2ae7205eaaa996237313ff208f4a21a310588965c7288c26450f7d06d4723128`) and
+`email-auth-form.tsx` (`97a6f2ce22428d717ceb1001b4478e89026466225e26eff70114e9d3152cd1df`).
+The referenced `skyline-fog.webp` was downloaded from its public CDN; copied
+asset digest is `56d97d76c9aeb76cc29bab5c8ebf1e4693adbc62f60ff00e2772e7fef9a841a3`.
+The desktop reuses the two-panel layout and the cityscape without overlays,
+with its own tokens, titlebar behavior and native-browser continuation. Financial
+product copy, tracking, providers and business logic were not imported. Vendor
+OAuth login remains on the vendor's hosted page.

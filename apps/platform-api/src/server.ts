@@ -2,6 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 
 import { provisionPlatformOrganization } from "@curve-ai/platform-database";
 
+import {
+  createNativeAuthRoutes,
+  nativeEntriesFromEnvironment,
+} from "./native-auth.js";
 import { createPlatformApp } from "./app.js";
 import {
   createPostgresBrowserAuth,
@@ -47,7 +51,19 @@ const provisioning = provisioningToken
 // that does not want to store conversations should not have the routes at all.
 const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
 if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
+const nativeEntries = nativeEntriesFromEnvironment(process.env);
 const app = createPlatformApp(runtime.services, {
+  nativeAuth: nativeEntries.length
+    ? createNativeAuthRoutes({
+        pool: runtime.pool,
+        entries: nativeEntries,
+        managedBaseDomain: sharedOrigins
+          ? requiredEnvironment("RADIUS_MANAGED_BASE_DOMAIN")
+          : undefined,
+        allowLoopback:
+          process.env.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
+      })
+    : undefined,
   browserAuth,
   provisioning,
   deploymentMode: sharedOrigins ? "managed" : "self_hosted",
@@ -78,8 +94,19 @@ function browserAuthFromEnvironment(
   sharedOrigins: boolean,
 ) {
   const issuer = process.env.RADIUS_OIDC_ISSUER?.trim();
+  const nativeSharedSettings = new Set([
+    "RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK",
+    "RADIUS_OIDC_ALLOWED_EMAILS",
+    "RADIUS_OIDC_ALLOWED_EMAIL_DOMAINS",
+    "RADIUS_OIDC_AUTO_JOIN_ROLE",
+  ]);
   const oidcEnvironmentPresent = Object.keys(process.env).some(
-    (name) => name.startsWith("RADIUS_OIDC_") && process.env[name]?.trim(),
+    (name) =>
+      name.startsWith("RADIUS_OIDC_") &&
+      process.env[name]?.trim() &&
+      !(
+        process.env.RADIUS_NATIVE_AUTH_CONFIG && nativeSharedSettings.has(name)
+      ),
   );
   if (!issuer) {
     if (oidcEnvironmentPresent) {

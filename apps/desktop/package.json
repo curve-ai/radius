@@ -19,8 +19,8 @@
     "start": "electron-vite preview",
     "build": "bun run typecheck && bun run build:bundle",
     "build:bundle": "electron-vite build",
-    "package": "bun run build && electron-builder --dir",
-    "make": "bun run build && electron-builder",
+    "package": "bun run build && electron-builder --config electron-builder.config.cjs --dir",
+    "make": "bun run build && electron-builder --config electron-builder.config.cjs",
     "lint": "eslint --cache .",
     "test": "ELECTRON_OVERRIDE_DIST_PATH=. tsx --test --test-force-exit 'src/**/*.test.ts'",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -67,7 +67,8 @@
     "remark-math": "6.0.0",
     "shiki": "4.4.3",
     "tailwind-merge": "^3.4.0",
-    "utf-8-validate": "6.0.6"
+    "utf-8-validate": "6.0.6",
+    "@curve-ai/platform-contracts": "0.0.1"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
