@@ -1,5 +1,8 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- electron-builder loads this CommonJS configuration.
 const fs = require("node:fs");
+const packageBuild = JSON.parse(
+  fs.readFileSync(`${__dirname}/package.json`, "utf8"),
+).build;
 const filename = process.env.RADIUS_DISTRIBUTION_CONFIG;
 const distribution = filename
   ? JSON.parse(fs.readFileSync(filename, "utf8"))
@@ -14,6 +17,7 @@ if (
   throw new Error("Invalid desktop distribution identity");
 module.exports = {
   extends: "./electron-builder.yml",
+  ...packageBuild,
   ...(distribution
     ? { appId: distribution.id, productName: distribution.displayName }
     : {}),
