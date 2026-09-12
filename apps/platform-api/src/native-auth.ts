@@ -16,6 +16,10 @@ import {
 } from "./browser-session.js";
 import { organizationFromManagedHost } from "./browser-auth.js";
 import type { OidcIdentityClaims } from "./oidc.js";
+import {
+  readNativeAuthConfiguration,
+  resolveAuthIssuer,
+} from "./auth-configuration.js";
 
 export function validateNativeConfiguration(
   value: unknown,
@@ -297,17 +301,22 @@ export function createNativeAuthRoutes(options: {
 export function nativeEntriesFromEnvironment(
   environment: NodeJS.ProcessEnv,
 ): NativeEntry[] {
-  if (!environment.RADIUS_NATIVE_AUTH_CONFIG) return [];
-  const entries: unknown = JSON.parse(environment.RADIUS_NATIVE_AUTH_CONFIG);
-  if (!Array.isArray(entries) || !entries.length || entries.length > 256)
+  const entries = readNativeAuthConfiguration(environment);
+  if (entries === undefined) return [];
+  if (!Array.isArray(entries) || entries.length > 256)
     throw new Error(
-      "Native auth configuration must be an array of 1–256 organizations",
+      "Native auth configuration must be an array of at most 256 organizations",
     );
   const seen = new Set<string>();
   const clients = new Set<string>();
   return entries.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(
+        "Native auth organization configuration must be an object",
+      );
+    }
     const config = validateNativeConfiguration(
-      entry,
+      { ...entry, issuer: resolveAuthIssuer(entry.issuer, environment) },
       environment.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
     );
     if (seen.has(config.organizationSlug))

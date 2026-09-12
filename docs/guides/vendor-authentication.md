@@ -4,6 +4,79 @@ Radius uses the OpenID Connect login exposed by its bundled Platform origin. The
 
 Every desktop bundle has one Platform origin and follows the same native auth flow whether Curve or the operator hosts it. An ordinary Radius build targets `http://localhost:3100/`; a branded distribution embeds its Platform origin, application identity, organization, and agent. Radius does not ask the user to choose a hosting mode or type an endpoint after launch.
 
+The Platform URL and the authentication issuer are independent. An organization
+with a registered native client can omit its issuer to use Curve's hosted Better
+Auth at `https://app.curvehq.sh/api/auth`. A custom Better Auth installation must
+enable its OAuth provider; other OIDC providers use the same public-client flow.
+No local identity server or managed Cloud stack is required to use hosted auth.
+The organization, client registration, resource, and membership must still exist;
+an issuer default does not provision them or grant access.
+
+## Configuration resolution
+
+For each organization's native auth entry, issuer precedence is:
+
+1. The entry's explicit `issuer`.
+2. Deployment `RADIUS_AUTH_ISSUER`.
+3. Existing deployment `RADIUS_OIDC_ISSUER`.
+4. `https://app.curvehq.sh/api/auth`.
+
+Explicit invalid configuration fails startup. Network/discovery errors do not
+switch to the hosted issuer. Issuer identity, including path and trailing slash,
+is preserved exactly. Host routing selects the organization's entry; membership
+remains enforced by Platform after login.
+
+Supply the array as `RADIUS_NATIVE_AUTH_CONFIG`, or set
+`RADIUS_NATIVE_AUTH_CONFIG_FILE` to a readable JSON file, but not both. An empty
+array deliberately leaves native auth unconfigured. An organization entry may
+omit only `issuer`; its registered `clientId`, organization, agent, callback,
+resource, and scopes remain required.
+
+For a single organization, the equivalent environment form is:
+
+```dotenv
+RADIUS_NATIVE_CLIENT_ID=registered-public-client-id
+RADIUS_NATIVE_ORGANIZATION=yourcompany
+RADIUS_NATIVE_AGENT_ID=your-agent
+RADIUS_NATIVE_RESOURCE=https://api.yourcompany.com/agent
+# Optional; omitted issuer uses hosted Better Auth.
+# RADIUS_AUTH_ISSUER=https://identity.yourcompany.com/api/auth
+RADIUS_NATIVE_SCOPES=openid profile email
+```
+
+The callback defaults to `http://127.0.0.1:43821/callback`; set
+`RADIUS_NATIVE_REDIRECT_URI` only to the callback registered for that client.
+File/JSON configuration takes precedence over the environment field form.
+Membership auto-join stays off unless explicitly enabled by the operator.
+
+## Local startup
+
+Put the organization's public native-client configuration array in
+`.radius/native-auth.json` and configure `DATABASE_URL` for the existing local
+Radius Platform database. Enable sync with `RADIUS_SYNC_ENABLED=true` and a
+server-only `RADIUS_SYNC_CURSOR_SECRET`. Secrets do not belong in the native
+client file.
+
+`bun run dev` checks native-auth readiness before starting Electron. For the
+default `http://localhost:3100/`, if no server is reachable it starts
+`bun run platform:dev`, which discovers `.radius/native-auth.json`, and waits
+for native discovery. It stops that child when the desktop exits. Explicit
+remote endpoints must already be running. A different service occupying port
+3100 is reported and is never terminated automatically.
+
+To start Platform separately or diagnose a packaged application's server:
+
+```sh
+bun run platform:dev
+bun run auth:check http://localhost:3100/
+```
+
+The local launcher does not create or migrate an identity provider, bootstrap
+an arbitrary organization, or borrow Cloud database credentials. The packaged
+desktop connects to its configured Platform; it does not start server services.
+A successful readiness check proves discovery, not a completed login or agent
+authorization.
+
 ## What your provider needs
 
 Use an OAuth 2.0 provider with OpenID Connect discovery and signed ID tokens, authorization-code flow, PKCE S256, public native clients (`token_endpoint_auth_method: none`), and an access token for your agent API's resource/audience. A generic OAuth service without an OIDC identity is not supported by this adapter. A Google login alone is not an access token for your custom API; a broker such as Better Auth can authenticate with Google and issue your API token.

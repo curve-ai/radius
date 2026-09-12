@@ -15,12 +15,15 @@ import {
 import { normalizeOidcProvisioningPolicy } from "./browser-session.js";
 import { normalizePlatformOidcOptions } from "./oidc.js";
 import { createPostgresPlatformServices } from "./postgres-services.js";
+import { resolveAuthIssuer } from "./auth-configuration.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
 const databaseUrl = requiredEnvironment("DATABASE_URL");
 const bootstrapDevelopmentAuthority =
   process.env.RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY === "true";
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
+// Reject invalid operator configuration before opening storage or starting services.
+const nativeEntries = nativeEntriesFromEnvironment(process.env);
 
 const runtime = await createPostgresPlatformServices({
   connectionString: databaseUrl,
@@ -51,7 +54,6 @@ const provisioning = provisioningToken
 // that does not want to store conversations should not have the routes at all.
 const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
 if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
-const nativeEntries = nativeEntriesFromEnvironment(process.env);
 const app = createPlatformApp(runtime.services, {
   nativeAuth: nativeEntries.length
     ? createNativeAuthRoutes({
@@ -93,7 +95,13 @@ function browserAuthFromEnvironment(
   pool: import("@curve-ai/platform-database").PlatformPool,
   sharedOrigins: boolean,
 ) {
-  const issuer = process.env.RADIUS_OIDC_ISSUER?.trim();
+  const browserConfigured =
+    process.env.RADIUS_OIDC_ISSUER !== undefined ||
+    process.env.RADIUS_OIDC_CLIENT_ID !== undefined ||
+    process.env.RADIUS_OIDC_CLIENT_ID_PREFIX !== undefined;
+  const issuer = browserConfigured
+    ? resolveAuthIssuer(process.env.RADIUS_OIDC_ISSUER, process.env)
+    : undefined;
   const nativeSharedSettings = new Set([
     "RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK",
     "RADIUS_OIDC_ALLOWED_EMAILS",
@@ -104,9 +112,7 @@ function browserAuthFromEnvironment(
     (name) =>
       name.startsWith("RADIUS_OIDC_") &&
       process.env[name]?.trim() &&
-      !(
-        process.env.RADIUS_NATIVE_AUTH_CONFIG && nativeSharedSettings.has(name)
-      ),
+      !(nativeEntries.length && nativeSharedSettings.has(name)),
   );
   if (!issuer) {
     if (oidcEnvironmentPresent) {
