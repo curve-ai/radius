@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  generateKeyPairSync,
+} from "node:crypto";
 import { createPlatformPool } from "@curve-ai/platform-database";
 import { Hono } from "hono";
 import { createPostgresPlatformServices } from "../src/postgres-services.js";
@@ -9,6 +14,8 @@ import {
 } from "../src/embedded-auth.js";
 import { createNativeAuthRoutes } from "../src/native-auth.js";
 import { normalizeOidcProvisioningPolicy } from "../src/browser-session.js";
+import { createPlatformApp } from "../src/app.js";
+import { HttpSyncProvider } from "../../../packages/sync-core/src/http-provider.js";
 
 // Creates and removes only its own ephemeral database on the local test server.
 const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
@@ -56,8 +63,11 @@ try {
       delivered.set(message.email, message.otp);
     },
   });
-  await registerEmbeddedClients(runtime.db, [config]);
-  await registerEmbeddedClients(runtime.db, [config]);
+  const trust = { trustedClientIds: new Set([config.clientId]) };
+  await registerEmbeddedClients(runtime.db, [config], trust);
+  await registerEmbeddedClients(runtime.db, [config], trust);
+  const unrelatedClient = { ...config, clientId: "unrelated-client" };
+  await registerEmbeddedClients(runtime.db, [unrelatedClient]);
   router.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   router.get("/.well-known/*", (c) => auth.handler(c.req.raw));
   router.route(
@@ -76,6 +86,10 @@ try {
       allowLoopback: true,
       localDevelopment: true,
     }),
+  );
+  router.route(
+    "/",
+    createPlatformApp(runtime.services, { syncDatabase: runtime.db }),
   );
   let cookies = new Map<string, string>();
   async function call(path: string, body?: unknown, bearer?: string) {
@@ -105,7 +119,11 @@ try {
       : { url: response.headers.get("location") };
     return { response, data };
   }
-  async function authorize(email: string) {
+  async function authorize(
+    email: string,
+    client = config,
+    expectConsent = false,
+  ) {
     cookies = new Map();
     const state = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
@@ -113,10 +131,10 @@ try {
     const url = new URL(`${issuer}/oauth2/authorize`);
     Object.entries({
       response_type: "code",
-      client_id: config.clientId,
-      redirect_uri: config.redirectUri,
-      resource: config.resource,
-      scope: config.scopes.join(" "),
+      client_id: client.clientId,
+      redirect_uri: client.redirectUri,
+      resource: client.resource,
+      scope: client.scopes.join(" "),
       state,
       nonce,
       code_challenge: createHash("sha256")
@@ -145,8 +163,21 @@ try {
       oauth_query: query,
     });
     assert.ok(signedIn.data.url, `sign-in status ${signedIn.response.status}`);
+    if (!expectConsent) {
+      const callback = new URL(signedIn.data.url, origin);
+      assert.equal(
+        callback.origin + callback.pathname,
+        client.redirectUri,
+        "first-party login returns directly to Radius",
+      );
+      return { callbackUrl: callback.href, state, nonce, codeVerifier };
+    }
     const consent = new URL(signedIn.data.url, origin);
-    assert.equal(consent.pathname, "/consent");
+    assert.equal(
+      consent.pathname,
+      "/consent",
+      "unrelated clients still require consent",
+    );
     const granted = await call("/api/auth/oauth2/consent", {
       accept: true,
       oauth_query: consent.search.slice(1),
@@ -168,6 +199,24 @@ try {
   assert.equal(exchange.response.status, 200, "native exchange");
   assert.equal(exchange.data.organization.slug, "dev");
   assert.ok(exchange.data.refreshToken, "refresh credential issued");
+  const keys = generateKeyPairSync("ed25519");
+  const syncProvider = new HttpSyncProvider({
+    endpoint: `${origin}/api/platform/v1/sync/`,
+    identity: {
+      clientInstanceId: randomUUID(),
+      displayName: "Auth integration device",
+      platform: "test",
+      publicKeyJwk: keys.publicKey.export({ format: "jwk" }),
+      privateKeyJwk: keys.privateKey.export({ format: "jwk" }),
+      appVersion: "test",
+    },
+    getAccessToken: async () => exchange.data.platformSessionToken,
+  });
+  await syncProvider.registerDevice();
+  assert.ok(
+    (await syncProvider.capabilities()).protocolVersions.includes(1),
+    "native session survives workspace sync preparation",
+  );
   assert.ok(
     await runtime.services.authenticateBrowserSession(
       exchange.data.platformSessionToken,
@@ -204,6 +253,22 @@ try {
     (await call("/native/exchange", input)).response.status,
     401,
     "authorization code is single-use",
+  );
+  const unrelatedUrl = new URL(`${issuer}/oauth2/authorize`);
+  Object.entries({
+    client_id: unrelatedClient.clientId,
+    redirect_uri: unrelatedClient.redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    state: randomBytes(32).toString("base64url"),
+    code_challenge: randomBytes(32).toString("base64url"),
+    code_challenge_method: "S256",
+  }).forEach(([key, value]) => unrelatedUrl.searchParams.set(key, value));
+  const unrelated = await call(unrelatedUrl.href);
+  assert.equal(
+    new URL(unrelated.data.url, origin).pathname,
+    "/consent",
+    "unrelated clients still require consent",
   );
   console.log(
     "PASS: embedded OTP, signed continuation, consent, native exchange, code replay rejection, refresh, second-owner rejection, logout",

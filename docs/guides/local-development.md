@@ -128,6 +128,10 @@ The desktop opens `http://localhost:3100/sign-in` in your browser. Better Auth
 inside Platform authenticates your identity; Resend only delivers the email.
 Workspace history, sync records, and artifacts go to the local Platform.
 Its identity-only token is not supplied to arbitrary example agents.
+The server trusts its own development desktop client, so it does not ask you
+to consent to sharing your identity with Radius itself. That trust does not
+grant membership in another organization. Unrelated clients still require
+explicit consent.
 Agents with their own provider authentication still use that flow. A company
 distribution retains its configured organization, agent, and OAuth credential.
 

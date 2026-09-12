@@ -16,7 +16,10 @@ import { normalizeOidcProvisioningPolicy } from "./browser-session.js";
 import { normalizePlatformOidcOptions } from "./oidc.js";
 import { createPostgresPlatformServices } from "./postgres-services.js";
 import { resolveAuthIssuer } from "./auth-configuration.js";
-import { isLocalDevelopmentAuth } from "./development-auth.js";
+import {
+  DEVELOPMENT_AUTH,
+  isLocalDevelopmentAuth,
+} from "./development-auth.js";
 import {
   authMode,
   embeddedAuthSecret,
@@ -116,23 +119,32 @@ if (embedded) {
   await registerEmbeddedClients(
     runtime.db,
     nativeEntries.map((entry) => entry.config),
+    {
+      trustedClientIds: new Set(
+        localDevelopment ? [DEVELOPMENT_AUTH.clientId] : [],
+      ),
+    },
   );
   if (
     process.env.RADIUS_OIDC_CLIENT_ID &&
     process.env.RADIUS_OIDC_ISSUER === embeddedAuthUrl(process.env)
   ) {
-    await registerEmbeddedClients(runtime.db, [
-      {
-        issuer: embeddedAuthUrl(process.env),
-        clientId: process.env.RADIUS_OIDC_CLIENT_ID,
-        redirectUri: requiredEnvironment("RADIUS_OIDC_REDIRECT_URI"),
-        scopes: ["openid", "email", "profile"],
-        resource: `${new URL(embeddedAuthUrl(process.env)).origin}/api/platform`,
-        organizationSlug: requiredEnvironment("RADIUS_OIDC_ORGANIZATION"),
-        displayName: "Radius dashboard",
-        agentId: "radius-dashboard",
-      },
-    ]);
+    await registerEmbeddedClients(
+      runtime.db,
+      [
+        {
+          issuer: embeddedAuthUrl(process.env),
+          clientId: process.env.RADIUS_OIDC_CLIENT_ID,
+          redirectUri: requiredEnvironment("RADIUS_OIDC_REDIRECT_URI"),
+          scopes: ["openid", "email", "profile"],
+          resource: `${new URL(embeddedAuthUrl(process.env)).origin}/api/platform`,
+          organizationSlug: requiredEnvironment("RADIUS_OIDC_ORGANIZATION"),
+          displayName: "Radius dashboard",
+          agentId: "radius-dashboard",
+        },
+      ],
+      { trustedClientIds: new Set([process.env.RADIUS_OIDC_CLIENT_ID]) },
+    );
   }
   router.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   router.get("/.well-known/*", (c) => auth.handler(c.req.raw));

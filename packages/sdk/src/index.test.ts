@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AcpAuthenticationRequiredError,
   acpStreamFromWebSocket,
   connectAcpRuntime,
 } from "@curve-ai/radius-runtime";
@@ -196,7 +197,7 @@ test("organization credentials reach only the authenticated connection", async (
         cwd: "/tmp/other-agent",
         handlers,
       }),
-      /Authentication required/i,
+      AcpAuthenticationRequiredError,
     );
     await assert.rejects(
       connectAcpRuntime(acpStreamFromWebSocket(server.endpoint), {
@@ -207,7 +208,7 @@ test("organization credentials reach only the authenticated connection", async (
           credential: { accessToken: "wrong-token", expiresAt },
         }),
       }),
-      /Authentication required/i,
+      AcpAuthenticationRequiredError,
     );
     assert.equal(
       (await runtime.prompt("still authenticated")).text,

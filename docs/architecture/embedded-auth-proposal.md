@@ -26,6 +26,10 @@ port 3100. Hosting topology does not select a different desktop protocol.
 - Register the development public client and local resource idempotently
   after migrations. Do not require a contributor to choose an organization
   slug or register a client manually. Retain the local `dev` fixture.
+- The server-owned development desktop and embedded dashboard clients skip
+  redundant first-party identity consent. Other clients retain consent.
+  This does not bypass identity verification, scopes, resource restrictions,
+  or Platform organization membership.
 - Default local authentication is email OTP delivered through operator-configured
   Resend. An optional loopback-only Mailpit inbox is supplied by dependency
   Compose for local tests; only that test mode avoids external email delivery.

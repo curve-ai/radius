@@ -146,3 +146,28 @@ test("sends no authorization header when the fetch carries the session", async (
   await provider.capabilities();
   assert.equal(sawAuthorization, null);
 });
+
+test("capability discovery carries the native bearer session just like registration", async () => {
+  const provider = new HttpSyncProvider({
+    endpoint: "http://localhost:3100/api/platform/v1/sync/",
+    identity: identityFor("8d7c6b5a-4938-4271-a605-f4e3d2c1b0a9"),
+    getAccessToken: async () => "radius_native_test-session",
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      assert.equal(
+        request.headers.get("authorization"),
+        "Bearer radius_native_test-session",
+      );
+      assert.equal(
+        new URL(request.url).pathname,
+        "/api/platform/v1/sync/capabilities",
+      );
+      return Response.json({
+        protocolVersions: [1],
+        maxBatchSize: 100,
+        artifactTransfer: true,
+      });
+    },
+  });
+  await provider.capabilities();
+});

@@ -108,6 +108,7 @@ export function createEmbeddedAuth(options: {
 export async function registerEmbeddedClients(
   database: PlatformDatabase,
   configurations: NativeOAuthConfiguration[],
+  options: { trustedClientIds?: ReadonlySet<string> } = {},
 ): Promise<void> {
   const { oauthClient, oauthResource, oauthClientResource } =
     embeddedAuthSchema;
@@ -122,7 +123,8 @@ export async function registerEmbeddedClients(
         responseTypes: ["code"],
         tokenEndpointAuthMethod: "none",
         requirePKCE: true,
-        skipConsent: false,
+        // Trust is server-owned and client-specific, never supplied by a login request.
+        skipConsent: options.trustedClientIds?.has(config.clientId) === true,
         updatedAt: new Date(),
       };
       const existing = await transaction
