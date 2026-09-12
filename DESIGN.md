@@ -659,6 +659,16 @@ designed and approved.
 Motion communicates feedback, hierarchy, or a state transition. It is not
 ambient decoration.
 
+- Startup uses an opaque, theme-matched canvas with the company's text
+  wordmark centered. Its loading-only shimmer uses a translating masked
+  highlight over a static wordmark, on the existing 1.4s linear cadence.
+  It becomes a static wordmark under reduced motion.
+- The startup surface fades out over 160ms. The workspace enters with opacity
+  and an 8px vertical offset over 240ms using `[0.23, 1, 0.32, 1]`. Reduced
+  motion uses a 100ms fade without translation. This entrance is not repeated
+  for ordinary navigation. The workspace wrapper remains transparent so
+  native sidebar material is preserved.
+
 - Reuse the motion helpers in `components/ui/motion.ts` and
   `components/ui/motion-features.ts`.
 - Animate transform and opacity where possible.

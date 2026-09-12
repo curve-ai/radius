@@ -15,10 +15,10 @@
     "directory": "apps/desktop"
   },
   "scripts": {
-    "dev": "electron-vite dev",
-    "start": "electron-vite preview",
+    "dev": "bun --bun run electron-vite dev",
+    "start": "bun --bun run electron-vite preview",
     "build": "bun run typecheck && bun run build:bundle",
-    "build:bundle": "electron-vite build",
+    "build:bundle": "bun --bun run electron-vite build",
     "package": "bun run build && electron-builder --config electron-builder.config.cjs --dir",
     "make": "bun run build && electron-builder --config electron-builder.config.cjs",
     "lint": "eslint --cache .",

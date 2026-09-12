@@ -7,6 +7,7 @@ import {
 import {
   AGENTS_CHANGED_CHANNEL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
+  SESSION_WORKING_STATE_CHANNEL,
   type RadiusApi,
   type ComposerDraftContext,
   type GetAgentSessionFeaturesInput,
@@ -15,6 +16,7 @@ import {
   type SetAgentSessionConfigOptionInput,
   type SetAgentSessionModeInput,
   type SessionTranscriptStreamUpdate,
+  type SessionWorkingStateUpdate,
 } from "../radius-api";
 import type { BrowserConnectionStatus } from "../radius-api";
 import type { DesktopConnectorCatalogQuery } from "../radius-api";
@@ -57,6 +59,17 @@ const radiusApi = {
     ipcRenderer.on(SESSION_TRANSCRIPT_STREAM_CHANNEL, handler);
     return () =>
       ipcRenderer.removeListener(SESSION_TRANSCRIPT_STREAM_CHANNEL, handler);
+  },
+  onSessionWorkingStateChanged: (
+    listener: (update: SessionWorkingStateUpdate) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      update: SessionWorkingStateUpdate,
+    ): void => listener(update);
+    ipcRenderer.on(SESSION_WORKING_STATE_CHANNEL, handler);
+    return () =>
+      ipcRenderer.removeListener(SESSION_WORKING_STATE_CHANNEL, handler);
   },
   chooseProjectFolder: () => ipcRenderer.invoke("radius:choose-project-folder"),
   createProject: (input: { selectionIds?: string[]; name: string }) =>

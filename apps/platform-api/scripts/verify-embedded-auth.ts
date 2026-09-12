@@ -198,6 +198,7 @@ try {
   const exchange = await call("/native/exchange", input);
   assert.equal(exchange.response.status, 200, "native exchange");
   assert.equal(exchange.data.organization.slug, "dev");
+  assert.equal(exchange.data.profile.email, "first@radius.example", "verified identity presentation is returned without tokens");
   assert.ok(exchange.data.refreshToken, "refresh credential issued");
   const keys = generateKeyPairSync("ed25519");
   const syncProvider = new HttpSyncProvider({

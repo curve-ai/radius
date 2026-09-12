@@ -17,6 +17,7 @@ import { initializeStorage } from "./storage";
 import { readDesktopPlatformUrl, readDistribution } from "./distribution";
 import { nativeBrowserLogin } from "./native-login";
 import { connectNativePlatform, stopSync } from "./sync";
+import { accountProfile } from "./account-profile";
 
 const SECRET = "distribution:oauth";
 const distribution = readDistribution();
@@ -38,7 +39,7 @@ let renewal: NodeJS.Timeout | null = null;
 let stopAgentRuntime: () => void;
 
 export function desktopAuthenticationStatus(): DesktopAuthenticationStatus {
-  return { ...status };
+  return { ...status, profile: status.profile ? { ...status.profile } : null };
 }
 export function assertDesktopAuthenticated(): void {
   assertUsableDesktopSession(status.state, credentials);
@@ -130,6 +131,7 @@ function parseCredentials(value: unknown): NativeAuthorizationResponse {
   return candidate;
 }
 async function accept(value: unknown, signal: AbortSignal): Promise<void> {
+  const alreadyReady = status.state === "ready";
   const next = parseCredentials(value);
   const storage = await initializeStorage();
   const previous = await getMostRecentSyncConnection(storage.database);
@@ -140,8 +142,9 @@ async function accept(value: unknown, signal: AbortSignal): Promise<void> {
   credentials = next;
   status = {
     ...status,
-    state: "preparing",
+    state: alreadyReady ? "ready" : "preparing",
     organizationName: next.organization.displayName,
+    profile: accountProfile(next.profile),
     errorCode: null,
   };
   await connectNativePlatform(
@@ -267,7 +270,10 @@ export async function initializeDesktopAuthentication(
       )
     )
       throw new Error("AUTH_PROFILE_MISMATCH");
-    if (Date.parse(previous.agent.expiresAt) <= Date.now() + 60_000) {
+    if (
+      (!previous.profile && previous.refreshToken) ||
+      Date.parse(previous.agent.expiresAt) <= Date.now() + 60_000
+    ) {
       await refresh(previous, signal);
     } else await accept(previous, signal);
   });
@@ -306,6 +312,7 @@ export async function signOutOfPlatform(): Promise<DesktopAuthenticationStatus> 
     state: "signed-out",
     errorCode: null,
     organizationName: null,
+    profile: null,
   };
   stopAgentRuntime();
   await stopSync();

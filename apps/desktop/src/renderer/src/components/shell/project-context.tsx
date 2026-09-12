@@ -14,6 +14,7 @@ import {
   type ProjectContextValue,
   type ProjectSidebarRecord,
   type RecentSessionRecord,
+  type WorkspaceSessionRecord,
 } from "./project-context-value";
 import { projectErrorMessage } from "./project-errors";
 import { resolveActiveProjectId } from "./project-selection";
@@ -22,6 +23,16 @@ import { hasUnreadAssistantMessage } from "./session-unread";
 const ACTIVE_PROJECT_STORAGE_KEY = "radius:active-project-id";
 const ACTIVE_SESSION_STORAGE_KEY = "radius:active-session-id";
 const SESSION_READ_AT_STORAGE_KEY = "radius:session-read-at";
+
+function withWorkingState(
+  session: WorkspaceSessionRecord,
+  workingStates: ReadonlyMap<string, boolean>,
+): WorkspaceSessionRecord {
+  const working = workingStates.get(session.id);
+  return working === undefined || working === session.working
+    ? session
+    : { ...session, working };
+}
 
 function getInitialSessionReadAt(): Record<string, string> {
   try {
@@ -68,6 +79,8 @@ export function ProjectProvider({
   const readStateInitializedRef = useRef(
     localStorage.getItem(SESSION_READ_AT_STORAGE_KEY) !== null,
   );
+  const knownSessionIdsRef = useRef<Set<string>>(new Set());
+  const workingStatesRef = useRef<Map<string, boolean>>(new Map());
 
   const updateSessionReadAt = useCallback(
     (updates: Readonly<Record<string, string>>): void => {
@@ -111,8 +124,23 @@ export function ProjectProvider({
           );
           readStateInitializedRef.current = true;
         }
-        setProjects(nextProjects);
-        setRecents(nextRecents);
+        const projectsWithWorkingState = nextProjects.map((project) => ({
+          ...project,
+          sessions: project.sessions.map((session) =>
+            withWorkingState(session, workingStatesRef.current),
+          ),
+        }));
+        const recentsWithWorkingState = nextRecents.map((session) =>
+          withWorkingState(session, workingStatesRef.current),
+        );
+        knownSessionIdsRef.current = new Set(
+          [
+            ...projectsWithWorkingState.flatMap((project) => project.sessions),
+            ...recentsWithWorkingState,
+          ].map((session) => session.id),
+        );
+        setProjects(projectsWithWorkingState);
+        setRecents(recentsWithWorkingState);
         const storedSessionId = localStorage.getItem(
           ACTIVE_SESSION_STORAGE_KEY,
         );
@@ -170,6 +198,30 @@ export function ProjectProvider({
     const frame = window.requestAnimationFrame(() => void loadProjects(true));
     return () => window.cancelAnimationFrame(frame);
   }, [loadProjects]);
+
+  useEffect(
+    () =>
+      window.radius.onSessionWorkingStateChanged((update) => {
+        workingStatesRef.current.set(update.sessionId, update.working);
+        const updateSession = (
+          session: WorkspaceSessionRecord,
+        ): WorkspaceSessionRecord =>
+          session.id === update.sessionId && session.working !== update.working
+            ? { ...session, working: update.working }
+            : session;
+        setProjects((current) =>
+          current.map((project) => ({
+            ...project,
+            sessions: project.sessions.map(updateSession),
+          })),
+        );
+        setRecents((current) => current.map(updateSession));
+        if (!knownSessionIdsRef.current.has(update.sessionId)) {
+          void loadProjects(false);
+        }
+      }),
+    [loadProjects],
+  );
 
   const hasActiveSessions = [...projects, { sessions: recents }].some(
     (project) =>

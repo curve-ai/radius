@@ -73,6 +73,11 @@ export interface ProjectSessionSummary {
   working: boolean;
 }
 
+export interface SessionWorkingStateUpdate {
+  sessionId: string;
+  working: boolean;
+}
+
 export interface ProjectRootSummary {
   id: string;
   name: string;
@@ -108,6 +113,7 @@ export interface SessionTranscriptStreamUpdate {
 }
 export const SESSION_TRANSCRIPT_STREAM_CHANNEL =
   "radius:session-transcript-stream";
+export const SESSION_WORKING_STATE_CHANNEL = "radius:session-working-state";
 export const SESSION_RUN_ACTIVITY_DETAIL = {
   connectingAgent: "Connecting to the development agent",
   resumingWork: "Continuing with approved access",
@@ -442,6 +448,9 @@ export interface RadiusApi {
   clearComposerDraft(context: ComposerDraftContext): Promise<void>;
   onSessionTranscriptStream(
     listener: (update: SessionTranscriptStreamUpdate) => void,
+  ): () => void;
+  onSessionWorkingStateChanged(
+    listener: (update: SessionWorkingStateUpdate) => void,
   ): () => void;
   chooseProjectFolder(): Promise<ProjectFolderSelection | null>;
   createProject(input: {

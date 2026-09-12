@@ -251,6 +251,10 @@ export function createNativeAuthRoutes(options: {
       platformSessionToken: created.sessionToken,
       platformExpiresAt: created.expiresAt,
       accountId: created.identity.accountId,
+      profile: {
+        displayName: identityClaims.displayName,
+        email: identityClaims.emailVerified ? identityClaims.email : null,
+      },
       organization,
       agent: {
         accessToken: tokens.access_token,

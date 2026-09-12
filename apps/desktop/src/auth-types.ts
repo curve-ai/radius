@@ -10,4 +10,5 @@ export interface DesktopAuthenticationStatus {
   signInName: string;
   organizationName: string | null;
   errorCode: string | null;
+  profile?: { displayName: string | null; email: string | null } | null;
 }

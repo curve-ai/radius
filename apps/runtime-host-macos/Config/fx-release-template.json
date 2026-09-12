@@ -3,13 +3,13 @@
   "agentId": "fx",
   "providerId": "vercel-labs",
   "displayName": "fx",
-  "releaseVersion": "0.0.5-radius.3",
+  "releaseVersion": "0.0.9-radius.3",
   "protocol": {
     "kind": "acp-stdio",
     "version": 1
   },
   "image": {
-    "reference": "radius.local/fx:0.0.5-radius.3",
+    "reference": "radius.local/fx:0.0.9-radius.3",
     "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "platform": "linux/arm64",
     "translation": "none"

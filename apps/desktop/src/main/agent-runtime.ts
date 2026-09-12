@@ -63,6 +63,7 @@ import type {
   DesktopAgentSummary,
   DesktopRuntimeStatus,
   SessionTranscriptStreamUpdate,
+  SessionWorkingStateUpdate,
   SetAgentSessionConfigOptionInput,
   StartAgentPromptInput,
   StartAgentPromptResult,
@@ -73,6 +74,7 @@ import type {
 import {
   SESSION_RUN_ACTIVITY_DETAIL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
+  SESSION_WORKING_STATE_CHANNEL,
 } from "../radius-api";
 import { splitGeneratedImageLinks } from "../generated-image-link";
 import {
@@ -830,12 +832,21 @@ export function isAgentSessionWorking(sessionId: string): boolean {
   return workingSessions.has(sessionId);
 }
 
+function broadcastSessionWorkingState(update: SessionWorkingStateUpdate): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(SESSION_WORKING_STATE_CHANNEL, update);
+  }
+}
+
 function markSessionWorking(sessionId: string): void {
+  if (workingSessions.has(sessionId)) return;
   workingSessions.add(sessionId);
+  broadcastSessionWorkingState({ sessionId, working: true });
 }
 
 function clearSessionWorking(sessionId: string): void {
-  workingSessions.delete(sessionId);
+  if (!workingSessions.delete(sessionId)) return;
+  broadcastSessionWorkingState({ sessionId, working: false });
 }
 
 export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
@@ -1188,7 +1199,9 @@ export function stopAgentRuntime(): void {
   }
   runningSessions.clear();
   runningTerminalManagers.clear();
-  workingSessions.clear();
+  for (const sessionId of [...workingSessions]) {
+    clearSessionWorking(sessionId);
+  }
   agentSessionFeatures.clear();
   agentSessionConfigOverrides.clear();
   agentSessionModeOverrides.clear();
