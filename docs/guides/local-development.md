@@ -125,7 +125,7 @@ In another terminal, register that process with the running desktop:
 
 ```sh
 bun run --cwd packages/cli build
-bun run --cwd examples/typescript-agent dev
+(cd examples/typescript-agent && bun ../../packages/cli/dist/cli.js dev)
 ```
 
 The CLI reads `examples/typescript-agent/radius.config.ts`. Its `dev` command
