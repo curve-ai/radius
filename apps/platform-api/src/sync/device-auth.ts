@@ -7,10 +7,9 @@ import {
 
 import { and, eq, isNull } from "drizzle-orm";
 
-import {
-  platformSchema,
-  type PlatformDatabase,
-} from "@curve-ai/platform-database";
+import { platformSchema } from "@curve-ai/platform-database";
+
+import type { PlatformTransaction } from "./owner.js";
 
 const { syncDevices } = platformSchema;
 
@@ -39,7 +38,7 @@ function signatureInput(
  * private key it does not hold.
  */
 export async function verifyDeviceRequest(
-  database: PlatformDatabase,
+  database: PlatformTransaction,
   request: Request,
   membershipId: string,
   body: string | Uint8Array,
