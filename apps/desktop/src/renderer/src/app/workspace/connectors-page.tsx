@@ -1,3 +1,4 @@
+import { thisDevice } from "@renderer/lib/device-name";
 import {
   ArrowLeft,
   ChevronRight,
@@ -129,9 +130,9 @@ function connectionLabel(
 ): string {
   switch (state) {
     case "connected":
-      return "Connected on this Mac";
+      return `Connected on ${thisDevice()}`;
     case "disconnected":
-      return "Disconnected on this Mac";
+      return `Disconnected on ${thisDevice()}`;
     case "needs_authentication":
       return "Authentication required";
     case "error":
@@ -1461,7 +1462,7 @@ function NeedsSetupSection({
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {connector.providers[0]
                   ? connectionLabel(connector.providers[0].connectionState)
-                  : "No account connected on this Mac"}
+                  : `No account connected on ${thisDevice()}`}
               </p>
             </div>
             <Button

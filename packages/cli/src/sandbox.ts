@@ -6,6 +6,7 @@ import { dirname, join, parse } from "node:path";
 import {
   buildPythonOciLayout,
   buildTypeScriptOciLayout,
+  hostImagePlatform,
 } from "@curve-ai/build";
 import {
   MicrovmAcpRuntime,
@@ -39,7 +40,11 @@ export interface BuiltSandboxOptions extends SandboxOptions {
 export async function startSandboxAgent(
   options: SandboxOptions,
 ): Promise<MicrovmAcpRuntime> {
-  if (process.platform !== "darwin" || process.arch !== "arm64") {
+  const windowsX64 = process.platform === "win32" && process.arch === "x64";
+  if (
+    !windowsX64 &&
+    (process.platform !== "darwin" || process.arch !== "arm64")
+  ) {
     throw new Error(
       "Radius sandbox development currently requires Apple Silicon macOS",
     );
@@ -92,6 +97,8 @@ export async function startBuiltSandboxAgent(
     `Imported ${options.build.imageReference}@${loadedDigest} (source manifest ${options.build.imageDigest})`,
   );
 
+  // linux/arm64 with no translation on a Mac, as before; linux/amd64 running natively on Windows x64.
+  const imagePlatform = hostImagePlatform();
   const release = parseAgentReleaseDescriptor({
     schemaVersion: 1,
     agentId: `build-${options.build.buildDigest.slice(0, 16)}`,
@@ -102,8 +109,8 @@ export async function startBuiltSandboxAgent(
     image: {
       reference: options.build.imageReference,
       digest: loadedDigest,
-      platform: "linux/arm64",
-      translation: "none",
+      platform: imagePlatform,
+      translation: imagePlatform === "linux/amd64" ? "native" : "none",
     },
     process: {
       arguments:
@@ -207,6 +214,9 @@ async function resolveDefaultRuntimeAssets(start: string): Promise<{
   runtimeHostPath: string;
   kernelPath: string;
 }> {
+  if (process.platform === "win32") {
+    return resolveWindowsRuntimeAssets(start);
+  }
   let current = start;
   const filesystemRoot = parse(current).root;
   for (;;) {
@@ -249,6 +259,34 @@ async function resolveDefaultRuntimeAssets(start: string): Promise<{
       } catch {
         // Continue to the next installed application location.
       }
+    }
+  }
+  throw new Error(
+    "Could not locate Radius runtime assets. Set RADIUS_RUNTIME_HOST_PATH and RADIUS_KERNEL_PATH.",
+  );
+}
+
+// Windows: the helper (with openvmm.exe beside it) and x64 kernel built in apps/runtime-host-windows.
+async function resolveWindowsRuntimeAssets(start: string): Promise<{
+  runtimeHostPath: string;
+  kernelPath: string;
+}> {
+  let current = start;
+  const filesystemRoot = parse(current).root;
+  for (;;) {
+    const hostRoot = join(current, "apps/runtime-host-windows");
+    try {
+      await access(join(hostRoot, "Config/runtime-assets.json"));
+      return {
+        runtimeHostPath: join(
+          hostRoot,
+          ".build/release/radius-runtime-host.exe",
+        ),
+        kernelPath: join(hostRoot, ".build/runtime-assets/vmlinux-x64"),
+      };
+    } catch {
+      if (current === filesystemRoot) break;
+      current = dirname(current);
     }
   }
   throw new Error(

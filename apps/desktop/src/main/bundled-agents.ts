@@ -19,7 +19,38 @@ interface ImageLoadReport {
 
 let installationPromise: Promise<string[]> | null = null;
 
+/**
+ * Windows: the helper (with openvmm.exe beside it) and the x64 kernel, from
+ * apps/runtime-host-windows or the installer's runtime folder.
+ */
+export function windowsRuntimeAssetPaths(): {
+  runtimeHostPath: string;
+  kernelPath: string;
+} {
+  return app.isPackaged
+    ? {
+        runtimeHostPath: path.join(
+          process.resourcesPath,
+          "runtime/windows-x64/radius-runtime-host.exe",
+        ),
+        kernelPath: path.join(process.resourcesPath, "runtime/vmlinux-x64"),
+      }
+    : {
+        runtimeHostPath: path.resolve(
+          app.getAppPath(),
+          "../runtime-host-windows/.build/release/radius-runtime-host.exe",
+        ),
+        kernelPath: path.resolve(
+          app.getAppPath(),
+          "../runtime-host-windows/.build/runtime-assets/vmlinux-x64",
+        ),
+      };
+}
+
 function runtimeHostPath(): string {
+  if (process.platform === "win32") {
+    return windowsRuntimeAssetPaths().runtimeHostPath;
+  }
   return app.isPackaged
     ? path.join(
         process.resourcesPath,
@@ -214,10 +245,15 @@ export async function resolveAgentReleasePaths(): Promise<string[]> {
 
   const resourceRoot = app.isPackaged
     ? path.join(process.resourcesPath, "agents")
-    : path.resolve(
-        app.getAppPath(),
-        "../runtime-host-macos/.build/provider-assets",
-      );
+    : process.platform === "win32"
+      ? path.resolve(
+          app.getAppPath(),
+          "../runtime-host-windows/.build/provider-assets",
+        )
+      : path.resolve(
+          app.getAppPath(),
+          "../runtime-host-macos/.build/provider-assets",
+        );
   installationPromise ??= installBundledAgents(resourceRoot).catch((error) => {
     installationPromise = null;
     throw error;

@@ -3,13 +3,19 @@ import {
   disconnectAgentAuthentication,
   getAgentAuthenticationSummary,
 } from "@curve-ai/radius-storage";
-import type { AgentReleaseDescriptor } from "@curve-ai/radius-runtime";
+import {
+  microvmRuntimeArguments,
+  parseAgentReleaseDescriptor,
+  type AgentReleaseDescriptor,
+  type MicrovmRuntimePaths,
+} from "@curve-ai/radius-runtime";
 import { app, shell } from "electron";
 import { spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -17,6 +23,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  resolveAgentReleasePaths,
+  windowsRuntimeAssetPaths,
+} from "./bundled-agents";
 import type { StorageContext } from "./storage";
 import {
   applyFxThinkingEffort,
@@ -116,6 +126,66 @@ async function assertFxBinary(): Promise<string> {
   return binaryPath;
 }
 
+/**
+ * Windows has no native fx executable (upstream only ships macOS and Linux archives), so `fx login`
+ * and `fx models` cannot run directly on the host the way they do on a Mac. Instead they run inside
+ * the same kind of disposable microVM that runs an agent session, using the Linux fx binary Windows
+ * already bundles to execute the agent. `homePath` is shared into the VM at /opt/data (the image's
+ * HOME), exactly like the developer state share an agent session uses, so fx's login/model-cache
+ * files land back on the host without any extra plumbing.
+ */
+async function resolveFxRelease(): Promise<AgentReleaseDescriptor> {
+  for (const releasePath of await resolveAgentReleasePaths()) {
+    const release = parseAgentReleaseDescriptor(
+      JSON.parse(await readFile(releasePath, "utf8")),
+    );
+    if (release.agentId === FX_AGENT_ID) return release;
+  }
+  throw new Error("FX_BINARY_NOT_INSTALLED");
+}
+
+function windowsFxMicrovmPaths(
+  release: AgentReleaseDescriptor,
+): MicrovmRuntimePaths {
+  const runtimeRoot = app.isPackaged
+    ? path.join(app.getPath("userData"), "runtime", release.agentId)
+    : path.join(app.getPath("appData"), "Radius/dev/runtime/fx-image-store");
+  return { ...windowsRuntimeAssetPaths(), runtimeRoot };
+}
+
+/** The fixed local port fx's own OAuth flow listens on and redirects the browser back to. */
+const FX_OAUTH_CALLBACK_PORT = 1455;
+
+function windowsFxCommandArguments(
+  release: AgentReleaseDescriptor,
+  homePath: string,
+  args: string[],
+  options: { login?: boolean },
+): { runtimeHostPath: string; argv: string[] } {
+  const paths: MicrovmRuntimePaths = {
+    ...windowsFxMicrovmPaths(release),
+    developerStateSharePath: homePath,
+    developerStateShareUser: "10000:10000",
+  };
+  const argv = microvmRuntimeArguments({
+    release: {
+      ...release,
+      process: {
+        ...release.process,
+        arguments: ["/usr/local/bin/agent", ...args],
+      },
+    },
+    paths,
+    // IPv4 only: consomme accepts on an IPv6 host address and then resets, and a reset is a hard failure
+    // that stops Chromium falling back, while no IPv6 listener at all refuses its first attempt and it
+    // retries on 127.0.0.1. The guest init relays the forwarded port to the agent's own loopback.
+    portForward: options.login
+      ? `hostfwd=tcp:127.0.0.1:${FX_OAUTH_CALLBACK_PORT}-:${FX_OAUTH_CALLBACK_PORT}`
+      : undefined,
+  });
+  return { runtimeHostPath: paths.runtimeHostPath, argv };
+}
+
 function minimalFxEnvironment(homePath: string): NodeJS.ProcessEnv {
   return {
     HOME: homePath,
@@ -139,11 +209,26 @@ async function runFx(
   args: string[],
   options: { login?: boolean } = {},
 ): Promise<{ stdout: string; stderr: string }> {
-  const binaryPath = await assertFxBinary();
-  return new Promise((resolve, reject) => {
-    const child = spawn(binaryPath, args, {
-      cwd: app.getPath("userData"),
+  let spawned: { command: string; argv: string[]; env: NodeJS.ProcessEnv };
+  if (process.platform === "win32") {
+    const { runtimeHostPath, argv } = windowsFxCommandArguments(
+      await resolveFxRelease(),
+      homePath,
+      args,
+      options,
+    );
+    spawned = { command: runtimeHostPath, argv, env: process.env };
+  } else {
+    spawned = {
+      command: await assertFxBinary(),
+      argv: args,
       env: minimalFxEnvironment(homePath),
+    };
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn(spawned.command, spawned.argv, {
+      cwd: app.getPath("userData"),
+      env: spawned.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -315,6 +400,26 @@ async function removeMaterializedProfile(root: string): Promise<void> {
   await rm(target, { force: true, recursive: true });
 }
 
+/**
+ * Every temporary profile is removed when its run ends, so one that is still here at startup was left by
+ * a run the app never finished — it was killed or crashed mid-run — and may still hold a credential.
+ * Call before anything can start a run. Windows only; macOS keeps its existing startup behavior.
+ */
+export async function removeOrphanedFxProfiles(): Promise<void> {
+  if (process.platform !== "win32") return;
+  const parent = path.join(app.getPath("userData"), "runtime-auth");
+  const names = await readdir(parent).catch(() => []);
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith("fx-"))
+      .map((name) =>
+        rm(path.join(parent, name), { force: true, recursive: true }).catch(
+          (error) => console.error("[fx-auth] orphaned profile remains", error),
+        ),
+      ),
+  );
+}
+
 async function withFxProfile<T>(
   context: StorageContext,
   requireCredential: boolean,
@@ -383,6 +488,13 @@ export async function connectFxCodex(
   }
   try {
     await runFx(profile.root, ["login", "codex"], { login: true });
+    // Windows bundles a newer fx whose sign-in no longer selects the provider, so without this it keeps its
+    // default, the Vercel AI Gateway, and every prompt fails with the Gateway's "requires a valid credit
+    // card" error. The choice lands in the profile's settings.json, which the capture below seals alongside
+    // the credential. macOS keeps its bundled fx and its existing sign-in flow.
+    if (process.platform === "win32") {
+      await runFx(profile.root, ["provider", "codex"]);
+    }
     const metadata = await captureAndSealProfile(context, profile.root);
     await connectAgentAuthenticationAccount(context.database, {
       installationId,
@@ -473,7 +585,10 @@ export async function getFxAuthenticationStatus(
           ? "expired"
           : "connected",
       accountLabel: "Codex subscription",
-      detail: "Authenticated on this Mac",
+      detail:
+        process.platform === "darwin"
+          ? "Authenticated on this Mac"
+          : "Authenticated on this device",
       models,
       defaultModelId: preferredModel(models),
     });

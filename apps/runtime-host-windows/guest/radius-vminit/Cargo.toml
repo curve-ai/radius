@@ -1,0 +1,18 @@
+[package]
+name = "radius-vminit"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Guest init for the Radius Windows runtime host: prepares the Linux VM, locks down the agent process and starts it."
+
+[dependencies]
+libc = "=0.2.184"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.143"
+
+[profile.release]
+panic = "abort"
+strip = true
+lto = true
+opt-level = "s"

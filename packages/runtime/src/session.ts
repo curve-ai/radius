@@ -139,7 +139,15 @@ export type AcpRuntimeSessionStart =
   | { kind: "new" }
   | { kind: "load"; sessionId: string }
   | { kind: "resume"; sessionId: string }
-  | { kind: "auto"; sessionId: string };
+  | {
+      kind: "auto";
+      sessionId: string;
+      /**
+       * Also start fresh when the agent answers with a bare "Session not found" that does not name the
+       * session, as the Windows fx build does. Off by default so other hosts keep the strict check.
+       */
+      newOnBareMissingSession?: boolean;
+    };
 
 export type AcpRuntimeSessionLifecycle = "new" | "load" | "resume";
 
@@ -502,7 +510,14 @@ export class AcpRuntimeSession {
                 ),
               };
             } catch (error) {
-              if (!isMissingSessionError(error, start.sessionId)) throw error;
+              if (
+                !isMissingSessionError(
+                  error,
+                  start.sessionId,
+                  start.newOnBareMissingSession === true,
+                )
+              )
+                throw error;
             }
           }
           if (
@@ -520,7 +535,14 @@ export class AcpRuntimeSession {
                 ),
               };
             } catch (error) {
-              if (!isMissingSessionError(error, start.sessionId)) throw error;
+              if (
+                !isMissingSessionError(
+                  error,
+                  start.sessionId,
+                  start.newOnBareMissingSession === true,
+                )
+              )
+                throw error;
             } finally {
               updateState.replaying = false;
             }
@@ -820,9 +842,21 @@ async function authenticateIfRequested(
   });
 }
 
-function isMissingSessionError(error: unknown, sessionId: string): boolean {
+function isMissingSessionError(
+  error: unknown,
+  sessionId: string,
+  acceptBareMissingSession = false,
+): boolean {
   if (!(error instanceof RequestError)) return false;
   const message = error.message.toLowerCase();
+  if (
+    acceptBareMissingSession &&
+    (error.code === -32602 || error.code === -32603) &&
+    error.data === undefined &&
+    message.trim() === "session not found"
+  ) {
+    return true;
+  }
   const normalizedSessionId = sessionId.toLowerCase();
   const data = error.data;
   const dataMatches =

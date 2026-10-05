@@ -21,6 +21,7 @@ import {
   type AgentManifest,
 } from "@curve-ai/agent-contracts";
 
+import { hostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 
 const PYTHON_IMAGE =
@@ -138,27 +139,39 @@ export async function buildPythonOciLayout(
     await writeFile(join(contextPath, "manifest.json"), manifestJson, "utf8");
 
     const imageTarPath = join(temporaryRoot, "image.oci.tar");
+    // Windows: Docker Desktop's default builder cannot write an OCI archive, so
+    // the image is loaded into Docker and exported with `docker save`, which
+    // writes the same OCI layout. Other computers keep the direct export.
+    const loadAndSave = process.platform === "win32";
     await runCommand(
       options.dockerExecutable ?? "docker",
       [
         "buildx",
         "build",
         "--platform",
-        "linux/arm64",
+        hostImagePlatform(),
         "--provenance=false",
         "--sbom=false",
         "--build-arg",
         "SOURCE_DATE_EPOCH=0",
         "--tag",
         imageReference,
-        "--output",
-        `type=oci,dest=${imageTarPath}`,
+        ...(loadAndSave
+          ? ["--load"]
+          : ["--output", `type=oci,dest=${imageTarPath}`]),
         "--file",
         join(contextPath, "Containerfile"),
         contextPath,
       ],
       options.root,
     );
+    if (loadAndSave) {
+      await runCommand(
+        options.dockerExecutable ?? "docker",
+        ["save", "--output", imageTarPath, imageReference],
+        options.root,
+      );
+    }
 
     const layoutPath = join(temporaryRoot, "oci-layout");
     await mkdir(layoutPath, { recursive: true });
