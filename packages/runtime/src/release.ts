@@ -18,7 +18,8 @@ export const AgentReleaseDescriptorSchema = z
       reference: z.string().trim().min(1),
       digest: sha256Digest,
       platform: z.enum(["linux/arm64", "linux/amd64"]),
-      translation: z.enum(["none", "rosetta"]),
+      // "native": a linux/amd64 image that runs without translation (Windows x64).
+      translation: z.enum(["none", "rosetta", "native"]),
     }),
     process: z.object({
       arguments: z.array(z.string().min(1)).min(1),
@@ -100,7 +101,8 @@ export const AgentReleaseDescriptorSchema = z
   .superRefine((release, context) => {
     if (
       release.image.platform === "linux/amd64" &&
-      release.image.translation !== "rosetta"
+      release.image.translation !== "rosetta" &&
+      release.image.translation !== "native"
     ) {
       context.addIssue({
         code: "custom",

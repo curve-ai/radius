@@ -1226,3 +1226,49 @@ test("exposes the negotiated protocol version", async () => {
     runtime.close();
   }
 });
+
+test("starts fresh on a bare missing-session error only when the caller opts in", async () => {
+  // Windows fx answers session/load for a session it no longer holds with a bare "Session not found".
+  const bareMissingSessionAgent = () =>
+    agent({ name: "bare-missing-session-agent" })
+      .onRequest(methods.agent.initialize, () => ({
+        protocolVersion: PROTOCOL_VERSION,
+        agentCapabilities: { loadSession: true },
+      }))
+      .onRequest(methods.agent.session.load, () => {
+        throw new RequestError(-32602, "Session not found");
+      })
+      .onRequest(methods.agent.session.new, () => ({
+        sessionId: "provider-session-fresh",
+        configOptions: [],
+      }));
+  const handlers = {
+    onPermissionRequest: async () => ({ outcome: "cancelled" }) as const,
+    onUpdate: () => {},
+  };
+
+  const runtime = await connectAcpRuntime(bareMissingSessionAgent(), {
+    cwd: "/tmp/radius-missing",
+    session: {
+      kind: "auto",
+      sessionId: "provider-session-gone",
+      newOnBareMissingSession: true,
+    },
+    handlers,
+  });
+  try {
+    assert.equal(runtime.lifecycle, "new");
+    assert.equal(runtime.sessionId, "provider-session-fresh");
+  } finally {
+    runtime.close();
+  }
+
+  await assert.rejects(
+    connectAcpRuntime(bareMissingSessionAgent(), {
+      cwd: "/tmp/radius-missing",
+      session: { kind: "auto", sessionId: "provider-session-gone" },
+      handlers,
+    }),
+    /Session not found/,
+  );
+});

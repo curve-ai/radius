@@ -145,6 +145,30 @@
           "to": "agents"
         }
       ]
+    },
+    "win": {
+      "extraResources": [
+        {
+          "from": "../runtime-host-windows/.build/release/radius-runtime-host.exe",
+          "to": "runtime/windows-x64/radius-runtime-host.exe"
+        },
+        {
+          "from": "../runtime-host-windows/.build/release/openvmm.exe",
+          "to": "runtime/windows-x64/openvmm.exe"
+        },
+        {
+          "from": "../runtime-host-windows/Config/runtime-assets.json",
+          "to": "runtime/runtime-assets.json"
+        },
+        {
+          "from": "../runtime-host-windows/.build/runtime-assets/vmlinux-x64",
+          "to": "runtime/vmlinux-x64"
+        },
+        {
+          "from": "../runtime-host-windows/.build/provider-assets",
+          "to": "agents"
+        }
+      ]
     }
   }
 }

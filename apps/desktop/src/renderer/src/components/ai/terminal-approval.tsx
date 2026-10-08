@@ -1,3 +1,4 @@
+import { thisDevice } from "@renderer/lib/device-name";
 import {
   FileText,
   FolderOpen,
@@ -103,7 +104,7 @@ function approvalDetails(event: ToolCallEvent): ApprovalDetails | null {
     description:
       input.outsideProjectRoots === true
         ? "This command needs read and write access outside the project folders."
-        : "Review the command before Radius runs it on this Mac.",
+        : `Review the command before Radius runs it on ${thisDevice()}.`,
     path: input.cwd,
     outsideProjectRoots: input.outsideProjectRoots === true,
     title: "Command approval required",

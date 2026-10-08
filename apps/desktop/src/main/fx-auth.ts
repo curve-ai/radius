@@ -3,13 +3,19 @@ import {
   disconnectAgentAuthentication,
   getAgentAuthenticationSummary,
 } from "@curve-ai/radius-storage";
-import type { AgentReleaseDescriptor } from "@curve-ai/radius-runtime";
+import {
+  microvmRuntimeArguments,
+  parseAgentReleaseDescriptor,
+  type AgentReleaseDescriptor,
+  type MicrovmRuntimePaths,
+} from "@curve-ai/radius-runtime";
 import { app, shell } from "electron";
 import { spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -17,6 +23,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  resolveAgentReleasePaths,
+  windowsRuntimeAssetPaths,
+} from "./bundled-agents";
 import type { StorageContext } from "./storage";
 import {
   applyFxThinkingEffort,
@@ -116,6 +126,57 @@ async function assertFxBinary(): Promise<string> {
   return binaryPath;
 }
 
+// Windows has no fx binary, so fx runs inside a VM with homePath shared at /opt/data.
+async function resolveFxRelease(): Promise<AgentReleaseDescriptor> {
+  for (const releasePath of await resolveAgentReleasePaths()) {
+    const release = parseAgentReleaseDescriptor(
+      JSON.parse(await readFile(releasePath, "utf8")),
+    );
+    if (release.agentId === FX_AGENT_ID) return release;
+  }
+  throw new Error("FX_BINARY_NOT_INSTALLED");
+}
+
+function windowsFxMicrovmPaths(
+  release: AgentReleaseDescriptor,
+): MicrovmRuntimePaths {
+  const runtimeRoot = app.isPackaged
+    ? path.join(app.getPath("userData"), "runtime", release.agentId)
+    : path.join(app.getPath("appData"), "Radius/dev/runtime/fx-image-store");
+  return { ...windowsRuntimeAssetPaths(), runtimeRoot };
+}
+
+/** The fixed local port fx's own OAuth flow listens on and redirects the browser back to. */
+const FX_OAUTH_CALLBACK_PORT = 1455;
+
+function windowsFxCommandArguments(
+  release: AgentReleaseDescriptor,
+  homePath: string,
+  args: string[],
+  options: { login?: boolean },
+): { runtimeHostPath: string; argv: string[] } {
+  const paths: MicrovmRuntimePaths = {
+    ...windowsFxMicrovmPaths(release),
+    developerStateSharePath: homePath,
+    developerStateShareUser: "10000:10000",
+  };
+  const argv = microvmRuntimeArguments({
+    release: {
+      ...release,
+      process: {
+        ...release.process,
+        arguments: ["/usr/local/bin/agent", ...args],
+      },
+    },
+    paths,
+    // IPv4 only: an IPv6 attempt is reset, which stops the browser retrying on IPv4.
+    portForward: options.login
+      ? `hostfwd=tcp:127.0.0.1:${FX_OAUTH_CALLBACK_PORT}-:${FX_OAUTH_CALLBACK_PORT}`
+      : undefined,
+  });
+  return { runtimeHostPath: paths.runtimeHostPath, argv };
+}
+
 function minimalFxEnvironment(homePath: string): NodeJS.ProcessEnv {
   return {
     HOME: homePath,
@@ -139,11 +200,26 @@ async function runFx(
   args: string[],
   options: { login?: boolean } = {},
 ): Promise<{ stdout: string; stderr: string }> {
-  const binaryPath = await assertFxBinary();
-  return new Promise((resolve, reject) => {
-    const child = spawn(binaryPath, args, {
-      cwd: app.getPath("userData"),
+  let spawned: { command: string; argv: string[]; env: NodeJS.ProcessEnv };
+  if (process.platform === "win32") {
+    const { runtimeHostPath, argv } = windowsFxCommandArguments(
+      await resolveFxRelease(),
+      homePath,
+      args,
+      options,
+    );
+    spawned = { command: runtimeHostPath, argv, env: process.env };
+  } else {
+    spawned = {
+      command: await assertFxBinary(),
+      argv: args,
       env: minimalFxEnvironment(homePath),
+    };
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn(spawned.command, spawned.argv, {
+      cwd: app.getPath("userData"),
+      env: spawned.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -315,6 +391,22 @@ async function removeMaterializedProfile(root: string): Promise<void> {
   await rm(target, { force: true, recursive: true });
 }
 
+/** Deletes sign-in folders left by runs that were killed, since they may hold a credential. */
+export async function removeOrphanedFxProfiles(): Promise<void> {
+  if (process.platform !== "win32") return;
+  const parent = path.join(app.getPath("userData"), "runtime-auth");
+  const names = await readdir(parent).catch(() => []);
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith("fx-"))
+      .map((name) =>
+        rm(path.join(parent, name), { force: true, recursive: true }).catch(
+          (error) => console.error("[fx-auth] orphaned profile remains", error),
+        ),
+      ),
+  );
+}
+
 async function withFxProfile<T>(
   context: StorageContext,
   requireCredential: boolean,
@@ -383,6 +475,10 @@ export async function connectFxCodex(
   }
   try {
     await runFx(profile.root, ["login", "codex"], { login: true });
+    // Newer fx no longer picks the provider at sign-in; without this it uses the Vercel AI Gateway.
+    if (process.platform === "win32") {
+      await runFx(profile.root, ["provider", "codex"]);
+    }
     const metadata = await captureAndSealProfile(context, profile.root);
     await connectAgentAuthenticationAccount(context.database, {
       installationId,
@@ -473,7 +569,10 @@ export async function getFxAuthenticationStatus(
           ? "expired"
           : "connected",
       accountLabel: "Codex subscription",
-      detail: "Authenticated on this Mac",
+      detail:
+        process.platform === "darwin"
+          ? "Authenticated on this Mac"
+          : "Authenticated on this device",
       models,
       defaultModelId: preferredModel(models),
     });

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "openvmmRevision": "a66e4f8345d304f78cd2059a80d72c77f3265086",
+  "kernel": {
+    "archiveUrl": "https://github.com/kata-containers/kata-containers/releases/download/3.28.0/kata-static-3.28.0-amd64.tar.zst",
+    "archiveSha256": "99cefb46d70bc27b7bcffd7595be9010c6bed43e1cdfcf8078554c19e7c9b19d",
+    "binaryPath": "./opt/kata/share/kata-containers/vmlinux-6.18.15-186",
+    "binarySha256": "4da27c70b7a357186adfb6617efa48d66e660d805a79eb5806d1c650c8031556"
+  }
+}

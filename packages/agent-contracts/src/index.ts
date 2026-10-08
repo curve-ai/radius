@@ -183,7 +183,7 @@ export const AgentBuildReceiptSchema = z.object({
   verifiedAt: z.string().datetime(),
   verification: z.object({
     kind: z.literal("microvm-acp"),
-    platform: z.literal("linux/arm64"),
+    platform: z.enum(["linux/arm64", "linux/amd64"]),
   }),
 });
 

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "agents": [
+    {
+      "project": "proj_radius_fx",
+      "imageLayout": "fx/oci-layout"
+    }
+  ]
+}

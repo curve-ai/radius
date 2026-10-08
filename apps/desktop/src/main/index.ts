@@ -23,6 +23,7 @@ import path from "node:path";
 import { DESKTOP_UPDATE_CHANNELS } from "../update-types";
 import { AGENTS_CHANGED_CHANNEL } from "../radius-api";
 import { initializeBundledAgents } from "./bundled-agents";
+import { removeOrphanedFxProfiles } from "./fx-auth";
 import {
   initializeDevelopmentAgentConnections,
   stopDevelopmentAgentConnections,
@@ -226,6 +227,7 @@ app.whenReady().then(async () => {
   if (!primaryInstance) return;
   app.setAppUserModelId(distribution?.id ?? "ai.curve.radius");
   try {
+    await removeOrphanedFxProfiles();
     const storageContext = await initializeStorage();
     void reportPlatformClientInstallation(storageContext).catch((error) => {
       console.error(
