@@ -90,9 +90,7 @@ export async function buildTypeScriptOciLayout(
     await writeFile(join(contextPath, "manifest.json"), manifestJson, "utf8");
 
     const imageTarPath = join(temporaryRoot, "image.oci.tar");
-    // Windows: Docker Desktop's default builder cannot write an OCI archive, so
-    // the image is loaded into Docker and exported with `docker save`, which
-    // writes the same OCI layout. Other computers keep the direct export.
+    // Docker Desktop's default builder cannot export OCI, so load then docker save.
     const loadAndSave = process.platform === "win32";
     await runCommand(
       options.dockerExecutable ?? "docker",

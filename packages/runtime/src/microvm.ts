@@ -184,10 +184,7 @@ export class MicrovmAcpRuntime {
 
 export function microvmRuntimeArguments(
   options: Pick<StartMicrovmAcpOptions, "release" | "paths" | "containerId"> & {
-    /**
-     * Windows only: an OpenVMM consomme `hostfwd=` spec forwarding host ports to the agent's own loopback
-     * inside the guest, where an OAuth redirect server listens. The guest init relays every entry's port.
-     */
+    /** OpenVMM hostfwd= spec; the guest relays each port to the agent's 127.0.0.1. */
     portForward?: string;
   },
 ): string[] {

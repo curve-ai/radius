@@ -142,10 +142,7 @@ export type AcpRuntimeSessionStart =
   | {
       kind: "auto";
       sessionId: string;
-      /**
-       * Also start fresh when the agent answers with a bare "Session not found" that does not name the
-       * session, as the Windows fx build does. Off by default so other hosts keep the strict check.
-       */
+      /** Also start fresh on a bare "Session not found" (Windows fx). Off by default. */
       newOnBareMissingSession?: boolean;
     };
 

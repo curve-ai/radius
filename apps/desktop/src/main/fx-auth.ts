@@ -126,14 +126,7 @@ async function assertFxBinary(): Promise<string> {
   return binaryPath;
 }
 
-/**
- * Windows has no native fx executable (upstream only ships macOS and Linux archives), so `fx login`
- * and `fx models` cannot run directly on the host the way they do on a Mac. Instead they run inside
- * the same kind of disposable microVM that runs an agent session, using the Linux fx binary Windows
- * already bundles to execute the agent. `homePath` is shared into the VM at /opt/data (the image's
- * HOME), exactly like the developer state share an agent session uses, so fx's login/model-cache
- * files land back on the host without any extra plumbing.
- */
+// Windows has no fx binary, so fx runs inside a VM with homePath shared at /opt/data.
 async function resolveFxRelease(): Promise<AgentReleaseDescriptor> {
   for (const releasePath of await resolveAgentReleasePaths()) {
     const release = parseAgentReleaseDescriptor(
@@ -176,9 +169,7 @@ function windowsFxCommandArguments(
       },
     },
     paths,
-    // IPv4 only: consomme accepts on an IPv6 host address and then resets, and a reset is a hard failure
-    // that stops Chromium falling back, while no IPv6 listener at all refuses its first attempt and it
-    // retries on 127.0.0.1. The guest init relays the forwarded port to the agent's own loopback.
+    // IPv4 only: an IPv6 attempt is reset, which stops the browser retrying on IPv4.
     portForward: options.login
       ? `hostfwd=tcp:127.0.0.1:${FX_OAUTH_CALLBACK_PORT}-:${FX_OAUTH_CALLBACK_PORT}`
       : undefined,
@@ -400,11 +391,7 @@ async function removeMaterializedProfile(root: string): Promise<void> {
   await rm(target, { force: true, recursive: true });
 }
 
-/**
- * Every temporary profile is removed when its run ends, so one that is still here at startup was left by
- * a run the app never finished — it was killed or crashed mid-run — and may still hold a credential.
- * Call before anything can start a run. Windows only; macOS keeps its existing startup behavior.
- */
+/** Deletes sign-in folders left by runs that were killed, since they may hold a credential. */
 export async function removeOrphanedFxProfiles(): Promise<void> {
   if (process.platform !== "win32") return;
   const parent = path.join(app.getPath("userData"), "runtime-auth");
@@ -488,10 +475,7 @@ export async function connectFxCodex(
   }
   try {
     await runFx(profile.root, ["login", "codex"], { login: true });
-    // Windows bundles a newer fx whose sign-in no longer selects the provider, so without this it keeps its
-    // default, the Vercel AI Gateway, and every prompt fails with the Gateway's "requires a valid credit
-    // card" error. The choice lands in the profile's settings.json, which the capture below seals alongside
-    // the credential. macOS keeps its bundled fx and its existing sign-in flow.
+    // Newer fx no longer picks the provider at sign-in; without this it uses the Vercel AI Gateway.
     if (process.platform === "win32") {
       await runFx(profile.root, ["provider", "codex"]);
     }

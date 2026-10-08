@@ -19,10 +19,7 @@ interface ImageLoadReport {
 
 let installationPromise: Promise<string[]> | null = null;
 
-/**
- * Windows: the helper (with openvmm.exe beside it) and the x64 kernel, from
- * apps/runtime-host-windows or the installer's runtime folder.
- */
+/** The Windows helper (openvmm.exe beside it) and x64 kernel, packaged or from the repo. */
 export function windowsRuntimeAssetPaths(): {
   runtimeHostPath: string;
   kernelPath: string;
