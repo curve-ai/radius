@@ -282,6 +282,21 @@ export const AgentBuildReceiptSchema = z.object({
   layoutPath: RelativeProjectPathSchema,
   contextPath: RelativeProjectPathSchema,
   manifest: AgentManifestSchema,
+  /**
+   * What the layout carries, so a downstream step does not have to reopen the
+   * image to find out what was just built. Optional, because a receipt written
+   * before this existed is still a valid receipt.
+   */
+  release: z
+    .object({
+      /** `<config version>+<buildDigest[:16]>`. */
+      version: z.string().trim().min(1),
+      /** Whether the OCI config carries the embedded release template. */
+      templateEmbedded: z.boolean(),
+      /** Where the bundled-agent index entry sits, relative to the project. */
+      indexPath: RelativeProjectPathSchema,
+    })
+    .optional(),
   verifiedAt: z.string().datetime(),
   verification: z.object({
     kind: z.literal("microvm-acp"),
