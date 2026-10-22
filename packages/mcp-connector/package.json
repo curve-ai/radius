@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@curve-ai/radius-connector-protocol": "0.0.1",
-    "@modelcontextprotocol/client": "2.0.0"
+    "@modelcontextprotocol/client": "2.3.1"
   },
   "devDependencies": {
     "@types/node": "22.19.1",
