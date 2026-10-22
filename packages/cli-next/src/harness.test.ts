@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { gzipSync } from "node:zlib";
 
 import { AgentConfigSchema } from "@curve-ai/agent-contracts";
 
@@ -24,30 +24,43 @@ function config(platforms: Record<string, unknown>) {
 }
 
 /**
- * Builds a tarball. `storedAs` renames the entry inside the archive via tar's
- * -s, which is the only way to produce a traversal path: the filesystem will
- * not let us create a file called `../escaped` to add in the first place.
+ * Writes a gzipped ustar archive directly, rather than shelling out to `tar`.
+ *
+ * The traversal case needs an entry literally named `../escaped`, which the
+ * filesystem will not let us create and which only BSD tar can fake with -s.
+ * GNU tar uses --transform and Windows tar neither — so building the bytes
+ * here is the only way this test runs the same everywhere.
  */
 async function tarball(
-  name: string,
+  storedName: string,
   body: string,
-  storedAs?: string,
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "radius-tar-"));
-  const stage = join(root, "stage");
-  await mkdir(stage, { recursive: true });
-  await writeFile(join(stage, name), body);
   const archive = join(root, "a.tar.gz");
-  const args = ["czf", archive];
-  if (storedAs) args.push("-s", `|^${name}|${storedAs}|`);
-  args.push("-C", stage, name);
-  await new Promise<void>((settle, reject) => {
-    const child = spawn("tar", args, { stdio: "ignore" });
-    child.once("error", reject);
-    child.once("exit", (code) =>
-      code === 0 ? settle() : reject(new Error(`tar exited ${String(code)}`)),
-    );
-  });
+
+  const content = Buffer.from(body, "utf8");
+  const header = Buffer.alloc(512);
+  header.write(storedName, 0, 100, "utf8");
+  header.write("0000644\0", 100, 8, "utf8"); // mode
+  header.write("0000000\0", 108, 8, "utf8"); // uid
+  header.write("0000000\0", 116, 8, "utf8"); // gid
+  header.write(`${content.length.toString(8).padStart(11, "0")}\0`, 124, 12, "utf8");
+  header.write(`${(0).toString(8).padStart(11, "0")}\0`, 136, 12, "utf8"); // mtime
+  header.write("        ", 148, 8, "utf8"); // checksum placeholder: spaces
+  header.write("0", 156, 1, "utf8"); // typeflag: regular file
+  header.write("ustar\0", 257, 6, "utf8");
+  header.write("00", 263, 2, "utf8");
+
+  let checksum = 0;
+  for (const byte of header) checksum += byte;
+  header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8, "utf8");
+
+  const padding = Buffer.alloc((512 - (content.length % 512)) % 512);
+  const trailer = Buffer.alloc(1024); // two empty blocks end the archive
+  await writeFile(
+    archive,
+    gzipSync(Buffer.concat([header, content, padding, trailer])),
+  );
   return archive;
 }
 
@@ -88,7 +101,7 @@ test("a URL archive without a digest is refused by the schema", () => {
 });
 
 test("an archive that escapes its directory is refused before extraction", async () => {
-  const archive = await tarball("escaped", "owned\n", "../escaped");
+  const archive = await tarball("../escaped", "owned\n");
   const parsed = config({ "darwin/arm64": { archive } });
   await assert.rejects(
     () =>
