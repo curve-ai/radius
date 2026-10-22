@@ -96,6 +96,8 @@ test("prepares, uploads, and finalizes one exact remote deployment", async () =>
         },
       }),
       bundleSha256: "c".repeat(64),
+      releaseVersion: `0.0.0+${"a".repeat(16)}`,
+      indexPath: join(root, ".radius", "builds", "index.json"),
     },
     pushOci: async () => `sha256:${"d".repeat(64)}`,
     io: { out: (message) => output.push(message), error: () => undefined },
