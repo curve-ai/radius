@@ -11,7 +11,7 @@ import { OperationalError } from "./errors.js";
  *
  * Every ACP harness speaks stdio, but `DevelopmentAgentConnectionSchema`
  * admits only a `ws://` endpoint, so the descriptor the desktop watches cannot
- * name a process. Until that schema gains a transport union (CUR-42), the CLI
+ * name a process. Until that schema gains a transport union, the CLI
  * closes the gap here and the desktop stays unchanged.
  */
 export interface Bridge {

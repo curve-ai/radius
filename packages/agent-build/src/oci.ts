@@ -18,9 +18,26 @@ import {
 import { build } from "esbuild";
 
 import { canonicalJson, createAgentManifest } from "./manifest.js";
+import {
+  releaseTemplateLabels,
+  synthesiseReleaseTemplate,
+} from "./release-template.js";
+import { writeImportableLayout } from "./importable.js";
 
 const NODE_IMAGE =
   "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5";
+
+/**
+ * Compressed size of the pinned base image's layers, measured once.
+ *
+ * `rootfsMb` has to go into the release template, which is embedded in the
+ * image being built — so it cannot be measured from that image's own output.
+ * The base is pinned by digest, so its size is a constant that changes only
+ * when the digest above changes; the agent bundle is the only variable, and
+ * its size is known before the build. The post-build check in
+ * `writeImportableLayout` fails loudly if this estimate ever undershoots.
+ */
+const BASE_IMAGE_COMPRESSED_BYTES = 80_000_000;
 
 export interface TypeScriptOciBuildOptions {
   root: string;
@@ -37,6 +54,10 @@ export interface TypeScriptOciBuildResult {
   contextPath: string;
   manifest: AgentManifest;
   bundleSha256: string;
+  /** The release version embedded in the layout, `<version>+<digest16>`. */
+  releaseVersion: string;
+  /** Where the bundled-agent index entry was written. */
+  indexPath: string;
 }
 
 export async function buildTypeScriptOciLayout(
@@ -81,6 +102,19 @@ export async function buildTypeScriptOciLayout(
       .digest("hex");
     const imageReference = `radius.local/dev/${safeImageName(config.name)}:${buildDigest.slice(0, 16)}`;
 
+    // The template is computed before the image is built, because it has to be
+    // embedded in that image's config as a label. Everything it needs —
+    // buildDigest, reference, config — is known at this point.
+    const template = synthesiseReleaseTemplate({
+      config,
+      buildDigest,
+      imageReference,
+      platform: "linux/arm64",
+      processArguments: ["node", "/opt/agent/agent.mjs"],
+      imageSizeMb: estimateImageMb(bundle.byteLength),
+    });
+    const labels = releaseTemplateLabels(template);
+
     await writeFile(
       join(contextPath, "Containerfile"),
       renderTypeScriptContainerfile(),
@@ -102,6 +136,10 @@ export async function buildTypeScriptOciLayout(
         "SOURCE_DATE_EPOCH=0",
         "--tag",
         imageReference,
+        ...Object.entries(labels).flatMap(([key, value]) => [
+          "--label",
+          `${key}=${value}`,
+        ]),
         "--output",
         `type=oci,dest=${imageTarPath}`,
         "--file",
@@ -120,14 +158,22 @@ export async function buildTypeScriptOciLayout(
     );
     await rm(imageTarPath, { force: true });
 
-    const index = JSON.parse(
-      await readFile(join(layoutPath, "index.json"), "utf8"),
-    ) as {
-      manifests?: Array<{ digest?: string }>;
-    };
-    const imageDigest = index.manifests?.[0]?.digest;
-    if (!imageDigest || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)) {
-      throw new Error("OCI build did not produce a digest-pinned manifest");
+    const { imageDigest, imageSizeMb } = await writeImportableLayout({
+      layoutPath,
+      imageReference,
+      platform: "linux/arm64",
+      agentId: config.agent!,
+      outputRoot: temporaryRoot,
+    });
+
+    // The template claimed a rootfs size before the image existed. If the
+    // built image is larger than claimed, the guest would not boot — so fail
+    // here rather than ship a layout that cannot start.
+    const claimedMb = estimateImageMb(bundle.byteLength);
+    if (imageSizeMb > claimedMb) {
+      throw new Error(
+        `Built image is larger than the release template claims (${Math.ceil(imageSizeMb)}MB > ${claimedMb}MB). Raise BASE_IMAGE_COMPRESSED_BYTES in oci.ts.`,
+      );
     }
 
     const finalRoot = join(outputRoot, buildDigest);
@@ -136,16 +182,25 @@ export async function buildTypeScriptOciLayout(
     return {
       buildDigest,
       imageReference,
-      imageDigest: imageDigest as `sha256:${string}`,
+      imageDigest,
       layoutPath: join(finalRoot, "oci-layout"),
       contextPath: join(finalRoot, "context"),
       manifest,
       bundleSha256,
+      releaseVersion: String(template.releaseVersion),
+      indexPath: join(finalRoot, "index.json"),
     };
   } catch (error) {
     await rm(temporaryRoot, { recursive: true, force: true });
     throw error;
   }
+}
+
+/** Deterministic: pinned base plus the bundle, decompressed generously. */
+export function estimateImageMb(bundleBytes: number): number {
+  return Math.ceil(
+    ((BASE_IMAGE_COMPRESSED_BYTES + bundleBytes) * 4) / (1024 * 1024),
+  );
 }
 
 export function renderTypeScriptContainerfile(): string {
