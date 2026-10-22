@@ -95,9 +95,7 @@ function isClientDataFault(error: unknown): boolean {
   return false;
 }
 
-type PlatformTransaction = Parameters<
-  Parameters<PlatformDatabase["transaction"]>[0]
->[0];
+import { withSyncOwner, type PlatformTransaction } from "./owner.js";
 
 async function insertArtifacts(
   transaction: PlatformTransaction,
@@ -472,7 +470,7 @@ async function applyOneChange(
   deviceId: string,
   change: SyncChangeEnvelope,
 ): Promise<ChangeResult> {
-  return database.transaction(async (transaction) => {
+  return withSyncOwner(database, owner, async (transaction) => {
     // Serialize one membership's writes against each other. Change sequences
     // are handed out at insert time but become visible at commit time, so
     // without this two concurrent pushes can commit out of order and a pull
@@ -716,7 +714,8 @@ export async function pullSyncChanges(
   limit: number,
 ): Promise<{ changes: SyncChangeEnvelope[]; nextCursor: string | null }> {
   const after = cursor ? decodeCursor(cursor) : null;
-  const rows = await database
+  const rows = await withSyncOwner(database, owner, (transaction) =>
+    transaction
     .select({ sequence: syncChanges.sequence, envelope: syncChanges.envelope })
     .from(syncChanges)
     .where(
@@ -728,7 +727,8 @@ export async function pullSyncChanges(
           ),
     )
     .orderBy(syncChanges.sequence)
-    .limit(limit);
+    .limit(limit),
+  );
   const last = rows.at(-1)?.sequence;
   return {
     changes: rows.map((row) => row.envelope as unknown as SyncChangeEnvelope),

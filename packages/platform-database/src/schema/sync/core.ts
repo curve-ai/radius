@@ -12,7 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { radiusSync } from "../common.js";
+import { ownedByMembership, radiusSync } from "../common.js";
 import {
   organizationMemberships,
   organizations,
@@ -63,6 +63,7 @@ export const syncDevices = radiusSync.table(
       table.membershipId,
       table.revokedAt,
     ),
+    ownedByMembership("devices"),
   ],
 );
 
@@ -106,6 +107,7 @@ export const syncProjects = radiusSync.table(
       table.updatedAt.desc(),
     ),
     check("sync_projects_revision_check", sql`${table.revision} > 0`),
+    ownedByMembership("projects"),
   ],
 );
 
@@ -166,6 +168,7 @@ export const syncSessions = radiusSync.table(
       sql`${table.status} IN ('active', 'completed', 'cancelled', 'failed')`,
     ),
     check("sync_sessions_revision_check", sql`${table.revision} > 0`),
+    ownedByMembership("sessions"),
   ],
 );
 
@@ -235,5 +238,6 @@ export const syncChanges = radiusSync.table(
       "sync_changes_digest_check",
       sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`,
     ),
+    ownedByMembership("changes"),
   ],
 );
