@@ -53,4 +53,6 @@ jobs:
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
-        run: bun audit --audit-level high
+        # GHSA-vfj7-8cjw-p6xm (braces) has no fixed release and only reaches
+        # us through eslint-config-next, a dev dependency.
+        run: bun audit --audit-level high --ignore=GHSA-vfj7-8cjw-p6xm
