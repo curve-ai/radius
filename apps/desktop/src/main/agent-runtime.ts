@@ -112,7 +112,10 @@ import {
   type FxRuntimeProfileLease,
 } from "./fx-auth";
 import { initializeStorage, type StorageContext } from "./storage";
-import { resolveAgentReleasePaths } from "./bundled-agents";
+import {
+  resolveAgentReleasePaths,
+  windowsRuntimeAssetPaths,
+} from "./bundled-agents";
 import { browserBridge } from "./browser-bridge";
 import { listDevelopmentAgentConnections } from "./development-agents";
 import { createRuntimeMcpClient } from "./mcp-connector-auth";
@@ -2335,7 +2338,12 @@ async function runAgentSession(input: {
       : selectProtocolAuthentication;
     let acpSession: AcpRuntimeSession;
     const sessionStart = input.providerSessionId
-      ? ({ kind: "auto", sessionId: input.providerSessionId } as const)
+      ? ({
+          kind: "auto",
+          sessionId: input.providerSessionId,
+          // Windows fx answers a session it no longer holds with a bare "Session not found".
+          newOnBareMissingSession: process.platform === "win32",
+        } as const)
       : ({ kind: "new" } as const);
     const additionalDirectories = input.projectRoots.slice(1);
     if (developmentConnection) {
@@ -2806,9 +2814,11 @@ function resolveMicrovmPaths(
     stateSharePath ||
     process.env.RADIUS_AGENT_DEVELOPER_STATE_SHARE?.trim() ||
     undefined;
+  const windowsPaths =
+    process.platform === "win32" ? windowsRuntimeAssetPaths() : undefined;
   return {
-    runtimeHostPath,
-    kernelPath,
+    runtimeHostPath: windowsPaths?.runtimeHostPath ?? runtimeHostPath,
+    kernelPath: windowsPaths?.kernelPath ?? kernelPath,
     runtimeRoot,
     developerStateSharePath,
     developerStateShareUser: developerStateSharePath

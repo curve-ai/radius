@@ -1,0 +1,21 @@
+[package]
+name = "radius-runtime-host"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Windows runtime host for Radius: runs each agent in its own Linux VM (OpenVMM + Windows Hypervisor Platform)."
+
+[lib]
+name = "radius_runtime_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "radius-runtime-host"
+path = "src/main.rs"
+
+[dependencies]
+am-fs-ext4 = "=0.5.1"
+crc32c = "=0.6.8"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.143"

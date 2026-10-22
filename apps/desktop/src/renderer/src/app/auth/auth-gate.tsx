@@ -1,3 +1,4 @@
+import { thisDevice } from "@renderer/lib/device-name";
 import { useEffect, useState, type ReactNode } from "react";
 import type { DesktopAuthenticationStatus } from "../../../../auth-types";
 import { Button } from "@renderer/components/ui/button";
@@ -10,7 +11,7 @@ const messages: Record<string, string> = {
     "Another sign-in is using the return address. Close it and try again.",
   AUTH_BROWSER_UNAVAILABLE: "Your browser could not be opened. Try again.",
   AUTH_PROFILE_MISMATCH:
-    "This installation belongs to another account. Sign in with the account you used on this Mac.",
+    `This installation belongs to another account. Sign in with the account you used on ${thisDevice()}.`,
   AUTH_SESSION_EXPIRED: "Your session has expired. Sign in again to continue.",
 };
 

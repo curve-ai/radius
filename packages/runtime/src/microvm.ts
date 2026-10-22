@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
+import { hostImageMismatch } from "./host-platform.js";
 import { acpStreamFromChild } from "./stdio.js";
 import {
   connectAcpRuntime,
@@ -111,6 +112,8 @@ export class MicrovmAcpRuntime {
   static async start(
     options: StartMicrovmAcpOptions,
   ): Promise<MicrovmAcpRuntime> {
+    const hostMismatch = hostImageMismatch(options.release.image);
+    if (hostMismatch) throw new Error(hostMismatch);
     const args = microvmRuntimeArguments(options);
     const child = spawn(options.paths.runtimeHostPath, args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -180,7 +183,10 @@ export class MicrovmAcpRuntime {
 }
 
 export function microvmRuntimeArguments(
-  options: Pick<StartMicrovmAcpOptions, "release" | "paths" | "containerId">,
+  options: Pick<StartMicrovmAcpOptions, "release" | "paths" | "containerId"> & {
+    /** OpenVMM hostfwd= spec; the guest relays each port to the agent's 127.0.0.1. */
+    portForward?: string;
+  },
 ): string[] {
   const { release, paths } = options;
   const args = [
@@ -212,6 +218,9 @@ export function microvmRuntimeArguments(
   if (release.image.translation === "rosetta") args.push("--rosetta");
   if (paths.developerStateSharePath) {
     args.push("--developer-state-share", paths.developerStateSharePath);
+  }
+  if (options.portForward) {
+    args.push("--port-forward", options.portForward);
   }
   args.push("--", ...release.process.arguments);
   return args;
