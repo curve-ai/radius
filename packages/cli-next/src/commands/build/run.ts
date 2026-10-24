@@ -18,7 +18,7 @@ import {
 
 import { loadConfigFile } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
-import { UsageError } from "../../errors.js";
+import { OperationalError, UsageError } from "../../errors.js";
 import { handler } from "../../handler.js";
 import { verifyBuild } from "../../verify.js";
 
@@ -71,8 +71,30 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
     protocolVersion: number;
     advertisedAgents: readonly string[];
   } | null = null;
+  let skippedBecause: string | null = flags["skip-verify"]
+    ? "--skip-verify"
+    : null;
+
   if (!flags["skip-verify"]) {
-    const result = await verifyBuild({ root, config, build, context });
+    // A missing runtime stops the check, not the build. The layout is the
+    // deliverable and it is already correct; refusing to write it would mean
+    // a developer with no desktop app installed could not build at all.
+    const result = await verifyBuild({ root, config, build, context }).catch(
+      (error: unknown) => {
+        if (error instanceof OperationalError || error instanceof UsageError) {
+          skippedBecause = error.message;
+          return null;
+        }
+        throw error;
+      },
+    );
+    if (result === null) {
+      context.note("");
+      context.note(`Not verified: ${skippedBecause}`);
+      context.note(
+        "The image is built and the receipt records that it was never booted.",
+      );
+    } else {
     verification = {
       protocolVersion: result.protocolVersion,
       advertisedAgents: result.advertisedAgents,
@@ -89,6 +111,7 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
     );
     if (result.authMethods.length > 0) {
       context.out(`  auth         ${result.authMethods.join(", ")}`);
+    }
     }
   } else {
     context.note("Skipping microVM verification (--skip-verify).");
@@ -109,7 +132,17 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
       indexPath: projectRelative(root, build.indexPath),
     },
     verifiedAt: new Date().toISOString(),
-    verification: { kind: "microvm-acp", platform: "linux/arm64" },
+    verification: {
+      kind: "microvm-acp",
+      platform: "linux/arm64",
+      verified: verification !== null,
+      ...(verification === null && skippedBecause
+        ? { skippedBecause }
+        : {}),
+      ...(verification
+        ? { advertisedAgents: [...verification.advertisedAgents] }
+        : {}),
+    },
   });
 
   const receiptPath = await writeReceipt(root, receipt);

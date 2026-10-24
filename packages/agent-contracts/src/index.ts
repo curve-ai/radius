@@ -388,6 +388,20 @@ export const AgentBuildReceiptSchema = z.object({
   verification: z.object({
     kind: z.literal("microvm-acp"),
     platform: z.literal("linux/arm64"),
+    /**
+     * Whether the check actually ran.
+     *
+     * A build can legitimately produce a layout without booting it — the
+     * developer asked to skip it, or this machine has no runtime to boot it
+     * with. Saying so is the difference between a receipt and a claim.
+     * Defaults true so a receipt written before this field existed still
+     * means what it said.
+     */
+    verified: z.boolean().default(true),
+    /** Why it did not run, when it did not. */
+    skippedBecause: z.string().trim().min(1).optional(),
+    /** What the agent advertised, which is the useful half of the evidence. */
+    advertisedAgents: z.array(z.string()).optional(),
   }),
 });
 

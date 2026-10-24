@@ -532,6 +532,22 @@ async function writeNotices(
   await writeFile(join(noticesPath, "HARNESS.txt"), lines.join("\n"), "utf8");
 }
 
+/**
+ * Expansion factors, measured rather than guessed.
+ *
+ * Compressed layers do not all expand alike, and treating them as if they do
+ * undershot a real opencode image by 300MB. A harness archive is one large
+ * self-contained executable with an embedded runtime, which compresses far
+ * better than a base image's many small files — a 78MB archive became a
+ * 716MB rootfs. The post-build check in `writeImportableLayout` is what
+ * caught that, and it stays the backstop for every number here.
+ */
+const BASE_EXPANSION = 4;
+const HARNESS_EXPANSION = 8;
+const TREE_EXPANSION = 4;
+/** Filesystem overhead and the slack a guest needs to boot at all. */
+const ROOTFS_HEADROOM_BYTES = 128_000_000;
+
 export function estimateHarnessImageMb(input: {
   harnessBytes: number;
   treeBytes: number;
@@ -541,19 +557,19 @@ export function estimateHarnessImageMb(input: {
     (toolchain) => toolchain.kind === "python",
   );
   const node = input.toolchains.some((toolchain) => toolchain.kind === "node");
-  const base = python
-    ? BASE_COMPRESSED_BYTES.python
-    : BASE_COMPRESSED_BYTES.plain;
+  const base =
+    (python ? BASE_COMPRESSED_BYTES.python : BASE_COMPRESSED_BYTES.plain) +
+    (node ? BUN_COMPRESSED_BYTES : 0);
   // Installed dependencies are the one input not known before the build, so
   // the allowance is deliberately generous; undershooting fails the build.
   const dependencyAllowance = input.toolchains.length * 250_000_000;
   const total =
-    base +
-    (node ? BUN_COMPRESSED_BYTES : 0) +
-    input.harnessBytes +
-    input.treeBytes +
-    dependencyAllowance;
-  return Math.ceil((total * 4) / (1024 * 1024));
+    base * BASE_EXPANSION +
+    input.harnessBytes * HARNESS_EXPANSION +
+    input.treeBytes * TREE_EXPANSION +
+    dependencyAllowance +
+    ROOTFS_HEADROOM_BYTES;
+  return Math.ceil(total / (1024 * 1024));
 }
 
 export function renderHarnessContainerfile(input: {

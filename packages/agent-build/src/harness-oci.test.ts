@@ -195,6 +195,21 @@ test("the size estimate grows with the harness, the tree and each toolchain", ()
   assert.ok(bare >= 100, `a bare harness image is not tiny, got ${bare}MB`);
 });
 
+test("a bare harness estimate covers a real opencode rootfs", () => {
+  // Measured: the 78MB linux/arm64 opencode archive produces a 716MB rootfs
+  // with no project tree and no toolchains. A 4x expansion claimed 414MB and
+  // the post-build check rejected the layout.
+  const estimate = estimateHarnessImageMb({
+    harnessBytes: 78_500_000,
+    treeBytes: 0,
+    toolchains: [],
+  });
+  assert.ok(
+    estimate >= 716,
+    `must cover the measured 716MB rootfs, claimed ${estimate}MB`,
+  );
+});
+
 test("a harness with no linux/arm64 build cannot be packaged", async () => {
   const { buildHarnessOciLayout } = await import("./harness-oci.js");
   await assert.rejects(

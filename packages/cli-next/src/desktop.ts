@@ -22,13 +22,43 @@ export interface RuntimeAssets {
   readonly source: string;
 }
 
-function appBundleCandidates(env: NodeJS.ProcessEnv): string[] {
+/** Walk-up roots, so a project inside the repo finds the repo. */
+function repoCandidates(projectRoot: string): string[] {
+  return [projectRoot, join(projectRoot, ".."), join(projectRoot, "..", "..")];
+}
+
+function appBundleCandidates(
+  env: NodeJS.ProcessEnv,
+  projectRoot?: string,
+): string[] {
   const explicit = env.RADIUS_APP_PATH?.trim();
   return [
     ...(explicit ? [explicit] : []),
     "/Applications/Radius.app",
     join(homedir(), "Applications", "Radius.app"),
+    // Someone working on Radius who has run `package` has a real bundle in
+    // the checkout, and would expect `dev` to open that one rather than be
+    // told nothing is installed.
+    ...(projectRoot
+      ? repoCandidates(projectRoot).flatMap((root) => [
+          join(root, "apps", "desktop", "dist", "mac-arm64", "Radius.app"),
+          join(root, "apps", "desktop", "dist", "mac", "Radius.app"),
+        ])
+      : []),
   ];
+}
+
+/** The repo root, if this project sits inside a Radius checkout. */
+async function findRepoRoot(projectRoot: string): Promise<string | null> {
+  for (const root of repoCandidates(projectRoot)) {
+    try {
+      await access(join(root, "apps", "desktop", "package.json"));
+      return root;
+    } catch {
+      // Not a checkout; try the next level up.
+    }
+  }
+  return null;
 }
 
 /**
@@ -52,7 +82,7 @@ export async function resolveRuntimeAssets(input: {
 
   const tried: string[] = [];
 
-  for (const bundle of appBundleCandidates(input.env)) {
+  for (const bundle of appBundleCandidates(input.env, input.projectRoot)) {
     const runtime = join(bundle, "Contents", "Resources", "runtime");
     const host = join(runtime, `macos-${process.arch}`, "radius-runtime-host");
     const kernel = join(runtime, "vmlinux-arm64");
@@ -127,6 +157,7 @@ export interface LaunchResult {
 export async function launchDesktopApp(input: {
   readonly platform: string;
   readonly env: NodeJS.ProcessEnv;
+  readonly projectRoot: string;
 }): Promise<LaunchResult> {
   if (input.platform !== "darwin") {
     return {
@@ -135,7 +166,7 @@ export async function launchDesktopApp(input: {
     };
   }
 
-  for (const bundle of appBundleCandidates(input.env)) {
+  for (const bundle of appBundleCandidates(input.env, input.projectRoot)) {
     try {
       await access(bundle);
     } catch {
@@ -148,6 +179,23 @@ export async function launchDesktopApp(input: {
           launched: false,
           detail: `Found ${bundle} but could not open it. Open Radius yourself.`,
         };
+  }
+
+  // No bundle. If this is a Radius checkout the app exists as source, and the
+  // useful answer is the command that starts it — not "not installed", which
+  // is false and unactionable for the one person most likely to see it.
+  // Deliberately not run for them: `electron-vite dev` is a long-lived build
+  // process that would outlive this command or have to be supervised by it.
+  const repo = await findRepoRoot(input.projectRoot);
+  if (repo) {
+    return {
+      launched: false,
+      detail: [
+        "Radius is not installed as an app.",
+        `Running from source: \`bun run dev\` in ${repo}.`,
+        "For a bundle this command can open: `bun run --cwd apps/desktop package`.",
+      ].join(" "),
+    };
   }
   return {
     launched: false,

@@ -110,6 +110,7 @@ async function run(
     : await launchDesktopApp({
         platform: context.process.platform,
         env: context.env,
+        projectRoot: context.cwd,
       });
 
   if (context.output === "json") {
