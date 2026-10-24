@@ -1,0 +1,78 @@
+name: Runtime host release
+
+# Publishes the VM host the CLI downloads to verify a build.
+#
+# `radius build` proves what it produced by booting it in a microVM, which
+# needs this binary. It used to be taken out of the installed desktop app, so
+# anyone who installed the CLI without the app could not verify anything. This
+# workflow is what makes it fetchable on its own.
+#
+# Run it manually against a tag, then update the `HOST` pin in
+# packages/cli-next/src/runtime-assets.ts with the printed digest. The pin is
+# deliberately a committed constant rather than a lookup: resolving it must
+# not need the network, and a given CLI version must always want the same
+# bytes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish the runtime host under
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish (macOS arm64)
+    # Must be Apple Silicon: the host links against Apple's virtualization
+    # stack and is consumed only by arm64 machines.
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Build the runtime host
+        run: bash scripts/build-runtime-host-macos.sh
+
+      - name: Confirm it runs
+        # A binary that cannot answer `doctor` is not worth publishing, and
+        # this is the cheapest possible check that it links.
+        run: |
+          apps/runtime-host-macos/.build/release/radius-runtime-host doctor --json
+
+      - name: Name the artifact and record its digest
+        id: artifact
+        run: |
+          set -euo pipefail
+          source="apps/runtime-host-macos/.build/release/radius-runtime-host"
+          name="radius-runtime-host-darwin-arm64"
+          cp "$source" "$name"
+          digest=$(shasum -a 256 "$name" | awk '{print $1}')
+          echo "name=$name"     >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Runtime host published"
+            echo
+            echo "Update the \`HOST\` pin in \`packages/cli-next/src/runtime-assets.ts\`:"
+            echo
+            echo '```ts'
+            echo "const HOST = {"
+            echo "  version: \"${{ inputs.tag }}\","
+            echo "  url: \"https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/$name\","
+            echo "  sha256: \"$digest\","
+            echo "};"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes "Runtime host for the Radius CLI."
+          gh release upload "${{ inputs.tag }}" "${{ steps.artifact.outputs.name }}" --clobber

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { OperationalError } from "./errors.js";
+import { fetchRuntime, RUNTIME_HOST_IS_PUBLISHED } from "./runtime-assets.js";
 
 /**
  * Finding and launching the installed Radius desktop app.
@@ -69,6 +70,7 @@ export async function resolveRuntimeAssets(input: {
   readonly projectRoot: string;
   readonly env: NodeJS.ProcessEnv;
   readonly platform: string;
+  readonly onProgress?: (message: string) => void;
 }): Promise<RuntimeAssets> {
   const overriddenHost = input.env.RADIUS_RUNTIME_HOST_PATH?.trim();
   const overriddenKernel = input.env.RADIUS_KERNEL_PATH?.trim();
@@ -119,10 +121,24 @@ export async function resolveRuntimeAssets(input: {
     }
   }
 
+  // Last resort, and the one that works on a machine with no Radius on it at
+  // all: fetch the runtime the CLI pins for itself. Tried last rather than
+  // first because a locally installed app is the runtime the agent will
+  // actually run under, so verifying against that one is more honest than
+  // verifying against a version only the CLI knows about.
+  if (RUNTIME_HOST_IS_PUBLISHED) {
+    const fetched = await fetchRuntime(input.onProgress ?? (() => {}));
+    return fetched;
+  }
+
   throw new OperationalError(
     "Could not find the Radius runtime, which is what boots the microVM a build is verified in.",
     [
-      "Install the Radius desktop app — it ships the runtime — or pass --skip-verify to stop at the image.",
+      "No published runtime is available for this CLI version yet, so it has to come from somewhere on this machine:",
+      "  · the Radius desktop app, which ships it",
+      "  · a repo checkout, after `bun run runtime:build` and `bun run runtime:prepare-assets`",
+      "",
+      "Or pass --skip-verify to produce the image without booting it.",
       "",
       "Looked in:",
       ...tried.map((path) => `  ${path}`),

@@ -75,6 +75,7 @@ export async function verifyBuild(
     projectRoot: options.root,
     env: context.env,
     platform: context.process.platform,
+    onProgress: (message) => context.out(`  ${message}`),
   });
   const runtimeHostPath = options.runtimeHostPath ?? assets.runtimeHostPath;
   const kernelPath = options.kernelPath ?? assets.kernelPath;
