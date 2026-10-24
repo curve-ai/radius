@@ -155,14 +155,100 @@ export const HarnessDistributionSchema = z.discriminatedUnion("kind", [
   HarnessUvxDistributionSchema,
 ]);
 
-export const HarnessRuntimeConfigSchema = z.object({
-  kind: z.literal("harness"),
-  /** The ACP registry id this was populated from, for provenance. */
-  registryId: nonempty.optional(),
-  distribution: HarnessDistributionSchema,
-  license: nonempty.optional(),
-  licenseUrl: nonempty.optional(),
+/**
+ * A toolchain the project's own code needs inside the image.
+ *
+ * A harness is often not the whole agent. An opencode project's tools are
+ * TypeScript wrappers around Python scripts, so the image needs both — and
+ * `typescript` and `python` runtime kinds are mutually exclusive by
+ * construction, so neither could express it. A discriminated union rather
+ * than an enum so a later `go` or `ruby` toolchain lands additively.
+ *
+ * `lockfile` is required, not optional: a toolchain installed from a range
+ * makes `buildDigest` vary between builds of identical config.
+ */
+export const PythonToolchainSchema = z.object({
+  kind: z.literal("python"),
+  version: z.string().regex(/^3\.\d+$/),
+  lockfile: RelativeProjectPathSchema.default("uv.lock"),
 });
+
+export const NodeToolchainSchema = z.object({
+  kind: z.literal("node"),
+  version: z.string().regex(/^\d+$/).default("22"),
+  lockfile: RelativeProjectPathSchema,
+  /**
+   * Where the lockfile's dependencies are installed, relative to the project.
+   * Defaults to the lockfile's own directory, which is what opencode wants:
+   * its plugin dependencies live beside `.opencode/bun.lock`, not at the root.
+   */
+  installIn: RelativeProjectPathSchema.optional(),
+});
+
+export const HarnessToolchainSchema = z.discriminatedUnion("kind", [
+  PythonToolchainSchema,
+  NodeToolchainSchema,
+]);
+
+export const HarnessRuntimeConfigSchema = z
+  .object({
+    kind: z.literal("harness"),
+    /** The ACP registry id this was populated from, for provenance. */
+    registryId: nonempty.optional(),
+    distribution: HarnessDistributionSchema,
+    license: nonempty.optional(),
+    licenseUrl: nonempty.optional(),
+    /**
+     * The project's own files to ship alongside the harness.
+     *
+     * There is no import graph to walk: a harness discovers its agents,
+     * tools and skills by reading directories at runtime, and agents are
+     * markdown. Empty means the harness is the whole agent — true for fx,
+     * goose and gemini — and the image carries nothing but the binary.
+     *
+     * A trailing `/` ships a directory; anything else is one file.
+     */
+    include: z.array(RelativeProjectPathSchema).default([]),
+    /**
+     * Where `include` is staged in the image, and what HOME becomes.
+     *
+     * Harnesses read their configuration from HOME rather than from the
+     * working directory, so a tree staged anywhere else is present and
+     * unread. Defaults to the state path every Radius image already uses.
+     */
+    configRoot: z
+      .string()
+      .regex(/^\/[A-Za-z0-9._\-/]*[A-Za-z0-9._-]$/, "configRoot must be an absolute POSIX path")
+      .default("/opt/data"),
+    toolchains: z.array(HarnessToolchainSchema).default([]),
+  })
+  .superRefine((value, context) => {
+    const kinds = value.toolchains.map((toolchain) => toolchain.kind);
+    if (new Set(kinds).size !== kinds.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["toolchains"],
+        message: "Each toolchain kind may appear at most once",
+      });
+    }
+    // A toolchain installs from files the image does not have unless they were
+    // shipped. Caught here rather than at build time, where the failure is a
+    // container-build error nobody can read.
+    for (const [index, toolchain] of value.toolchains.entries()) {
+      const covered = value.include.some((entry) =>
+        entry.endsWith("/")
+          ? toolchain.lockfile.startsWith(entry)
+          : toolchain.lockfile === entry,
+      );
+      if (!covered) {
+        context.addIssue({
+          code: "custom",
+          path: ["toolchains", index, "lockfile"],
+          message: `${toolchain.lockfile} is not covered by runtime.include, so the image cannot install from it`,
+        });
+      }
+    }
+  });
 
 export const AgentRuntimeConfigSchema = z.discriminatedUnion("kind", [
   TypeScriptRuntimeConfigSchema,
@@ -271,6 +357,7 @@ export type HarnessDistribution = z.output<typeof HarnessDistributionSchema>;
 export type HarnessPlatformArtifact = z.output<
   typeof HarnessPlatformArtifactSchema
 >;
+export type HarnessToolchain = z.output<typeof HarnessToolchainSchema>;
 export type CapabilityRequest = z.output<typeof CapabilityRequestSchema>;
 
 export const AgentBuildReceiptSchema = z.object({

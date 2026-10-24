@@ -29,14 +29,45 @@ export async function readRawConfig(root: string): Promise<string | null> {
   }
 }
 
-export async function loadConfig(root: string): Promise<AgentConfig> {
+export interface LoadedConfig {
+  readonly config: AgentConfig;
+  readonly path: string;
+  /** Set when the config came from a format that is on its way out. */
+  readonly deprecation?: string;
+}
+
+/**
+ * Loads `radius.json`, falling back to the formats it replaced.
+ *
+ * The fallback is what makes `init` → `dev` → `build` work in a project that
+ * predates `radius.json`: without it, `build` would refuse every config the
+ * old CLI ever wrote.
+ */
+export async function loadConfigFile(root: string): Promise<LoadedConfig> {
   const raw = await readRawConfig(root);
-  if (raw === null) {
-    throw new OperationalError(
-      `No ${CONFIG_FILENAME} in ${root}.`,
-      "Run `radius init --harness <id>` to create one.",
-    );
+  if (raw !== null) {
+    return { config: parseConfig(raw), path: configPath(root) };
   }
+  const { findLegacyConfig } = await import("./legacy-config.js");
+  const legacy = await findLegacyConfig(root);
+  if (legacy) {
+    return {
+      config: legacy.config,
+      path: legacy.path,
+      deprecation: `${legacy.filename} is deprecated and will stop being read. Run \`radius init\` to write ${CONFIG_FILENAME}.`,
+    };
+  }
+  throw new OperationalError(
+    `No ${CONFIG_FILENAME} in ${root}.`,
+    "Run `radius init --harness <id>` to create one.",
+  );
+}
+
+export async function loadConfig(root: string): Promise<AgentConfig> {
+  return (await loadConfigFile(root)).config;
+}
+
+function parseConfig(raw: string): AgentConfig {
   const errors: ParseError[] = [];
   const parsed = parse(raw, errors, { allowTrailingComma: true });
   if (errors.length > 0) {
