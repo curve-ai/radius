@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # bun.lock at the root covers every workspace, so one entry is enough.
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
