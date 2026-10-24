@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, parse as parsePath } from "node:path";
 
 import type { AgentConfig } from "@curve-ai/agent-contracts";
@@ -10,8 +9,9 @@ import {
   type SessionConfigOption,
 } from "@curve-ai/radius-runtime";
 
-import { OperationalError, UsageError } from "./errors.js";
 import type { RadiusContext } from "./context.js";
+import { resolveRuntimeAssets } from "./desktop.js";
+import { OperationalError, UsageError } from "./errors.js";
 
 /**
  * Boots the built image in a microVM and checks it speaks ACP.
@@ -71,23 +71,20 @@ export async function verifyBuild(
     );
   }
 
-  const defaults = await resolveDefaultRuntimeAssets(options.root);
-  const runtimeHostPath =
-    options.runtimeHostPath ??
-    context.env.RADIUS_RUNTIME_HOST_PATH ??
-    defaults.runtimeHostPath;
-  const kernelPath =
-    options.kernelPath ?? context.env.RADIUS_KERNEL_PATH ?? defaults.kernelPath;
+  const assets = await resolveRuntimeAssets({
+    projectRoot: options.root,
+    env: context.env,
+    platform: context.process.platform,
+  });
+  const runtimeHostPath = options.runtimeHostPath ?? assets.runtimeHostPath;
+  const kernelPath = options.kernelPath ?? assets.kernelPath;
   const runtimeRoot =
     options.runtimeRoot ??
     context.env.RADIUS_RUNTIME_ROOT ??
     join(options.root, ".radius", "build", "runtime");
 
-  await Promise.all([
-    requirePath(runtimeHostPath, "runtime helper"),
-    requirePath(kernelPath, "runtime kernel"),
-    mkdir(runtimeRoot, { recursive: true }),
-  ]);
+  context.out(`  runtime      ${assets.source}`);
+  await mkdir(runtimeRoot, { recursive: true });
 
   const loadedDigest = await loadImage({
     runtimeHostPath,
@@ -247,57 +244,6 @@ function run(command: string, args: readonly string[]): Promise<string> {
         );
     });
   });
-}
-
-async function requirePath(path: string, what: string): Promise<void> {
-  try {
-    await access(path);
-  } catch {
-    throw new OperationalError(
-      `Could not find the ${what} at ${path}.`,
-      "Build it with `bun run runtime:build`, or point RADIUS_RUNTIME_HOST_PATH / RADIUS_KERNEL_PATH at an existing one.",
-    );
-  }
-}
-
-async function resolveDefaultRuntimeAssets(
-  root: string,
-): Promise<{ runtimeHostPath: string; kernelPath: string }> {
-  const candidates = [root, join(root, ".."), join(root, "..", "..")];
-  for (const candidate of candidates) {
-    const host = join(
-      candidate,
-      "apps",
-      "runtime-host-macos",
-      ".build",
-      "release",
-      "radius-runtime-host",
-    );
-    try {
-      await access(host);
-      // The kernel moved under `runtime-assets/` when asset preparation was
-      // split out of the Swift build; the old path is tried second so a stale
-      // checkout still resolves.
-      for (const kernel of [
-        join(candidate, "apps", "runtime-host-macos", ".build", "runtime-assets", "vmlinux-arm64"),
-        join(candidate, "apps", "runtime-host-macos", ".build", "vmlinux-arm64"),
-      ]) {
-        try {
-          await access(kernel);
-          return { runtimeHostPath: host, kernelPath: kernel };
-        } catch {
-          // Try the next known location.
-        }
-      }
-    } catch {
-      // Keep looking; a project outside the repo has neither.
-    }
-  }
-  const shared = join(homedir(), ".radius", "runtime");
-  return {
-    runtimeHostPath: join(shared, "radius-runtime-host"),
-    kernelPath: join(shared, "vmlinux-arm64"),
-  };
 }
 
 /**

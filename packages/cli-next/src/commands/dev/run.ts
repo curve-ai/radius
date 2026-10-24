@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { startBridge } from "../../bridge.js";
 import { loadConfig } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
+import { launchDesktopApp } from "../../desktop.js";
 import { handler } from "../../handler.js";
 import { resolveHarness } from "../../harness.js";
 import {
@@ -13,6 +14,7 @@ import { OperationalError } from "../../errors.js";
 
 interface DevFlags {
   readonly verbose: boolean;
+  readonly "no-open": boolean;
 }
 
 async function run(
@@ -101,6 +103,15 @@ async function run(
     ),
   });
 
+  // Launched after registration, never before: the descriptor is what the app
+  // reads, so an app that opens first would briefly show nothing.
+  const desktop = flags["no-open"]
+    ? { launched: false, detail: "--no-open" }
+    : await launchDesktopApp({
+        platform: context.process.platform,
+        env: context.env,
+      });
+
   if (context.output === "json") {
     emitJson(context, {
       agentId: config.agent,
@@ -112,13 +123,20 @@ async function run(
         source: harness.source,
         cached: harness.cached,
       },
+      desktop: { launched: desktop.launched, detail: desktop.detail },
     });
   } else {
     context.out(`${config.name} is running for Radius.`);
     context.out(`  harness     ${harness.command.join(" ")}`);
     context.out(`  endpoint    ${bridge.endpoint}`);
     context.out(`  descriptor  ${registration.path}`);
-    context.out("\nOpen Radius and pick this agent. Ctrl-C to deregister.");
+    if (desktop.launched) {
+      context.out(`  desktop     opened ${desktop.detail}`);
+      context.out("\nPick this agent in Radius. Ctrl-C to deregister.");
+    } else {
+      if (!flags["no-open"]) context.out(`  desktop     ${desktop.detail}`);
+      context.out("\nOpen Radius and pick this agent. Ctrl-C to deregister.");
+    }
   }
 
   try {

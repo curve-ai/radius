@@ -55,16 +55,20 @@ async function run(
     { path: ["agent"], value: mintAgentId() },
     { path: ["version"], value: "0.0.0" },
     { path: ["name"], value: flags.name ?? entry.name },
-    {
-      path: ["runtime"],
-      value: {
-        kind: "harness",
-        registryId: entry.id,
-        distribution: entry.distribution,
-        ...(entry.license ? { license: entry.license } : {}),
-        ...(entry.licenseUrl ? { licenseUrl: entry.licenseUrl } : {}),
-      },
-    },
+    // One edit per leaf, not one for the whole `runtime` block. Idempotent
+    // fill-in means filling what is *missing*, and a project that already
+    // declares `runtime.include` or `runtime.toolchains` has a runtime block
+    // without a harness pin in it — writing at ["runtime"] would see the
+    // block, skip, and leave the config permanently unbuildable.
+    { path: ["runtime", "kind"], value: "harness" },
+    { path: ["runtime", "registryId"], value: entry.id },
+    { path: ["runtime", "distribution"], value: entry.distribution },
+    ...(entry.license
+      ? [{ path: ["runtime", "license"], value: entry.license }]
+      : []),
+    ...(entry.licenseUrl
+      ? [{ path: ["runtime", "licenseUrl"], value: entry.licenseUrl }]
+      : []),
     { path: ["capabilities"], value: [] },
     { path: ["networkAllowlist"], value: [] },
     { path: ["resources"], value: { cpu: 2, memoryMb: 4096, diskMb: 5120 } },
