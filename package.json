@@ -75,6 +75,8 @@
     "typecheck": "bun run --cwd packages/browser-protocol typecheck && bun run --cwd apps/browser-native-host typecheck && bun run --cwd apps/browser-extension typecheck && bun run --cwd packages/browser-tools typecheck && bun run --cwd packages/agent-contracts typecheck && bun run --cwd packages/agent-build typecheck && bun run --cwd packages/platform-contracts typecheck && bun run --cwd packages/platform-client typecheck && bun run --cwd packages/platform-job-contracts typecheck && bun run --cwd packages/platform-providers typecheck && bun run --cwd packages/platform-database typecheck && bun run --cwd apps/platform-api typecheck && bun run --cwd apps/platform-jobs typecheck && bun run --cwd apps/platform-web typecheck && bun run --cwd packages/runtime typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/cli-next typecheck && bun run --cwd packages/connector-protocol typecheck && bun run --cwd packages/mcp-connector typecheck && bun run --cwd packages/tool-broker typecheck && bun run --cwd packages/sync-protocol typecheck && bun run --cwd packages/storage typecheck && bun run --cwd packages/sync-core typecheck && bun run --cwd packages/scheduler typecheck && bun run --cwd apps/desktop typecheck",
     "package": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop package",
     "make": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop make",
-    "auth:setup": "bun scripts/configure-desktop-auth.ts"
+    "auth:setup": "bun scripts/configure-desktop-auth.ts",
+    "cli:link": "bun link --cwd packages/cli-next",
+    "cli:unlink": "bun unlink --cwd packages/cli-next"
   }
 }
