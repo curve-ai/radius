@@ -124,3 +124,36 @@ test("include may not escape the project", async () => {
     /must not escape the project root/,
   );
 });
+
+// ADR-008: "A command may prompt only when standard input is a TTY, `--json`
+// is unset, and no `--yes` or `--non-interactive` flag is present. Otherwise
+// it fails immediately and names the flag that would have supplied the
+// answer." A prompt that reaches CI hangs rather than failing, so each gate
+// is pinned here.
+test("the prompt gate closes for every non-interactive case", async () => {
+  const { canPrompt } = await import("./prompt.js");
+  const base = { isTTY: true, output: "text" } as never;
+  assert.equal(canPrompt(base, { yes: false }), true);
+  assert.equal(canPrompt(base, { yes: true }), false, "--yes must close it");
+  assert.equal(
+    canPrompt({ isTTY: false, output: "text" } as never, { yes: false }),
+    false,
+    "a pipe must close it",
+  );
+  assert.equal(
+    canPrompt({ isTTY: true, output: "json" } as never, { yes: false }),
+    false,
+    "--json must close it",
+  );
+});
+
+test("refusing to prompt names the flag that would have answered", async () => {
+  const { requireFlag } = await import("./prompt.js");
+  assert.throws(
+    () => requireFlag("--harness <id>", "Run `radius init --list`."),
+    (error: Error) =>
+      /--harness <id>/.test(error.message) &&
+      /nobody to ask/.test(error.message) &&
+      error.name === "UsageError",
+  );
+});

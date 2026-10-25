@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
+    "radius": "./bin/radius.mjs",
     "radius-next": "./dist/bin.js"
   },
   "scripts": {
@@ -28,5 +29,10 @@
     "@types/ws": "8.18.1",
     "tsx": "4.23.12",
     "typescript": "5.9.3"
-  }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src"
+  ]
 }

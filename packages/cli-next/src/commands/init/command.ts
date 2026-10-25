@@ -24,6 +24,11 @@ export const initCommand = buildCommand({
         brief: "Display name for the agent (defaults to the harness name)",
         optional: true,
       },
+      yes: {
+        kind: "boolean",
+        brief: "Never prompt; fail instead if something is missing",
+        default: false,
+      },
       list: {
         kind: "boolean",
         brief: "List the harness ids the ACP registry offers, and exit",

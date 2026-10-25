@@ -11,12 +11,14 @@ import {
 import { emitJson, type RadiusContext } from "../../context.js";
 import { handler } from "../../handler.js";
 import { UsageError } from "../../errors.js";
+import { canPrompt, promptChoice, promptText, requireFlag } from "../../prompt.js";
 import { fetchRegistry, listHarnessIds, selectEntry } from "../../registry.js";
 
 interface InitFlags {
   readonly harness?: string;
   readonly name?: string;
   readonly list: boolean;
+  readonly yes: boolean;
 }
 
 async function run(
@@ -37,14 +39,38 @@ async function run(
     return;
   }
 
-  if (!flags.harness) {
-    throw new UsageError(
-      "radius init needs --harness <id>. Run `radius init --list` to see the available ids.",
-    );
+  const root = context.cwd;
+
+  // Asked for rather than demanded, when there is someone to ask. The gate is
+  // ADR-008's: a TTY, no --json, no --yes — otherwise fail naming the flag,
+  // because a prompt in CI hangs instead of failing.
+  let harnessId = flags.harness;
+  if (!harnessId) {
+    if (!canPrompt(context, flags)) {
+      requireFlag(
+        "--harness <id>",
+        "Run `radius init --list` to see the available ids.",
+      );
+    }
+    harnessId = await promptChoice(context, {
+      label: "Harness",
+      choices: listHarnessIds(registry).map((id) => ({ value: id })),
+    });
   }
 
-  const entry = selectEntry(registry, flags.harness);
-  const root = context.cwd;
+  const entry = selectEntry(registry, harnessId);
+
+  // The registry's name is the harness's, not the project's, so every
+  // opencode project would be called "OpenCode" and two of them would be
+  // indistinguishable in the agent list. The directory is at least the
+  // developer's own word for this thing.
+  let name = flags.name;
+  if (!name) {
+    const suggestion = basename(root) || entry.name;
+    name = canPrompt(context, flags)
+      ? await promptText(context, { label: "Agent name", fallback: suggestion })
+      : suggestion;
+  }
   const existed = (await readRawConfig(root)) !== null;
 
   // Order matters only for readability of a freshly written file; every edit
@@ -54,7 +80,7 @@ async function run(
     { path: ["schemaVersion"], value: 1 },
     { path: ["agent"], value: mintAgentId() },
     { path: ["version"], value: "0.0.0" },
-    { path: ["name"], value: flags.name ?? entry.name },
+    { path: ["name"], value: name },
     // One edit per leaf, not one for the whole `runtime` block. Idempotent
     // fill-in means filling what is *missing*, and a project that already
     // declares `runtime.include` or `runtime.toolchains` has a runtime block
