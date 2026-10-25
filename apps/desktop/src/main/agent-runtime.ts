@@ -1863,8 +1863,20 @@ async function runAgentSession(input: {
 
   let agentRunRecorded = false;
   let userMessageRecorded = false;
+  /**
+   * Records the run against the conversation it belongs to.
+   *
+   * The ACP session id identifies the *conversation*, not this turn, so it
+   * goes in `providerSessionId`. It used to be written to `providerRunId`,
+   * which is unique — so the second message of any conversation with an agent
+   * that supports resuming collided with the first and was rejected, and the
+   * UI reported that the agent could not be started while it was running fine.
+   *
+   * ACP v1 has no per-run identifier, so `providerRunId` stays null until a
+   * provider offers one.
+   */
   const recordAgentRun = async (
-    providerRunId: string | null,
+    providerSessionId: string | null,
   ): Promise<void> => {
     if (agentRunRecorded) return;
     await input.journal.append({
@@ -1872,7 +1884,8 @@ async function runAgentSession(input: {
       agentRunId,
       eventType: "agent_run",
       providerKey,
-      providerRunId,
+      providerRunId: null,
+      providerSessionId,
       triggeringMessageEventId: input.userMessageEventId,
     });
     agentRunRecorded = true;

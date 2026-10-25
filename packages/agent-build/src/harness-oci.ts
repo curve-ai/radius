@@ -11,6 +11,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 
@@ -351,13 +352,55 @@ async function stageHarness(input: {
       `The ${TARGET_PLATFORM} archive is a URL but carries no sha256. Radius will not package an unverified harness.`,
     );
   }
+
+  // Content-addressed, so a rebuild — or a second project pinning the same
+  // build — reuses the bytes instead of pulling 80MB again. `dev` already
+  // caches the extracted harness this way; a build needs the archive itself,
+  // which is why this is a sibling directory rather than the same one.
+  const cached = join(
+    homedir(),
+    ".radius",
+    "harnesses",
+    "archives",
+    `${artifact.sha256}-${TARGET_PLATFORM.replace("/", "-")}`,
+  );
+  let bytes: number;
+  if (await fileExists(cached)) {
+    const contents = await readFile(cached);
+    // Re-verified on read: a cache is a place on disk like any other, and the
+    // digest is the only reason to trust what is in it.
+    const digest = createHash("sha256").update(contents).digest("hex");
+    if (digest === artifact.sha256) {
+      await writeFile(destination, contents);
+      input.report(`Using the cached ${TARGET_PLATFORM} harness`);
+      return {
+        sha256: artifact.sha256,
+        source: artifact.archive,
+        archiveBytes: contents.byteLength,
+      };
+    }
+    await rm(cached, { force: true });
+  }
+
   input.report(`Downloading the ${TARGET_PLATFORM} harness…`);
-  const bytes = await download(artifact.archive, artifact.sha256, destination);
+  bytes = await download(artifact.archive, artifact.sha256, destination);
+  await mkdir(dirname(cached), { recursive: true, mode: 0o700 });
+  // Copied rather than moved: the build context is temporary and gets removed.
+  await writeFile(cached, await readFile(destination));
   return {
     sha256: artifact.sha256,
     source: artifact.archive,
     archiveBytes: bytes,
   };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function download(

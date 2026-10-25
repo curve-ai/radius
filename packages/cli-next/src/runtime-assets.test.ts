@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { runtimeCacheRoot, RUNTIME_HOST_IS_PUBLISHED } from "./runtime-assets.js";
+import { runtimeCacheRoot, runtimeHostIsAvailable } from "./runtime-assets.js";
 
 /**
  * The kernel is pinned in two places: the repo's own asset script reads
@@ -59,7 +59,7 @@ test("the cache sits under the user's own Radius directory", () => {
 
 test("the download tier reports honestly whether it can serve a host", async () => {
   const { fetchRuntime } = await import("./runtime-assets.js");
-  if (RUNTIME_HOST_IS_PUBLISHED) {
+  if (runtimeHostIsAvailable({})) {
     // Nothing to assert without spending a download; the pin being set is
     // itself the contract.
     return;
@@ -67,7 +67,34 @@ test("the download tier reports honestly whether it can serve a host", async () 
   // Until a release carries the host, this tier must refuse in a way that
   // names the alternatives rather than failing opaquely.
   await assert.rejects(
-    () => fetchRuntime(() => {}),
+    () => fetchRuntime(() => {}, {}),
     /no published runtime host to download yet/,
+  );
+});
+
+test("an override must carry a digest, and both halves together", () => {
+  assert.equal(runtimeHostIsAvailable({}), false);
+  assert.equal(
+    runtimeHostIsAvailable({
+      RADIUS_RUNTIME_HOST_URL: "http://127.0.0.1:8000/host",
+      RADIUS_RUNTIME_HOST_SHA256: "a".repeat(64),
+    }),
+    true,
+  );
+});
+
+test("a half-set or malformed override fails loudly rather than being ignored", async () => {
+  const { fetchRuntime } = await import("./runtime-assets.js");
+  await assert.rejects(
+    () => fetchRuntime(() => {}, { RADIUS_RUNTIME_HOST_URL: "http://x/y" }),
+    /must be set together/,
+  );
+  await assert.rejects(
+    () =>
+      fetchRuntime(() => {}, {
+        RADIUS_RUNTIME_HOST_URL: "http://x/y",
+        RADIUS_RUNTIME_HOST_SHA256: "not-a-digest",
+      }),
+    /not a sha256 digest/,
   );
 });

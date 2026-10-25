@@ -54,6 +54,43 @@ const HOST: {
   readonly sha256: string;
 } | null = null;
 
+/**
+ * The pin, with a local override for testing the download path.
+ *
+ * The published pin is a constant on purpose, and it stays one. But until a
+ * release exists there is nothing to download, and after one exists there is
+ * still no way to exercise a *new* host before publishing it. Both env vars
+ * are required together, and a digest is still mandatory — so this widens
+ * where bytes may come from, never whether they are checked.
+ *
+ * No weaker than what is already possible: RADIUS_RUNTIME_HOST_PATH lets a
+ * caller nominate any binary on the machine with no digest at all.
+ */
+function hostPin(env: NodeJS.ProcessEnv): NonNullable<typeof HOST> | null {
+  const url = env.RADIUS_RUNTIME_HOST_URL?.trim();
+  const sha256 = env.RADIUS_RUNTIME_HOST_SHA256?.trim();
+  if (url && sha256) {
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+      throw new OperationalError(
+        "RADIUS_RUNTIME_HOST_SHA256 is not a sha256 digest.",
+        "It must be 64 lowercase hex characters.",
+      );
+    }
+    return {
+      version: env.RADIUS_RUNTIME_HOST_VERSION?.trim() || "local",
+      url,
+      sha256,
+    };
+  }
+  if (url || sha256) {
+    throw new OperationalError(
+      "RADIUS_RUNTIME_HOST_URL and RADIUS_RUNTIME_HOST_SHA256 must be set together.",
+      "A download without a digest is not something Radius will boot.",
+    );
+  }
+  return HOST;
+}
+
 export function runtimeCacheRoot(): string {
   return join(homedir(), ".radius", "runtime");
 }
@@ -73,8 +110,10 @@ export interface FetchedRuntime {
  */
 export async function fetchRuntime(
   onProgress: (message: string) => void,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<FetchedRuntime> {
-  if (HOST === null) {
+  const host = hostPin(env);
+  if (host === null) {
     throw new OperationalError(
       "This CLI has no published runtime host to download yet.",
       [
@@ -85,11 +124,11 @@ export async function fetchRuntime(
   }
 
   const kernelPath = await ensureKernel(onProgress);
-  const hostPath = await ensureHost(HOST, onProgress);
+  const hostPath = await ensureHost(host, onProgress);
   return {
     runtimeHostPath: hostPath,
     kernelPath,
-    source: `downloaded runtime ${HOST.version} (${runtimeCacheRoot()})`,
+    source: `downloaded runtime ${host.version} (${runtimeCacheRoot()})`,
   };
 }
 
@@ -129,6 +168,9 @@ async function ensureHost(
   if (await exists(join(directory, ".complete"))) return hostPath;
 
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  // An interrupted attempt leaves a partial behind; it is never resumed, so
+  // clear it rather than letting it accumulate.
+  await rm(`${hostPath}.partial`, { force: true });
   onProgress(`Downloading the Radius runtime host ${host.version}…`);
   await download(host.url, host.sha256, hostPath);
   await chmod(hostPath, 0o755);
@@ -205,5 +247,15 @@ function run(command: string, args: readonly string[]): Promise<void> {
   });
 }
 
-/** Exported for the error message that lists where the CLI looked. */
-export const RUNTIME_HOST_IS_PUBLISHED = HOST !== null;
+/** Whether a download can serve a host at all, pin or override. */
+export function runtimeHostIsAvailable(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  try {
+    return hostPin(env) !== null;
+  } catch {
+    // A half-set override is a configuration error the caller must see, so it
+    // counts as available and `fetchRuntime` raises it properly.
+    return true;
+  }
+}

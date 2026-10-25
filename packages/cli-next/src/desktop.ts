@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { OperationalError } from "./errors.js";
-import { fetchRuntime, RUNTIME_HOST_IS_PUBLISHED } from "./runtime-assets.js";
+import { fetchRuntime, runtimeHostIsAvailable } from "./runtime-assets.js";
 
 /**
  * Finding and launching the installed Radius desktop app.
@@ -126,9 +126,8 @@ export async function resolveRuntimeAssets(input: {
   // first because a locally installed app is the runtime the agent will
   // actually run under, so verifying against that one is more honest than
   // verifying against a version only the CLI knows about.
-  if (RUNTIME_HOST_IS_PUBLISHED) {
-    const fetched = await fetchRuntime(input.onProgress ?? (() => {}));
-    return fetched;
+  if (runtimeHostIsAvailable(input.env)) {
+    return fetchRuntime(input.onProgress ?? (() => {}), input.env);
   }
 
   throw new OperationalError(

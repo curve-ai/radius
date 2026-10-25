@@ -236,7 +236,17 @@ const AgentRunEventSchema = z.object({
   ...EventHeaderShape,
   eventType: z.literal("agent_run"),
   providerKey: z.string().trim().min(1),
+  /** The provider's id for this one turn, where it gives one. */
   providerRunId: z.string().trim().min(1).nullable(),
+  /**
+   * The provider's id for the whole conversation.
+   *
+   * Added rather than replacing `providerRunId`, and optional, so a desktop
+   * that predates this field still syncs and a platform that predates it
+   * still accepts the event. Older events carry the session id in
+   * `providerRunId`; the storage migration moves those across locally.
+   */
+  providerSessionId: z.string().trim().min(1).nullable().optional(),
   triggeringMessageEventId: uuid.nullable(),
 });
 
