@@ -74,10 +74,101 @@ export const CommandRuntimeConfigSchema = z.object({
   command: z.array(nonempty).min(1),
 });
 
+/**
+ * Where a third-party harness comes from. Mirrors the ACP registry's own
+ * distribution shapes so `init` can copy a registry entry in verbatim.
+ *
+ * A discriminated union rather than a literal, so a later `oci` or `git`
+ * distribution lands additively.
+ */
+export const HarnessPlatformArtifactSchema = z.object({
+  /** Absolute URL, or a path relative to the project root. */
+  archive: nonempty,
+  /** Required for URLs, optional for in-repo paths, where `build` computes it. */
+  sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  /**
+   * Overrides the distribution's `cmd`/`args` for this platform. Real
+   * harnesses differ here — opencode ships `./opencode` everywhere and
+   * `./opencode.exe` on Windows — so one command for all platforms cannot be
+   * the only option. Additive and optional: a single-command harness omits it.
+   */
+  cmd: nonempty.optional(),
+  args: z.array(nonempty).optional(),
+});
+
+/**
+ * Keyed by Radius platform identifiers (`linux/arm64`, `darwin/arm64`, …),
+ * NOT the registry's own (`linux-aarch64`, `darwin-aarch64`). `init` translates.
+ */
+export const HarnessBinaryDistributionSchema = z
+  .object({
+    kind: z.literal("binary"),
+    platforms: z.record(nonempty, HarnessPlatformArtifactSchema),
+    cmd: nonempty,
+    args: z.array(nonempty).default([]),
+  })
+  .superRefine((value, context) => {
+    // Enforced here rather than at spawn time, so a config carrying an
+    // unverifiable archive for a platform this machine cannot run is still
+    // rejected. A remote artifact without a digest is not pinned at all.
+    for (const [platform, artifact] of Object.entries(value.platforms)) {
+      if (/^https?:\/\//.test(artifact.archive) && !artifact.sha256) {
+        context.addIssue({
+          code: "custom",
+          path: ["platforms", platform, "sha256"],
+          message: `A URL archive must carry sha256 (${platform})`,
+        });
+      }
+    }
+  });
+
+/** Exact version required: `name@1.2.3`. A floating range is not reproducible. */
+const pinnedPackage = nonempty.regex(
+  /@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/,
+  "Harness packages must pin an exact version",
+);
+
+/**
+ * `npx` and `uvx` are separate members with literal discriminants rather than
+ * one member with `kind: z.enum(["npx","uvx"])`. A union-typed discriminant
+ * cannot be narrowed away by a negative check, so the enum form forces casts
+ * at every consumer.
+ */
+export const HarnessNpxDistributionSchema = z.object({
+  kind: z.literal("npx"),
+  package: pinnedPackage,
+  args: z.array(nonempty).default([]),
+});
+
+export const HarnessUvxDistributionSchema = z.object({
+  kind: z.literal("uvx"),
+  package: pinnedPackage,
+  args: z.array(nonempty).default([]),
+});
+
+export const HarnessDistributionSchema = z.discriminatedUnion("kind", [
+  HarnessBinaryDistributionSchema,
+  HarnessNpxDistributionSchema,
+  HarnessUvxDistributionSchema,
+]);
+
+export const HarnessRuntimeConfigSchema = z.object({
+  kind: z.literal("harness"),
+  /** The ACP registry id this was populated from, for provenance. */
+  registryId: nonempty.optional(),
+  distribution: HarnessDistributionSchema,
+  license: nonempty.optional(),
+  licenseUrl: nonempty.optional(),
+});
+
 export const AgentRuntimeConfigSchema = z.discriminatedUnion("kind", [
   TypeScriptRuntimeConfigSchema,
   PythonRuntimeConfigSchema,
   CommandRuntimeConfigSchema,
+  HarnessRuntimeConfigSchema,
 ]);
 
 export const AgentResourceConfigSchema = z.object({
@@ -116,6 +207,12 @@ export const AgentConfigSchema = z
   .object({
     schemaVersion: z.literal(RADIUS_AGENT_CONFIG_VERSION).default(1),
     agent: agentRef.nullable().default(null),
+    /**
+     * Developer-owned semver. Combined with the build digest it forms the
+     * release version, so major/minor stay expressible without a manual bump
+     * for every rebuild.
+     */
+    version: semanticVersion.default("0.0.0"),
     name: z.string().trim().min(1).max(120),
     runtime: AgentRuntimeConfigSchema,
     development: AgentDevelopmentConfigSchema.optional(),
@@ -169,6 +266,11 @@ export type AgentConfigInput = z.input<typeof AgentConfigSchema>;
 export type AgentConfig = z.output<typeof AgentConfigSchema>;
 export type AgentManifest = z.output<typeof AgentManifestSchema>;
 export type AgentRuntimeConfig = z.output<typeof AgentRuntimeConfigSchema>;
+export type HarnessRuntimeConfig = z.output<typeof HarnessRuntimeConfigSchema>;
+export type HarnessDistribution = z.output<typeof HarnessDistributionSchema>;
+export type HarnessPlatformArtifact = z.output<
+  typeof HarnessPlatformArtifactSchema
+>;
 export type CapabilityRequest = z.output<typeof CapabilityRequestSchema>;
 
 export const AgentBuildReceiptSchema = z.object({
