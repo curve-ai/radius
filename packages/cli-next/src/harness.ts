@@ -1,7 +1,15 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  open,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import type { AgentConfig } from "@curve-ai/agent-contracts";
@@ -195,11 +203,23 @@ async function digestOf(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/**
+ * Somewhere to unpack before the result is renamed into place.
+ *
+ * Two properties that both have to hold:
+ *
+ *  - **Beside the cache, not in `tmpdir()`.** The staged directory is moved
+ *    with `rename`, which fails `EXDEV` across filesystems — and `/tmp` is a
+ *    separate tmpfs on Fedora, Arch and many CI images, where a URL harness
+ *    could therefore never be cached at all.
+ *  - **Unique per call.** The name used to be derived from the digest alone
+ *    and cleared with `rm -rf` on entry, so a second `radius dev` for the
+ *    same harness deleted the files the first session was executing from.
+ */
 async function freshStagingDirectory(tag: string): Promise<string> {
-  const staging = join(tmpdir(), `radius-harness-${tag}`);
-  await rm(staging, { recursive: true, force: true });
-  await mkdir(staging, { recursive: true });
-  return staging;
+  const root = harnessCacheRoot();
+  await mkdir(root, { recursive: true });
+  return mkdtemp(join(root, `.staging-${tag.slice(0, 12)}-`));
 }
 
 /**

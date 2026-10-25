@@ -3,16 +3,18 @@ import { randomBytes } from "node:crypto";
 import { startBridge } from "../../bridge.js";
 import { loadConfig } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
+import { launchDesktopApp } from "../../desktop.js";
 import { handler } from "../../handler.js";
 import { resolveHarness } from "../../harness.js";
 import {
   radiusUserDataPath,
   registerDevelopmentAgent,
 } from "../../registration.js";
-import { OperationalError } from "../../errors.js";
+import { EXIT_OPERATIONAL, OperationalError } from "../../errors.js";
 
 interface DevFlags {
   readonly verbose: boolean;
+  readonly "no-open": boolean;
 }
 
 async function run(
@@ -44,12 +46,15 @@ async function run(
         `[radius] harness exited (code ${String(code)}, signal ${String(signal)})`,
       );
       // No restart: supervision is a contract decision the experiments inform.
-      context.process.exitCode = code === 0 ? 0 : 1;
+      // Recorded through fail() rather than by assigning process.exitCode:
+      // Stricli assigns it after the handler returns and would overwrite it,
+      // so a crashed harness exited 0.
+      if (code !== 0) context.fail(EXIT_OPERATIONAL);
       context.stop();
     },
     onSpawnError: (error) => {
       failure = error;
-      context.process.exitCode = 1;
+      context.fail(EXIT_OPERATIONAL);
       context.stop();
     },
     onConnect: () => context.note("[radius] Radius connected"),
@@ -87,6 +92,10 @@ async function run(
   });
 
   const instanceId = randomBytes(4).toString("hex");
+  // From here on the bridge owns a child process and a listening socket, so
+  // every later step runs where a throw can still close them. Without this a
+  // failed registration left the harness running and the CLI hanging.
+  try {
   const registration = await registerDevelopmentAgent({
     userDataPath: radiusUserDataPath(context.process.platform, context.env),
     agentId: config.agent,
@@ -101,6 +110,16 @@ async function run(
     ),
   });
 
+  // Launched after registration, never before: the descriptor is what the app
+  // reads, so an app that opens first would briefly show nothing.
+  const desktop = flags["no-open"]
+    ? { launched: false, detail: "--no-open" }
+    : await launchDesktopApp({
+        platform: context.process.platform,
+        env: context.env,
+        projectRoot: context.cwd,
+      });
+
   if (context.output === "json") {
     emitJson(context, {
       agentId: config.agent,
@@ -112,19 +131,30 @@ async function run(
         source: harness.source,
         cached: harness.cached,
       },
+      desktop: { launched: desktop.launched, detail: desktop.detail },
     });
   } else {
     context.out(`${config.name} is running for Radius.`);
     context.out(`  harness     ${harness.command.join(" ")}`);
     context.out(`  endpoint    ${bridge.endpoint}`);
     context.out(`  descriptor  ${registration.path}`);
-    context.out("\nOpen Radius and pick this agent. Ctrl-C to deregister.");
+    if (desktop.launched) {
+      context.out(`  desktop     opened ${desktop.detail}`);
+      context.out("\nPick this agent in Radius. Ctrl-C to deregister.");
+    } else {
+      if (!flags["no-open"]) context.out(`  desktop     ${desktop.detail}`);
+      context.out("\nOpen Radius and pick this agent. Ctrl-C to deregister.");
+    }
   }
 
   try {
     await context.untilStopped();
   } finally {
     await registration.remove();
+  }
+  } finally {
+    // Closes whether registration succeeded, the session ended normally, or
+    // anything in between threw.
     await bridge.close();
   }
   // Surfaced through the caller so a failed spawn lands in the error taxonomy

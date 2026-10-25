@@ -18,6 +18,22 @@ export class OperationalError extends Error {
   }
 }
 
+/**
+ * No microVM runtime exists on this machine.
+ *
+ * Its own class because `build` has to distinguish it from every other
+ * verification failure: a missing runtime is a reason to skip the check and
+ * still write the layout, while an image that will not boot is a failed
+ * build. Catching `OperationalError` broadly conflated the two and reported
+ * success for a broken image.
+ */
+export class RuntimeUnavailableError extends OperationalError {
+  constructor(message: string, nextAction?: string) {
+    super(message, nextAction);
+    this.name = "RuntimeUnavailableError";
+  }
+}
+
 /** The invocation or the config was wrong. Print the correct usage. */
 export class UsageError extends Error {
   readonly exitCode = EXIT_USAGE;

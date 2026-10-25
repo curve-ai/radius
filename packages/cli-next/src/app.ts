@@ -1,11 +1,12 @@
 import { buildApplication, buildRouteMap } from "@stricli/core";
 
+import { agentBuildCommand } from "./commands/build/command.js";
 import { devCommand } from "./commands/dev/command.js";
 import { initCommand } from "./commands/init/command.js";
 import type { RadiusContext } from "./context.js";
 
-const routes = buildRouteMap<"init" | "dev", RadiusContext>({
-  routes: { init: initCommand, dev: devCommand },
+const routes = buildRouteMap<"init" | "dev" | "build", RadiusContext>({
+  routes: { init: initCommand, dev: devCommand, build: agentBuildCommand },
   docs: { brief: "Build and run agents on Radius" },
 });
 

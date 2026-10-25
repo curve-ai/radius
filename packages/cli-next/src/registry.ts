@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-import type {
-  HarnessDistribution,
-  HarnessPlatformArtifact,
+import {
+  HarnessRuntimeConfigSchema,
+  type HarnessDistribution,
+  type HarnessPlatformArtifact,
 } from "@curve-ai/agent-contracts";
 
 import { OperationalError, UsageError } from "./errors.js";
@@ -184,7 +185,7 @@ export function selectEntry(document: unknown, id: string): RegistryEntry {
       };
     }
 
-    return {
+    return validated(id, {
       ...common,
       distribution: {
         kind: "binary",
@@ -192,20 +193,53 @@ export function selectEntry(document: unknown, id: string): RegistryEntry {
         cmd: shared.cmd,
         args: shared.args,
       },
-    };
+    });
   }
 
   for (const kind of ["npx", "uvx"] as const) {
     const pkg = entry.distribution?.[kind];
     if (!pkg) continue;
-    return {
+    return validated(id, {
       ...common,
       distribution: { kind, package: pkg.package, args: pkg.args ?? [] },
-    };
+    });
   }
 
   throw new OperationalError(
     `The registry entry for "${id}" has no distribution Radius can install.`,
     "Only binary, npx and uvx distributions are supported.",
   );
+}
+
+/**
+ * Checks a translated entry against the contract before it is written.
+ *
+ * The registry is a third-party document and not everything in it satisfies
+ * the schema — a URL archive without a sha256, or a package pinned to
+ * `latest` rather than an exact version. Writing one of those produced an
+ * `init` that reported success and a `radius.json` that every later `dev` and
+ * `build` rejected, with the failure landing a command away from its cause.
+ */
+function validated<T extends { distribution: unknown }>(
+  id: string,
+  candidate: T,
+): T {
+  const result = HarnessRuntimeConfigSchema.safeParse({
+    kind: "harness",
+    registryId: id,
+    ...candidate,
+  });
+  if (!result.success) {
+    const detail = result.error.issues
+      .map(
+        (issue: z.core.$ZodIssue) =>
+          `  ${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      )
+      .join("\n");
+    throw new OperationalError(
+      `The registry entry for "${id}" cannot be used by Radius:\n${detail}`,
+      "This is a problem with the published entry, not with your project. Pick another harness, or write the distribution into radius.json by hand.",
+    );
+  }
+  return candidate;
 }

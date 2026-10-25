@@ -381,7 +381,22 @@ export const agentRuns = sqliteTable(
       .unique()
       .references(() => sessionEvents.id, { onDelete: "restrict" }),
     providerKey: text("provider_key").notNull(),
+    /**
+     * The provider's id for this one turn, where it gives one.
+     *
+     * Unique on purpose: a run happens once. This used to carry the ACP
+     * *session* id, which spans every turn in a conversation — so the second
+     * message of any conversation collided with the first and could not be
+     * recorded at all. The session id now has its own column below.
+     */
     providerRunId: text("provider_run_id"),
+    /**
+     * The provider's id for the whole conversation.
+     *
+     * Repeats across every run in that conversation, so it is indexed for
+     * lookup and never unique.
+     */
+    providerSessionId: text("provider_session_id"),
     triggeringMessageEventId: text("triggering_message_event_id").references(
       () => messages.eventId,
       { onDelete: "set null" },
@@ -392,6 +407,10 @@ export const agentRuns = sqliteTable(
     uniqueIndex("agent_runs_provider_run_uq")
       .on(table.providerKey, table.providerRunId)
       .where(sql`${table.providerRunId} is not null`),
+    index("agent_runs_provider_session_idx").on(
+      table.providerKey,
+      table.providerSessionId,
+    ),
     index("agent_runs_session_started_idx").on(
       table.sessionId,
       table.startedAtMs,

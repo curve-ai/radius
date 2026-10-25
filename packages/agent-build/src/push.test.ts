@@ -35,6 +35,8 @@ test("uses a temporary Docker config and never places the password in argv", asy
     contextPath,
     manifest: {} as TypeScriptOciBuildResult["manifest"],
     bundleSha256: "c".repeat(64),
+    releaseVersion: `0.0.0+${"a".repeat(16)}`,
+    indexPath: `${layoutPath}/../index.json`,
   } satisfies TypeScriptOciBuildResult;
 
   const digest = await pushTypeScriptOciImage({

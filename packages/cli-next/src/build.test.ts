@@ -1,0 +1,200 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { loadConfigFile } from "./config.js";
+
+async function project(files: Record<string, string>): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "radius-build-test-"));
+  for (const [name, contents] of Object.entries(files)) {
+    const path = join(root, name);
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, contents, "utf8");
+  }
+  return root;
+}
+
+const harnessConfig = {
+  schemaVersion: 1,
+  agent: "agent_abcdef12",
+  name: "Harness Project",
+  runtime: {
+    kind: "harness",
+    distribution: {
+      kind: "binary",
+      cmd: "./opencode",
+      args: ["acp"],
+      platforms: {
+        "linux/arm64": {
+          archive: "https://example.invalid/opencode.tar.gz",
+          sha256: "a".repeat(64),
+        },
+      },
+    },
+  },
+};
+
+test("radius.json is preferred and reported without a deprecation", async () => {
+  const root = await project({
+    "radius.json": JSON.stringify(harnessConfig),
+  });
+  const loaded = await loadConfigFile(root);
+  assert.equal(loaded.config.name, "Harness Project");
+  assert.equal(loaded.deprecation, undefined);
+});
+
+test("a pyproject-only project still loads, with a deprecation", async () => {
+  // This is the exact shape that made `build` unreachable: the old CLI found
+  // pyproject.toml, demanded [tool.radius], and stopped.
+  const root = await project({
+    "pyproject.toml": [
+      "[project]",
+      'name = "example"',
+      'version = "0.1.0"',
+      "",
+      "[tool.radius]",
+      "schemaVersion = 1",
+      'agent = "agent_abcdef12"',
+      'name = "Python Project"',
+      "",
+      "[tool.radius.runtime]",
+      'kind = "python"',
+      'module = "example.agent"',
+      'python = "3.12"',
+    ].join("\n"),
+  });
+  const loaded = await loadConfigFile(root);
+  assert.equal(loaded.config.name, "Python Project");
+  assert.match(loaded.deprecation ?? "", /pyproject\.toml is deprecated/);
+});
+
+test("a pyproject without [tool.radius] is not mistaken for a config", async () => {
+  const root = await project({
+    "pyproject.toml": '[project]\nname = "just-a-python-project"\n',
+    "radius.config.json": JSON.stringify(harnessConfig),
+  });
+  const loaded = await loadConfigFile(root);
+  assert.equal(loaded.config.name, "Harness Project");
+  assert.match(loaded.deprecation ?? "", /radius\.config\.json is deprecated/);
+});
+
+test("a project with no config at all says what to run", async () => {
+  const root = await project({ "README.md": "# nothing here\n" });
+  await assert.rejects(() => loadConfigFile(root), /No radius\.json/);
+});
+
+test("the harness defaults ship nothing and stage at the state path", async () => {
+  const root = await project({
+    "radius.json": JSON.stringify(harnessConfig),
+  });
+  const { config } = await loadConfigFile(root);
+  assert.equal(config.runtime.kind, "harness");
+  if (config.runtime.kind !== "harness") return;
+  // A binary-only harness must behave exactly as it did before these fields
+  // existed, which is what makes them safe to add.
+  assert.deepEqual(config.runtime.include, []);
+  assert.deepEqual(config.runtime.toolchains, []);
+  assert.equal(config.runtime.configRoot, "/opt/data");
+});
+
+test("configRoot must be an absolute path", async () => {
+  const root = await project({
+    "radius.json": JSON.stringify({
+      ...harnessConfig,
+      runtime: { ...harnessConfig.runtime, configRoot: "runtime" },
+    }),
+  });
+  await assert.rejects(
+    () => loadConfigFile(root),
+    /configRoot must be an absolute POSIX path/,
+  );
+});
+
+test("include may not escape the project", async () => {
+  const root = await project({
+    "radius.json": JSON.stringify({
+      ...harnessConfig,
+      runtime: { ...harnessConfig.runtime, include: ["../secrets/"] },
+    }),
+  });
+  await assert.rejects(
+    () => loadConfigFile(root),
+    /must not escape the project root/,
+  );
+});
+
+// ADR-008: "A command may prompt only when standard input is a TTY, `--json`
+// is unset, and no `--yes` or `--non-interactive` flag is present. Otherwise
+// it fails immediately and names the flag that would have supplied the
+// answer." A prompt that reaches CI hangs rather than failing, so each gate
+// is pinned here.
+test("the prompt gate closes for every non-interactive case", async () => {
+  const { canPrompt } = await import("./prompt.js");
+  const base = { isTTY: true, output: "text" } as never;
+  assert.equal(canPrompt(base, { yes: false }), true);
+  assert.equal(canPrompt(base, { yes: true }), false, "--yes must close it");
+  assert.equal(
+    canPrompt({ isTTY: false, output: "text" } as never, { yes: false }),
+    false,
+    "a pipe must close it",
+  );
+  assert.equal(
+    canPrompt({ isTTY: true, output: "json" } as never, { yes: false }),
+    false,
+    "--json must close it",
+  );
+});
+
+test("refusing to prompt names the flag that would have answered", async () => {
+  const { requireFlag } = await import("./prompt.js");
+  assert.throws(
+    () => requireFlag("--harness <id>", "Run `radius init --list`."),
+    (error: Error) =>
+      /--harness <id>/.test(error.message) &&
+      /nobody to ask/.test(error.message) &&
+      error.name === "UsageError",
+  );
+});
+
+// A broken image used to be indistinguishable from an unverifiable machine:
+// both printed "Not verified" and exited 0. Only an absent runtime is a skip.
+test("only an absent runtime counts as a skippable verification", async () => {
+  const { RuntimeUnavailableError, OperationalError, UsageError } =
+    await import("./errors.js");
+  const absent = new RuntimeUnavailableError("no runtime here");
+  assert.ok(absent instanceof RuntimeUnavailableError);
+  // It stays an OperationalError so exit codes and rendering are unchanged.
+  assert.ok(absent instanceof OperationalError);
+  assert.equal(absent.exitCode, 1);
+
+  // These are failed builds, and must not be mistaken for a skip.
+  for (const failure of [
+    new OperationalError("the image carries no release template"),
+    new UsageError("that config is wrong"),
+  ]) {
+    assert.ok(
+      !(failure instanceof RuntimeUnavailableError),
+      `${failure.name} must not read as a missing runtime`,
+    );
+  }
+});
+
+test("--config names a file, and roots the build at its directory", async () => {
+  const root = await project({
+    "envs/prod.json": JSON.stringify({ ...harnessConfig, name: "Prod" }),
+    "radius.json": JSON.stringify({ ...harnessConfig, name: "Default" }),
+  });
+  // Passing a file must not fall back to radius.json beside it.
+  const loaded = await loadConfigFile(root, join(root, "envs", "prod.json"));
+  assert.equal(loaded.config.name, "Prod");
+});
+
+test("a named config that does not exist says so", async () => {
+  const root = await project({ "radius.json": JSON.stringify(harnessConfig) });
+  await assert.rejects(
+    () => loadConfigFile(root, join(root, "nope.json")),
+    /No config at /,
+  );
+});

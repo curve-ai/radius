@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-const projectRef = z.string().regex(/^proj_[A-Za-z0-9_-]{6,64}$/);
+// `proj_` is a Platform project; `agent_` is a locally built agent, which has
+// no Platform project until it is first deployed. Widened additively so an
+// existing signed bundle keeps validating unchanged.
+const projectRef = z
+  .string()
+  .regex(/^(?:proj|agent)_[A-Za-z0-9_-]{6,64}$/);
 const relativeResourcePath = z
   .string()
   .trim()

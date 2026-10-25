@@ -103,7 +103,15 @@ export const syncAgentRuns = radiusSync.table(
       .notNull()
       .references(() => syncSessions.id, { onDelete: "cascade" }),
     providerKey: text("provider_key").notNull(),
+    /** The provider's id for this one turn, where it gives one. Unique. */
     providerRunId: text("provider_run_id"),
+    /**
+     * The provider's id for the whole conversation, which repeats across
+     * every run in it. Never unique — the mirror of the local split, where
+     * putting a session id in the unique run column rejected the second
+     * message of every resumable conversation.
+     */
+    providerSessionId: text("provider_session_id"),
     triggeringMessageEventId: uuid("triggering_message_event_id"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
   },
@@ -112,6 +120,10 @@ export const syncAgentRuns = radiusSync.table(
     uniqueIndex("sync_agent_runs_provider_run_key")
       .on(table.providerKey, table.providerRunId)
       .where(sql`${table.providerRunId} IS NOT NULL`),
+    index("sync_agent_runs_provider_session_idx").on(
+      table.providerKey,
+      table.providerSessionId,
+    ),
     index("sync_agent_runs_session_started_idx").on(
       table.sessionId,
       table.startedAt,

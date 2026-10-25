@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
+    "radius": "./bin/radius.mjs",
     "radius-next": "./dist/bin.js"
   },
   "scripts": {
@@ -15,9 +16,12 @@
   },
   "dependencies": {
     "@curve-ai/agent-contracts": "0.0.1",
+    "@curve-ai/build": "0.0.1",
     "@curve-ai/radius-runtime": "0.0.1",
     "@stricli/core": "1.2.1",
     "jsonc-parser": "3.3.1",
+    "smol-toml": "1.8.0",
+    "tsx": "4.23.12",
     "ws": "8.21.3"
   },
   "devDependencies": {
@@ -25,5 +29,10 @@
     "@types/ws": "8.18.1",
     "tsx": "4.23.12",
     "typescript": "5.9.3"
-  }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src"
+  ]
 }
