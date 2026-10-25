@@ -20,7 +20,7 @@
     "@curve-ai/radius-runtime": "0.0.1",
     "@stricli/core": "1.2.1",
     "jsonc-parser": "3.3.1",
-    "smol-toml": "1.8.0",
+    "smol-toml": "1.9.0",
     "tsx": "4.23.12",
     "ws": "8.21.3"
   },
