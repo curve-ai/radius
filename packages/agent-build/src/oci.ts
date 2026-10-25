@@ -17,6 +17,7 @@ import {
 } from "@curve-ai/agent-contracts";
 import { build } from "esbuild";
 
+import { BuildError } from "./errors.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 import {
   releaseTemplateLabels,
@@ -171,7 +172,7 @@ export async function buildTypeScriptOciLayout(
     // here rather than ship a layout that cannot start.
     const claimedMb = estimateImageMb(bundle.byteLength);
     if (imageSizeMb > claimedMb) {
-      throw new Error(
+      throw new BuildError(
         `Built image is larger than the release template claims (${Math.ceil(imageSizeMb)}MB > ${claimedMb}MB). Raise BASE_IMAGE_COMPRESSED_BYTES in oci.ts.`,
       );
     }

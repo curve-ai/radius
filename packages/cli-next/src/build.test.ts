@@ -157,3 +157,44 @@ test("refusing to prompt names the flag that would have answered", async () => {
       error.name === "UsageError",
   );
 });
+
+// A broken image used to be indistinguishable from an unverifiable machine:
+// both printed "Not verified" and exited 0. Only an absent runtime is a skip.
+test("only an absent runtime counts as a skippable verification", async () => {
+  const { RuntimeUnavailableError, OperationalError, UsageError } =
+    await import("./errors.js");
+  const absent = new RuntimeUnavailableError("no runtime here");
+  assert.ok(absent instanceof RuntimeUnavailableError);
+  // It stays an OperationalError so exit codes and rendering are unchanged.
+  assert.ok(absent instanceof OperationalError);
+  assert.equal(absent.exitCode, 1);
+
+  // These are failed builds, and must not be mistaken for a skip.
+  for (const failure of [
+    new OperationalError("the image carries no release template"),
+    new UsageError("that config is wrong"),
+  ]) {
+    assert.ok(
+      !(failure instanceof RuntimeUnavailableError),
+      `${failure.name} must not read as a missing runtime`,
+    );
+  }
+});
+
+test("--config names a file, and roots the build at its directory", async () => {
+  const root = await project({
+    "envs/prod.json": JSON.stringify({ ...harnessConfig, name: "Prod" }),
+    "radius.json": JSON.stringify({ ...harnessConfig, name: "Default" }),
+  });
+  // Passing a file must not fall back to radius.json beside it.
+  const loaded = await loadConfigFile(root, join(root, "envs", "prod.json"));
+  assert.equal(loaded.config.name, "Prod");
+});
+
+test("a named config that does not exist says so", async () => {
+  const root = await project({ "radius.json": JSON.stringify(harnessConfig) });
+  await assert.rejects(
+    () => loadConfigFile(root, join(root, "nope.json")),
+    /No config at /,
+  );
+});

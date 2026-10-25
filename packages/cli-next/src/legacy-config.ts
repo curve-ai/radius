@@ -80,3 +80,22 @@ async function readLegacy(
   }
   return imported.default;
 }
+
+/** Reads one named legacy config, for `--config path/to/radius.config.ts`. */
+export async function readLegacyConfigFile(
+  path: string,
+): Promise<AgentConfig> {
+  const filename = path.split("/").pop() ?? path;
+  const value = await readLegacy(path, filename);
+  if (value === null) {
+    throw new UsageError(`${filename} defines no [tool.radius] section.`);
+  }
+  const result = AgentConfigSchema.safeParse(value);
+  if (!result.success) {
+    const detail = result.error.issues
+      .map((issue) => `  ${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("\n");
+    throw new UsageError(`${filename} is not a valid agent config:\n${detail}`);
+  }
+  return result.data;
+}

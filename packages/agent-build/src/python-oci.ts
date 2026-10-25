@@ -21,6 +21,7 @@ import {
   type AgentManifest,
 } from "@curve-ai/agent-contracts";
 
+import { BuildError } from "./errors.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 import {
   releaseTemplateLabels,
@@ -65,9 +66,36 @@ export interface PythonOciBuildResult {
 }
 
 /** Deterministic: pinned base plus the agent's own sources. */
-export function estimatePythonImageMb(sourceBytes: number): number {
+/**
+ * Dependencies are installed inside the image, so their size is the one input
+ * not known before the build.
+ *
+ * The estimate used to be the base image plus the bytes of `pyproject.toml`
+ * and `uv.lock` — two text files. Any agent with real dependencies therefore
+ * claimed a few hundred megabytes, built something far larger, and failed the
+ * post-build check. The lockfile at least says how many packages there are,
+ * which is a much better signal than how long it is, and the allowance is
+ * deliberately generous because undershooting fails the build while
+ * overshooting only reserves rootfs the guest does not use.
+ */
+const PER_PACKAGE_BYTES = 16 * 1024 * 1024;
+const MINIMUM_DEPENDENCY_BYTES = 512 * 1024 * 1024;
+
+export function countLockedPackages(lockfile: string): number {
+  return (lockfile.match(/^name = "/gm) ?? []).length;
+}
+
+export function estimatePythonImageMb(
+  sourceBytes: number,
+  lockedPackages = 0,
+): number {
+  const dependencies = Math.max(
+    MINIMUM_DEPENDENCY_BYTES,
+    lockedPackages * PER_PACKAGE_BYTES,
+  );
   return Math.ceil(
-    ((BASE_IMAGE_COMPRESSED_BYTES + sourceBytes) * 4) / (1024 * 1024),
+    ((BASE_IMAGE_COMPRESSED_BYTES + sourceBytes) * 4 + dependencies) /
+      (1024 * 1024),
   );
 }
 
@@ -162,7 +190,10 @@ export async function buildPythonOciLayout(
       imageReference,
       platform: "linux/arm64",
       processArguments: ["python", "-m", config.runtime.module],
-      imageSizeMb: estimatePythonImageMb(sourceBytes),
+      imageSizeMb: estimatePythonImageMb(
+        sourceBytes,
+        countLockedPackages(lockfile.toString()),
+      ),
     });
     const labels = releaseTemplateLabels(template);
 
@@ -212,10 +243,15 @@ export async function buildPythonOciLayout(
       outputRoot: temporaryRoot,
     });
 
-    const claimedMb = estimatePythonImageMb(sourceBytes);
+    const claimedMb = estimatePythonImageMb(
+      sourceBytes,
+      countLockedPackages(lockfile.toString()),
+    );
     if (imageSizeMb > claimedMb) {
-      throw new Error(
-        `Built image is larger than the release template claims (${Math.ceil(imageSizeMb)}MB > ${claimedMb}MB). Raise BASE_IMAGE_COMPRESSED_BYTES in python-oci.ts.`,
+      throw new BuildError(
+        `This agent's dependencies make a larger image than Radius budgeted for: ${Math.ceil(imageSizeMb)}MB against ${claimedMb}MB.\n` +
+          "The guest would be given a rootfs too small to boot, so the layout was not written.\n" +
+          "Please report this with the dependency list — the per-package allowance in python-oci.ts needs raising.",
       );
     }
 

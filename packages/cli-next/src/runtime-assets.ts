@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 
-import { OperationalError } from "./errors.js";
+import { OperationalError, RuntimeUnavailableError } from "./errors.js";
 
 /**
  * The runtime the CLI fetches for itself.
@@ -114,7 +114,7 @@ export async function fetchRuntime(
 ): Promise<FetchedRuntime> {
   const host = hostPin(env);
   if (host === null) {
-    throw new OperationalError(
+    throw new RuntimeUnavailableError(
       "This CLI has no published runtime host to download yet.",
       [
         "Until one ships, verifying a build needs the Radius desktop app installed (it carries the runtime), or a repo checkout with `bun run runtime:build`.",
@@ -184,7 +184,15 @@ async function download(
   expected: string,
   destination: string,
 ): Promise<void> {
-  const response = await fetch(url);
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new OperationalError(
+      `Could not reach the runtime download: ${(error as Error).message}`,
+      `URL: ${url}`,
+    );
+  }
   if (!response.ok || !response.body) {
     throw new OperationalError(
       `Downloading the runtime failed: ${response.status} ${response.statusText}`,

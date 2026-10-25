@@ -23,6 +23,7 @@ import {
   type HarnessToolchain,
 } from "@curve-ai/agent-contracts";
 
+import { BuildError } from "./errors.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 import {
   releaseTemplateLabels,
@@ -225,7 +226,7 @@ export async function buildHarnessOciLayout(
     });
 
     if (imageSizeMb > estimatedMb) {
-      throw new Error(
+      throw new BuildError(
         `Built image is larger than the release template claims (${Math.ceil(imageSizeMb)}MB > ${estimatedMb}MB). Raise the estimate in harness-oci.ts.`,
       );
     }
@@ -327,7 +328,7 @@ async function stageHarness(input: {
   const artifact = distribution.platforms[TARGET_PLATFORM];
   if (!artifact) {
     const published = Object.keys(distribution.platforms).sort().join(", ");
-    throw new Error(
+    throw new BuildError(
       `This harness publishes no ${TARGET_PLATFORM} build, so it cannot run in a Radius microVM. It ships: ${published}.`,
     );
   }
@@ -338,7 +339,7 @@ async function stageHarness(input: {
     const bytes = await readFile(source);
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (artifact.sha256 && artifact.sha256 !== digest) {
-      throw new Error(
+      throw new BuildError(
         `${artifact.archive} does not match the sha256 in config (expected ${artifact.sha256}, got ${digest}).`,
       );
     }
@@ -348,7 +349,7 @@ async function stageHarness(input: {
   }
 
   if (!artifact.sha256) {
-    throw new Error(
+    throw new BuildError(
       `The ${TARGET_PLATFORM} archive is a URL but carries no sha256. Radius will not package an unverified harness.`,
     );
   }
@@ -408,9 +409,20 @@ async function download(
   expected: string,
   destination: string,
 ): Promise<number> {
-  const response = await fetch(url);
+  // `fetch` itself throws on DNS failure, a refused connection or a dropped
+  // socket — none of which is a defect in Radius, and all of which reached
+  // the developer as "Internal error, please report this".
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new BuildError(
+      `Could not reach the harness download: ${(error as Error).message}`,
+      `URL: ${url}\nCheck the network, or the archive URL in radius.json.`,
+    );
+  }
   if (!response.ok || !response.body) {
-    throw new Error(
+    throw new BuildError(
       `Downloading the harness failed: ${response.status} ${response.statusText} (${url})`,
     );
   }
@@ -422,7 +434,7 @@ async function download(
       for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
         received += chunk.byteLength;
         if (received > MAX_ARCHIVE_BYTES) {
-          throw new Error(
+          throw new BuildError(
             `The harness archive exceeds ${MAX_ARCHIVE_BYTES / (1024 * 1024)}MB.`,
           );
         }
@@ -435,7 +447,7 @@ async function download(
   const digest = hash.digest("hex");
   if (digest !== expected) {
     await rm(destination, { force: true });
-    throw new Error(
+    throw new BuildError(
       `The harness archive does not match its pinned sha256 (expected ${expected}, got ${digest}).`,
     );
   }
@@ -476,7 +488,7 @@ async function stageProjectTree(input: {
     try {
       info = await stat(source);
     } catch {
-      throw new Error(
+      throw new BuildError(
         `runtime.include names ${declared}, which does not exist in the project.`,
       );
     }
@@ -748,7 +760,7 @@ async function runCommand(
       // export. The raw message names neither Radius nor the fix.
       if (/OCI exporter is not supported for the docker driver/.test(stderr)) {
         rejectRun(
-          new Error(
+          new BuildError(
             "This Docker builder cannot export an OCI layout, which is the only thing Radius can ship.\n" +
               "Create one once with:\n" +
               "  docker buildx create --name radius-oci --driver docker-container --bootstrap\n" +

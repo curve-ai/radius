@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   AgentBuildReceiptSchema,
@@ -11,6 +11,7 @@ import {
   buildPythonOciLayout,
   buildTypeScriptOciLayout,
   canonicalJson,
+  isBuildError,
   type HarnessOciBuildResult,
   type PythonOciBuildResult,
   type TypeScriptOciBuildResult,
@@ -18,7 +19,11 @@ import {
 
 import { loadConfigFile } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
-import { OperationalError, UsageError } from "../../errors.js";
+import {
+  OperationalError,
+  RuntimeUnavailableError,
+  UsageError,
+} from "../../errors.js";
 import { handler } from "../../handler.js";
 import { verifyBuild } from "../../verify.js";
 
@@ -35,10 +40,19 @@ type AnyBuildResult =
 
 async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
   const context = this;
-  const root = context.cwd;
-  const loaded = await loadConfigFile(
-    flags.config ? dirnameOf(root, flags.config) : root,
-  );
+  // --config names a file, not a directory. Resolving it to a directory and
+  // then looking for radius.json inside meant `--config agent.prod.json`
+  // silently built whatever radius.json held instead.
+  const explicit = flags.config
+    ? isAbsolute(flags.config)
+      ? flags.config
+      : resolve(context.cwd, flags.config)
+    : null;
+  // Paths in the receipt, and `include` in a harness config, are relative to
+  // the project — which is the config's own directory, not wherever the
+  // command happened to be run.
+  const root = explicit ? dirname(explicit) : context.cwd;
+  const loaded = await loadConfigFile(root, explicit);
   if (loaded.deprecation) context.note(loaded.deprecation);
   const config = loaded.config;
 
@@ -49,9 +63,18 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
   }
 
   context.out(`building ${config.name}`);
+  // A build failure the builder could describe is an operational error with a
+  // next action, not an internal defect. Without this an expected condition —
+  // a harness with no Linux build, a Docker driver that cannot export OCI —
+  // reached the developer as "Internal error, please report this".
   const build = await buildFor(config, root, (message) =>
     context.out(`  ${message}`),
-  );
+  ).catch((error: unknown) => {
+    if (isBuildError(error)) {
+      throw new OperationalError(error.message, error.nextAction);
+    }
+    throw error;
+  });
   context.out(`  digest       ${build.buildDigest}`);
   context.out(`  release      ${build.releaseVersion}`);
   context.out(`  image        ${build.imageDigest}`);
@@ -81,7 +104,11 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
     // a developer with no desktop app installed could not build at all.
     const result = await verifyBuild({ root, config, build, context }).catch(
       (error: unknown) => {
-        if (error instanceof OperationalError || error instanceof UsageError) {
+        // Only an absent runtime is a skip. An image that will not boot, a
+        // missing release template or a runtime host that fails are failed
+        // builds, and reporting them as "not verified" with exit 0 would make
+        // a broken image indistinguishable from an unverifiable machine.
+        if (error instanceof RuntimeUnavailableError) {
           skippedBecause = error.message;
           return null;
         }
@@ -222,10 +249,6 @@ async function writeReceipt(
   return receiptPath;
 }
 
-function dirnameOf(root: string, configPath: string): string {
-  const absolute = isAbsolute(configPath) ? configPath : resolve(root, configPath);
-  return absolute.replace(/\/[^/]+$/, "");
-}
 
 function projectRelative(root: string, target: string): string {
   const relativePath = relative(root, target);

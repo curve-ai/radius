@@ -10,7 +10,7 @@ import {
   radiusUserDataPath,
   registerDevelopmentAgent,
 } from "../../registration.js";
-import { OperationalError } from "../../errors.js";
+import { EXIT_OPERATIONAL, OperationalError } from "../../errors.js";
 
 interface DevFlags {
   readonly verbose: boolean;
@@ -46,12 +46,15 @@ async function run(
         `[radius] harness exited (code ${String(code)}, signal ${String(signal)})`,
       );
       // No restart: supervision is a contract decision the experiments inform.
-      context.process.exitCode = code === 0 ? 0 : 1;
+      // Recorded through fail() rather than by assigning process.exitCode:
+      // Stricli assigns it after the handler returns and would overwrite it,
+      // so a crashed harness exited 0.
+      if (code !== 0) context.fail(EXIT_OPERATIONAL);
       context.stop();
     },
     onSpawnError: (error) => {
       failure = error;
-      context.process.exitCode = 1;
+      context.fail(EXIT_OPERATIONAL);
       context.stop();
     },
     onConnect: () => context.note("[radius] Radius connected"),
@@ -89,6 +92,10 @@ async function run(
   });
 
   const instanceId = randomBytes(4).toString("hex");
+  // From here on the bridge owns a child process and a listening socket, so
+  // every later step runs where a throw can still close them. Without this a
+  // failed registration left the harness running and the CLI hanging.
+  try {
   const registration = await registerDevelopmentAgent({
     userDataPath: radiusUserDataPath(context.process.platform, context.env),
     agentId: config.agent,
@@ -144,6 +151,10 @@ async function run(
     await context.untilStopped();
   } finally {
     await registration.remove();
+  }
+  } finally {
+    // Closes whether registration succeeded, the session ended normally, or
+    // anything in between threw.
     await bridge.close();
   }
   // Surfaced through the caller so a failed spawn lands in the error taxonomy

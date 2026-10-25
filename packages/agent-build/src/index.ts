@@ -1,3 +1,4 @@
+export { BuildError, isBuildError } from "./errors.js";
 export { canonicalJson, createAgentManifest, defineConfig } from "./manifest.js";
 
 export {

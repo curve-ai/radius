@@ -3,7 +3,7 @@ import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { OperationalError } from "./errors.js";
+import { OperationalError, RuntimeUnavailableError } from "./errors.js";
 import { fetchRuntime, runtimeHostIsAvailable } from "./runtime-assets.js";
 
 /**
@@ -130,7 +130,7 @@ export async function resolveRuntimeAssets(input: {
     return fetchRuntime(input.onProgress ?? (() => {}), input.env);
   }
 
-  throw new OperationalError(
+  throw new RuntimeUnavailableError(
     "Could not find the Radius runtime, which is what boots the microVM a build is verified in.",
     [
       "No published runtime is available for this CLI version yet, so it has to come from somewhere on this machine:",

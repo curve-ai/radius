@@ -231,7 +231,9 @@ async function insertEventProjection(
         eventId: event.eventId,
         sessionId: event.sessionId,
         providerKey: event.providerKey,
-        providerRunId: event.providerRunId,
+        providerRunId: event.providerSessionId
+          ? event.providerRunId
+          : null,
         // Optional on the wire, so a desktop that predates the split still
         // syncs; its session id arrives in providerRunId and is read from
         // there rather than being dropped.

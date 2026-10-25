@@ -882,7 +882,9 @@ async function insertEventSubtype(
         sessionId: event.sessionId,
         createdByEventId: event.eventId,
         providerKey: event.providerKey,
-        providerRunId: event.providerRunId,
+        providerRunId: event.providerSessionId
+          ? event.providerRunId
+          : null,
         // Older events predate the split and carry the session id in
         // `providerRunId`; read it from there so history stays queryable.
         providerSessionId: event.providerSessionId ?? event.providerRunId,

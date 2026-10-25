@@ -238,3 +238,35 @@ test("a harness with no linux/arm64 build cannot be packaged", async () => {
     /publishes no linux\/arm64 build/,
   );
 });
+
+test("an expected failure is a BuildError, not an internal defect", async () => {
+  // These reached the developer as "Internal error — please report this"
+  // with a stack trace, for an ordinary condition they could act on.
+  const { isBuildError } = await import("./errors.js");
+  const { buildHarnessOciLayout } = await import("./harness-oci.js");
+  await assert.rejects(
+    () =>
+      buildHarnessOciLayout({
+        root: process.cwd(),
+        config: {
+          agent: "agent_harness01",
+          name: "Windows Only",
+          runtime: {
+            kind: "harness",
+            distribution: {
+              kind: "binary",
+              cmd: "./agent.exe",
+              platforms: {
+                "windows/amd64": {
+                  archive: "https://example.invalid/a.zip",
+                  sha256: "c".repeat(64),
+                },
+              },
+            },
+          },
+        } as AgentConfigInput,
+        outputRoot: `${process.cwd()}/.radius-test-out`,
+      }),
+    (error: unknown) => isBuildError(error),
+  );
+});

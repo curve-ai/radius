@@ -43,7 +43,34 @@ export interface LoadedConfig {
  * predates `radius.json`: without it, `build` would refuse every config the
  * old CLI ever wrote.
  */
-export async function loadConfigFile(root: string): Promise<LoadedConfig> {
+export async function loadConfigFile(
+  root: string,
+  explicitPath?: string | null,
+): Promise<LoadedConfig> {
+  // A named file is read as given. Probing the directory instead is how
+  // `--config agent.prod.json` ended up loading radius.json.
+  if (explicitPath) {
+    let raw: string;
+    try {
+      raw = await readFile(explicitPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new OperationalError(`No config at ${explicitPath}.`);
+      }
+      throw error;
+    }
+    if (explicitPath.endsWith(".json")) {
+      return { config: parseConfig(raw), path: explicitPath };
+    }
+    const { readLegacyConfigFile } = await import("./legacy-config.js");
+    const legacy = await readLegacyConfigFile(explicitPath);
+    return {
+      config: legacy,
+      path: explicitPath,
+      deprecation: `${explicitPath} is a deprecated config format and will stop being read.`,
+    };
+  }
+
   const raw = await readRawConfig(root);
   if (raw !== null) {
     return { config: parseConfig(raw), path: configPath(root) };

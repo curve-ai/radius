@@ -77,6 +77,15 @@ export async function startBridge(
   child.once("exit", events.onExit);
   child.stderr.on("data", split(events.onStderr));
 
+  // A harness that dies mid-session makes the next stdin write fail with
+  // EPIPE. Without a listener that is an uncaught exception, which takes the
+  // process down before the descriptor is removed — leaving a registration
+  // pointing at an endpoint nobody is serving.
+  child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") return;
+    events.onStderr(`[bridge] could not write to the harness: ${error.message}`);
+  });
+
   // Loopback is not a trust boundary — the process on the other end runs code —
   // so the bridge requires the bearer token handed to the desktop in the
   // descriptor, which the desktop already knows how to send.
@@ -102,7 +111,10 @@ export async function startBridge(
       accepted.on("message", (data) => {
         const line = data.toString();
         tee(line, "client", events);
-        child.stdin.write(`${line}\n`);
+        // Checked rather than attempted: writing to a closed stdin is a
+        // normal consequence of the harness exiting, not an error worth
+        // raising at the client.
+        if (child.stdin.writable) child.stdin.write(`${line}\n`);
       });
       accepted.once("close", () => {
         socket = null;
