@@ -310,8 +310,16 @@ fn developer_state_share_path(
         return Err(outside());
     };
 
+    // A missing path cannot resolve the same Windows junctions as APPDATA.
+    // Reject it before comparing its canonical location with the root.
+    let candidate_path = Path::new(raw_path);
+    if !candidate_path.is_dir() {
+        return Err(invalid(
+            "--developer-state-share must reference an existing directory",
+        ));
+    }
     let app_data = normalize(app_data);
-    let candidate = normalize(Path::new(raw_path));
+    let candidate = normalize(candidate_path);
     let depth = app_data.components().count();
     let profile = candidate
         .components()
@@ -325,11 +333,6 @@ fn developer_state_share_path(
         || candidate.components().count() <= depth + 1
     {
         return Err(outside());
-    }
-    if !candidate.is_dir() {
-        return Err(invalid(
-            "--developer-state-share must reference an existing directory",
-        ));
     }
     Ok(Some(candidate))
 }
