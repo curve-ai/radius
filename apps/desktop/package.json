@@ -23,8 +23,8 @@
     "make": "bun run build && electron-builder --config electron-builder.config.cjs",
     "lint": "eslint --cache .",
     "test": "ELECTRON_OVERRIDE_DIST_PATH=. tsx --test --test-force-exit 'src/**/*.test.ts'",
-    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
-    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck:node": "bun check -p tsconfig.node.json --composite false",
+    "typecheck:web": "bun check -p tsconfig.web.json --composite false",
     "typecheck": "bun run typecheck:node && bun run typecheck:web",
     "postinstall": "electron-builder install-app-deps"
   },

@@ -4,14 +4,14 @@
   "private": true,
   "description": "The open-source runtime and delivery platform for specialized AI agents.",
   "license": "MIT",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "workspaces": [
     "apps/*",
     "packages/*",
     "examples/*"
   ],
   "engines": {
-    "bun": ">=1.3.14",
+    "bun": ">=1.4.4",
     "node": ">=22.23.4"
   },
   "overrides": {
@@ -81,6 +81,10 @@
     "make": "bun run browser:build && bun run runtime:build && bun run runtime:prepare-assets && bun run agents:prepare && bun run --cwd apps/desktop make",
     "auth:setup": "bun scripts/configure-desktop-auth.ts",
     "cli:link": "bun link --cwd packages/cli-next",
-    "cli:unlink": "bun unlink --cwd packages/cli-next"
+    "cli:unlink": "bun unlink --cwd packages/cli-next",
+    "format": "bun fmt",
+    "format:check": "bun fmt --check",
+    "format:changed": "bun fmt --changed=HEAD",
+    "format:changed:check": "bun fmt --changed=HEAD --check"
   }
 }
