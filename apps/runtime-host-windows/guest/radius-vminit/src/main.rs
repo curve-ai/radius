@@ -169,8 +169,8 @@ fn start_loopback_relay(port: u16) {
 }
 
 fn relay(client: TcpStream, port: u16) -> io::Result<()> {
-    let agent = TcpStream::connect(("127.0.0.1", port))
-        .or_else(|_| TcpStream::connect(("::1", port)))?;
+    let agent =
+        TcpStream::connect(("127.0.0.1", port)).or_else(|_| TcpStream::connect(("::1", port)))?;
     let mut client_reader = client.try_clone()?;
     let mut agent_writer = agent.try_clone()?;
     let inbound = std::thread::spawn(move || {

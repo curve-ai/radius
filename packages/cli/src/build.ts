@@ -1,5 +1,5 @@
 import { access, readFile, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   AgentBuildReceiptSchema,
@@ -83,6 +83,11 @@ export async function buildAgent(
     layoutPath: projectRelativePath(options.root, build.layoutPath),
     contextPath: projectRelativePath(options.root, build.contextPath),
     manifest: build.manifest,
+    release: {
+      version: build.releaseVersion,
+      templateEmbedded: true,
+      indexPath: projectRelativePath(options.root, build.indexPath),
+    },
     verifiedAt: new Date().toISOString(),
     verification: { kind: "microvm-acp", platform: hostImagePlatform() },
   });
@@ -133,6 +138,13 @@ export async function loadBuildReceipt(
       contextPath,
       manifest: receipt.manifest,
       bundleSha256: receipt.bundleSha256,
+      // A receipt written before the release block existed still describes a
+      // valid build, so these are reconstructed rather than demanded.
+      releaseVersion:
+        receipt.release?.version ?? `0.0.0+${receipt.buildDigest.slice(0, 16)}`,
+      indexPath: receipt.release
+        ? resolve(root, receipt.release.indexPath)
+        : join(dirname(layoutPath), "index.json"),
     },
   };
 }

@@ -59,9 +59,7 @@ const RUN_FLAG_OPTIONS: [&str; 4] = [
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeCommand {
-    Doctor {
-        json: bool,
-    },
+    Doctor { json: bool },
     LoadImage(LoadImageOptions),
     Run(Box<RunOptions>),
 }

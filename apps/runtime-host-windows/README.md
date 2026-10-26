@@ -44,6 +44,26 @@ The two guest programs, `radius-vminit` (the guest init) and
 `radius-rootfs-builder`, are compiled into the helper, so signing the helper
 covers them.
 
+## CLI builds
+
+The new CLI selects `linux/amd64` on Windows x64 for TypeScript, Python,
+and binary harness builds. The embedded release template, importable index,
+and build receipt carry the same architecture. `radius build` locates the
+runtime in the installed app or a Windows checkout, including `openvmm.exe`
+beside the helper. Explicit host/kernel path overrides remain supported.
+`--skip-verify` produces the image while recording that no VM was booted.
+
+Building an image requires Docker with Linux containers. Execution uses the
+Radius runtime described above and does not require a container engine.
+Docker Desktop builds that use load/save are normalized to an OCI layout
+before the desktop importer or verifier consumes them.
+
+CI builds the Linux guest programs and runs native Windows helper tests,
+formatting, and Clippy. Its Linux runner also builds real TypeScript and
+harness AMD64 images through the new CLI and checks their embedded metadata
+and receipts. Hosted runners do not prove a Windows 11 WHP boot; that remains
+a live-host check.
+
 ## How a run works
 
 - **Two disks.** A read-only erofs code disk, built once per image digest inside

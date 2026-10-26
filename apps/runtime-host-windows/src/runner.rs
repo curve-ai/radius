@@ -31,7 +31,13 @@ fn forwarded_guest_ports(specification: &str) -> Vec<u16> {
     let mut ports: Vec<u16> = specification
         .split(',')
         .filter_map(|entry| entry.rsplit_once('-'))
-        .filter_map(|(_, guest)| guest.rsplit_once(':').map_or(guest, |(_, port)| port).parse().ok())
+        .filter_map(|(_, guest)| {
+            guest
+                .rsplit_once(':')
+                .map_or(guest, |(_, port)| port)
+                .parse()
+                .ok()
+        })
         .collect();
     ports.sort_unstable();
     ports.dedup();
@@ -221,9 +227,14 @@ fn remove_old_runs(containers: &Path) {
     let mut finished: Vec<_> = entries
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .filter(|entry| !RUN_FILES.iter().any(|name| entry.path().join(name).exists()))
+        .filter(|entry| {
+            !RUN_FILES
+                .iter()
+                .any(|name| entry.path().join(name).exists())
+        })
         .filter_map(|entry| {
-            let metadata = fs::metadata(entry.path().join("boot.log")).or_else(|_| entry.metadata());
+            let metadata =
+                fs::metadata(entry.path().join("boot.log")).or_else(|_| entry.metadata());
             Some((metadata.ok()?.modified().ok()?, entry.path()))
         })
         .collect();
@@ -510,9 +521,7 @@ mod tests {
     #[test]
     fn forwarded_guest_ports_are_read_from_every_entry() {
         assert_eq!(
-            forwarded_guest_ports(
-                "hostfwd=tcp:127.0.0.1:1455-:1455,hostfwd=tcp:[::1]:1455-:1455"
-            ),
+            forwarded_guest_ports("hostfwd=tcp:127.0.0.1:1455-:1455,hostfwd=tcp:[::1]:1455-:1455"),
             vec![1455],
             "the same guest port forwarded for IPv4 and IPv6 is relayed once"
         );

@@ -196,7 +196,7 @@ test("organization credentials reach only the authenticated connection", async (
         cwd: "/tmp/other-agent",
         handlers,
       }),
-      /Authentication required/i,
+      /requires ACP authentication/i,
     );
     await assert.rejects(
       connectAcpRuntime(acpStreamFromWebSocket(server.endpoint), {
