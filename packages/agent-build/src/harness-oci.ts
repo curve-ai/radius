@@ -59,7 +59,7 @@ const BASE_IMAGES = {
   python:
     "ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58",
   /** Only `bun` is copied out of this one; it is never the base. */
-  bun: "oven/bun:1.3.4-slim@sha256:10c077f99e1d7dd7fa2947d8ed0a8c2094fa85577856062e43c8967dc97e9fc6",
+  bun: "oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4",
 } as const;
 
 /**

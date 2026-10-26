@@ -4,13 +4,13 @@ This is the first executable Radius SDK and CLI example. From the Radius
 repository root:
 
 ```bash
-npx bun@1.3.14 install
-npx bun@1.3.14 run --cwd examples/typescript-agent validate
-npx bun@1.3.14 run --cwd examples/typescript-agent agent:dev
+npx bun@1.4.4 install
+npx bun@1.4.4 run --cwd examples/typescript-agent validate
+npx bun@1.4.4 run --cwd examples/typescript-agent agent:dev
 # In a second terminal:
-npx bun@1.3.14 run --cwd examples/typescript-agent dev
-npx bun@1.3.14 run --cwd examples/typescript-agent build
-npx bun@1.3.14 run --cwd examples/typescript-agent deploy
+npx bun@1.4.4 run --cwd examples/typescript-agent dev
+npx bun@1.4.4 run --cwd examples/typescript-agent build
+npx bun@1.4.4 run --cwd examples/typescript-agent deploy
 ```
 
 `agent:dev` runs the agent's own watch process and exposes authenticated-ready
