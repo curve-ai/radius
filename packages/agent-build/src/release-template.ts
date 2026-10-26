@@ -64,9 +64,8 @@ export function synthesiseReleaseTemplate(
       reference: input.imageReference,
       digest: PLACEHOLDER_DIGEST,
       platform: input.platform,
-      // Translation is a property of the host, not of the artifact. A build
-      // cannot know what will run it, so it never claims translation.
-      translation: "none",
+      // Local builds target the host: AMD64 is native on Windows x64.
+      translation: input.platform === "linux/amd64" ? "native" : "none",
     },
     process: {
       arguments: [...input.processArguments],
@@ -84,7 +83,9 @@ export function synthesiseReleaseTemplate(
     networkAllowlist: [...config.networkAllowlist],
     // Flattened to `key.op`, matching what the dev path already registers.
     capabilities: config.capabilities.flatMap((capability) =>
-      capability.operations.map((operation) => `${capability.key}.${operation}`),
+      capability.operations.map(
+        (operation) => `${capability.key}.${operation}`,
+      ),
     ),
     // Empty until the harness auth layer lands; the field exists so adding it
     // later is additive rather than a schema change.

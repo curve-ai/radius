@@ -24,6 +24,8 @@ import {
 } from "@curve-ai/agent-contracts";
 
 import { BuildError } from "./errors.js";
+import type { OciCommandRunner } from "./push.js";
+import { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 import {
   releaseTemplateLabels,
@@ -42,8 +44,8 @@ import { writeImportableLayout } from "./importable.js";
  */
 
 /** Guest is always Linux; only the architecture varies. */
-const TARGET_PLATFORM = "linux/arm64";
-const REGISTRY_ARCH = "arm64";
+const TARGET_PLATFORM = hostImagePlatform();
+const REGISTRY_ARCH = TARGET_PLATFORM.split("/")[1]!;
 
 /**
  * Pinned by index digest, so the same config builds the same bytes. Each
@@ -86,6 +88,8 @@ export interface HarnessOciBuildOptions {
   config: AgentConfigInput;
   outputRoot?: string;
   dockerExecutable?: string;
+  platform?: HostImagePlatform;
+  commandRunner?: OciCommandRunner;
   onProgress?: (message: string) => void;
 }
 
@@ -121,6 +125,12 @@ export async function buildHarnessOciLayout(
   if (config.runtime.kind !== "harness") {
     throw new Error("Harness OCI build requires a harness runtime config");
   }
+  const platform = options.platform ?? hostImagePlatform();
+  const runner = options.commandRunner;
+  const run = runner
+    ? (command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) =>
+        runner({ command, args, cwd, env }).then(() => {})
+    : runCommand;
   const runtime = config.runtime;
   const report = options.onProgress ?? (() => {});
 
@@ -132,9 +142,10 @@ export async function buildHarnessOciLayout(
   await mkdir(contextPath, { recursive: true });
 
   try {
-    const launch = resolveLaunch(runtime);
+    const launch = resolveLaunch(runtime, platform);
     const harness = await stageHarness({
       runtime,
+      platform,
       root: options.root,
       contextPath,
       report,
@@ -155,6 +166,7 @@ export async function buildHarnessOciLayout(
     // inputs: two builds of identical input produce one digest.
     const buildDigest = createHash("sha256")
       .update(manifestJson)
+      .update(platform)
       .update(harness.sha256)
       .update(tree.digest)
       .digest("hex");
@@ -169,7 +181,7 @@ export async function buildHarnessOciLayout(
       config,
       buildDigest,
       imageReference,
-      platform: TARGET_PLATFORM,
+      platform,
       processArguments: launch.processArguments,
       imageSizeMb: estimatedMb,
     });
@@ -181,15 +193,16 @@ export async function buildHarnessOciLayout(
     );
     await writeFile(join(contextPath, "manifest.json"), manifestJson, "utf8");
 
-    report(`Building ${imageReference} for ${TARGET_PLATFORM}…`);
+    report(`Building ${imageReference} for ${platform}…`);
     const imageTarPath = join(temporaryRoot, "image.oci.tar");
-    await runCommand(
+    const loadAndSave = process.platform === "win32";
+    await run(
       options.dockerExecutable ?? "docker",
       [
         "buildx",
         "build",
         "--platform",
-        TARGET_PLATFORM,
+        platform,
         "--provenance=false",
         "--sbom=false",
         "--build-arg",
@@ -199,8 +212,9 @@ export async function buildHarnessOciLayout(
         ...Object.entries(releaseTemplateLabels(template)).flatMap(
           ([key, value]) => ["--label", `${key}=${value}`],
         ),
-        "--output",
-        `type=oci,dest=${imageTarPath}`,
+        ...(loadAndSave
+          ? ["--load"]
+          : ["--output", `type=oci,dest=${imageTarPath}`]),
         "--file",
         join(contextPath, "Containerfile"),
         contextPath,
@@ -208,19 +222,23 @@ export async function buildHarnessOciLayout(
       options.root,
     );
 
+    if (loadAndSave) {
+      await run(
+        options.dockerExecutable ?? "docker",
+        ["save", "--output", imageTarPath, imageReference],
+        options.root,
+      );
+    }
+
     const layoutPath = join(temporaryRoot, "oci-layout");
     await mkdir(layoutPath, { recursive: true });
-    await runCommand(
-      "tar",
-      ["-xf", imageTarPath, "-C", layoutPath],
-      options.root,
-    );
+    await run("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
     await rm(imageTarPath, { force: true });
 
     const { imageDigest, imageSizeMb } = await writeImportableLayout({
       layoutPath,
       imageReference,
-      platform: TARGET_PLATFORM,
+      platform,
       agentId: config.agent!,
       outputRoot: temporaryRoot,
     });
@@ -268,12 +286,15 @@ interface ResolvedLaunch {
  * The entrypoint is the harness's own command, which is what makes ACP
  * arrive with the harness rather than being asked of the project.
  */
-function resolveLaunch(runtime: HarnessRuntimeConfig): ResolvedLaunch {
+function resolveLaunch(
+  runtime: HarnessRuntimeConfig,
+  platform: HostImagePlatform,
+): ResolvedLaunch {
   const distribution = runtime.distribution;
   if (distribution.kind === "binary") {
-    const platform = distribution.platforms[TARGET_PLATFORM];
-    const command = platform?.cmd ?? distribution.cmd;
-    const args = platform?.args ?? distribution.args;
+    const artifact = distribution.platforms[platform];
+    const command = artifact?.cmd ?? distribution.cmd;
+    const args = artifact?.args ?? distribution.args;
     // Registry commands are written for a cwd that contains the extracted
     // archive (`./opencode`); the guest has no such cwd, so anchor them.
     const absolute = posix.join("/opt/agent", command.replace(/^\.\//, ""));
@@ -284,7 +305,12 @@ function resolveLaunch(runtime: HarnessRuntimeConfig): ResolvedLaunch {
   }
   if (distribution.kind === "npx") {
     return {
-      processArguments: ["npx", "-y", distribution.package, ...distribution.args],
+      processArguments: [
+        "npx",
+        "-y",
+        distribution.package,
+        ...distribution.args,
+      ],
       entrypoint: ["npx", "-y", distribution.package, ...distribution.args],
     };
   }
@@ -309,10 +335,12 @@ interface StagedHarness {
  */
 async function stageHarness(input: {
   runtime: HarnessRuntimeConfig;
+  platform: HostImagePlatform;
   root: string;
   contextPath: string;
   report: (message: string) => void;
 }): Promise<StagedHarness> {
+  const platform = input.platform;
   const distribution = input.runtime.distribution;
   if (distribution.kind !== "binary") {
     // npx and uvx install inside the image from a pinned package, so there is
@@ -325,11 +353,11 @@ async function stageHarness(input: {
     };
   }
 
-  const artifact = distribution.platforms[TARGET_PLATFORM];
+  const artifact = distribution.platforms[platform];
   if (!artifact) {
     const published = Object.keys(distribution.platforms).sort().join(", ");
     throw new BuildError(
-      `This harness publishes no ${TARGET_PLATFORM} build, so it cannot run in a Radius microVM. It ships: ${published}.`,
+      `This harness publishes no ${platform} build, so it cannot run in a Radius microVM. It ships: ${published}.`,
     );
   }
 
@@ -344,13 +372,15 @@ async function stageHarness(input: {
       );
     }
     await writeFile(destination, bytes);
-    input.report(`Staged harness from ${artifact.archive} (${digest.slice(0, 12)}…)`);
+    input.report(
+      `Staged harness from ${artifact.archive} (${digest.slice(0, 12)}…)`,
+    );
     return { sha256: digest, source, archiveBytes: bytes.byteLength };
   }
 
   if (!artifact.sha256) {
     throw new BuildError(
-      `The ${TARGET_PLATFORM} archive is a URL but carries no sha256. Radius will not package an unverified harness.`,
+      `The ${platform} archive is a URL but carries no sha256. Radius will not package an unverified harness.`,
     );
   }
 
@@ -363,7 +393,7 @@ async function stageHarness(input: {
     ".radius",
     "harnesses",
     "archives",
-    `${artifact.sha256}-${TARGET_PLATFORM.replace("/", "-")}`,
+    `${artifact.sha256}-${platform.replace("/", "-")}`,
   );
   let bytes: number;
   if (await fileExists(cached)) {
@@ -373,7 +403,7 @@ async function stageHarness(input: {
     const digest = createHash("sha256").update(contents).digest("hex");
     if (digest === artifact.sha256) {
       await writeFile(destination, contents);
-      input.report(`Using the cached ${TARGET_PLATFORM} harness`);
+      input.report(`Using the cached ${platform} harness`);
       return {
         sha256: artifact.sha256,
         source: artifact.archive,
@@ -383,7 +413,7 @@ async function stageHarness(input: {
     await rm(cached, { force: true });
   }
 
-  input.report(`Downloading the ${TARGET_PLATFORM} harness…`);
+  input.report(`Downloading the ${platform} harness…`);
   bytes = await download(artifact.archive, artifact.sha256, destination);
   await mkdir(dirname(cached), { recursive: true, mode: 0o700 });
   // Copied rather than moved: the build context is temporary and gets removed.
@@ -636,7 +666,9 @@ export function renderHarnessContainerfile(input: {
   const python = runtime.toolchains.find(
     (toolchain) => toolchain.kind === "python",
   );
-  const node = runtime.toolchains.find((toolchain) => toolchain.kind === "node");
+  const node = runtime.toolchains.find(
+    (toolchain) => toolchain.kind === "node",
+  );
   const configRoot = runtime.configRoot;
   const lines: string[] = [];
 

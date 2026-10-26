@@ -1,3 +1,4 @@
+import { thisDevice } from "@renderer/lib/device-name";
 import {
   useCallback,
   useEffect,
@@ -39,8 +40,8 @@ function connectionDescription(status: DesktopSyncStatus): string {
       return `Connected to ${where}, but the last sync did not finish.`;
     case "disabled":
       return status.connection
-        ? `Syncing with ${where} is turned off. Conversations stay on this Mac.`
-        : "Conversations stay on this Mac until you connect a platform.";
+        ? `Syncing with ${where} is turned off. Conversations stay on ${thisDevice()}.`
+        : `Conversations stay on ${thisDevice()} until you connect a platform.`;
   }
 }
 

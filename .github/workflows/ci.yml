@@ -51,6 +51,45 @@ jobs:
       - name: Build
         run: bun run --cwd apps/desktop build:bundle
 
+      - name: Verify the Windows CLI image pipeline
+        if: runner.os == 'Linux'
+        run: |
+          docker buildx create --name radius-windows-smoke --driver docker-container --use
+          bun scripts/verify-windows-build.ts
+
+      - name: Set up Windows Rust validation
+        if: runner.os == 'Windows'
+        run: rustup toolchain install 1.94.0 --profile minimal --component clippy --component rustfmt --target x86_64-unknown-linux-musl
+
+      - name: Build and check Windows guest programs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($guest in 'radius-vminit', 'radius-rootfs-builder') {
+            Push-Location "apps/runtime-host-windows/guest/$guest"
+            try {
+              cargo +1.94.0 fmt --check
+              if ($LASTEXITCODE -ne 0) { throw "Guest formatting failed: $guest" }
+              cargo +1.94.0 clippy --locked --all-targets --all-features -- -D warnings
+              if ($LASTEXITCODE -ne 0) { throw "Guest clippy failed: $guest" }
+              cargo +1.94.0 build --locked --release
+              if ($LASTEXITCODE -ne 0) { throw "Guest build failed: $guest" }
+            } finally { Pop-Location }
+          }
+
+      - name: Validate native Windows runtime host
+        if: runner.os == 'Windows'
+        working-directory: apps/runtime-host-windows
+        shell: pwsh
+        run: |
+          cargo +1.94.0 fmt --check
+          if ($LASTEXITCODE -ne 0) { throw 'Windows runtime formatting failed' }
+          cargo +1.94.0 clippy --locked --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Windows runtime clippy failed' }
+          cargo +1.94.0 test --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Windows runtime tests failed' }
+
       - name: Audit production dependencies
         if: runner.os == 'Linux'
         # GHSA-vfj7-8cjw-p6xm (braces) has no fixed release and only reaches

@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { canonicalJson } from "./manifest.js";
+import { normalizeDockerArchive } from "./docker-archive.js";
 
 interface OciDescriptor {
   digest?: string;
@@ -67,6 +68,7 @@ export async function measureLayoutMb(
 export async function writeImportableLayout(
   input: ImportableLayoutInput,
 ): Promise<ImportableLayoutResult> {
+  await normalizeDockerArchive(input);
   const indexFile = join(input.layoutPath, "index.json");
   const index = JSON.parse(await readFile(indexFile, "utf8")) as {
     manifests?: OciDescriptor[];
@@ -142,7 +144,9 @@ export function selectManifest(
     `OCI index carries no ${platform} manifest (found: ${
       manifests
         .map((m) =>
-          m.platform ? `${m.platform.os}/${m.platform.architecture}` : "unknown",
+          m.platform
+            ? `${m.platform.os}/${m.platform.architecture}`
+            : "unknown",
         )
         .join(", ") || "none"
     })`,

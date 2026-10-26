@@ -22,6 +22,8 @@ import {
 } from "@curve-ai/agent-contracts";
 
 import { BuildError } from "./errors.js";
+import type { OciCommandRunner } from "./push.js";
+import { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 import {
   releaseTemplateLabels,
@@ -48,6 +50,8 @@ export interface PythonOciBuildOptions {
   config: AgentConfigInput;
   outputRoot?: string;
   dockerExecutable?: string;
+  platform?: HostImagePlatform;
+  commandRunner?: OciCommandRunner;
   uvExecutable?: string;
 }
 
@@ -107,7 +111,9 @@ export async function buildPythonOciLayout(
     throw new Error("Python OCI build requires a Python runtime config");
   }
   if (config.runtime.python !== "3.12") {
-    throw new Error("Python OCI builds currently support the pinned Python 3.12 line");
+    throw new Error(
+      "Python OCI builds currently support the pinned Python 3.12 line",
+    );
   }
 
   const lockfilePath = join(options.root, config.runtime.lockfile);
@@ -118,7 +124,14 @@ export async function buildPythonOciLayout(
   const moduleRoot = await findModuleRoot(options.root, modulePackage);
   const sdkRoot = await findPythonSdk(options.root);
 
-  const outputRoot = options.outputRoot ?? join(options.root, ".radius", "builds");
+  const platform = options.platform ?? hostImagePlatform();
+  const runner = options.commandRunner;
+  const run = runner
+    ? (command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) =>
+        runner({ command, args, cwd, env }).then(() => {})
+    : runCommand;
+  const outputRoot =
+    options.outputRoot ?? join(options.root, ".radius", "builds");
   await mkdir(outputRoot, { recursive: true });
   const temporaryRoot = await mkdtemp(join(outputRoot, ".python-sandbox-"));
   const contextPath = join(temporaryRoot, "context");
@@ -151,17 +164,23 @@ export async function buildPythonOciLayout(
     if (!requirements.trim()) {
       throw new Error("Python lockfile exported no runtime dependencies");
     }
-    await writeFile(join(contextPath, "requirements.txt"), requirements, "utf8");
+    await writeFile(
+      join(contextPath, "requirements.txt"),
+      requirements,
+      "utf8",
+    );
 
     const wheelsPath = join(contextPath, "wheels");
     await mkdir(wheelsPath, { recursive: true });
-    await runCommand(
+    await run(
       uv,
       ["build", "--wheel", "--project", sdkRoot, "--out-dir", wheelsPath],
       sdkRoot,
       { ...process.env, SOURCE_DATE_EPOCH: "315532800" },
     );
-    const wheels = (await readdir(wheelsPath)).filter((name) => name.endsWith(".whl"));
+    const wheels = (await readdir(wheelsPath)).filter((name) =>
+      name.endsWith(".whl"),
+    );
     if (wheels.length !== 1) {
       throw new Error("Radius Python SDK build must produce exactly one wheel");
     }
@@ -177,18 +196,20 @@ export async function buildPythonOciLayout(
       .digest("hex");
     const buildDigest = createHash("sha256")
       .update(manifestJson)
+      .update(platform)
       .update(pyproject)
       .update(lockfile)
       .update(bundleSha256)
       .digest("hex");
     const imageReference = `radius.local/dev/${safeImageName(config.name)}:${buildDigest.slice(0, 16)}`;
 
-    const sourceBytes = Buffer.byteLength(pyproject) + Buffer.byteLength(lockfile);
+    const sourceBytes =
+      Buffer.byteLength(pyproject) + Buffer.byteLength(lockfile);
     const template = synthesiseReleaseTemplate({
       config,
       buildDigest,
       imageReference,
-      platform: "linux/arm64",
+      platform,
       processArguments: ["python", "-m", config.runtime.module],
       imageSizeMb: estimatePythonImageMb(
         sourceBytes,
@@ -205,13 +226,15 @@ export async function buildPythonOciLayout(
     await writeFile(join(contextPath, "manifest.json"), manifestJson, "utf8");
 
     const imageTarPath = join(temporaryRoot, "image.oci.tar");
-    await runCommand(
+    // Docker Desktop's default builder cannot export OCI, so load then docker save.
+    const loadAndSave = process.platform === "win32";
+    await run(
       options.dockerExecutable ?? "docker",
       [
         "buildx",
         "build",
         "--platform",
-        "linux/arm64",
+        platform,
         "--provenance=false",
         "--sbom=false",
         "--build-arg",
@@ -222,23 +245,31 @@ export async function buildPythonOciLayout(
           "--label",
           `${key}=${value}`,
         ]),
-        "--output",
-        `type=oci,dest=${imageTarPath}`,
+        ...(loadAndSave
+          ? ["--load"]
+          : ["--output", `type=oci,dest=${imageTarPath}`]),
         "--file",
         join(contextPath, "Containerfile"),
         contextPath,
       ],
       options.root,
     );
+    if (loadAndSave) {
+      await run(
+        options.dockerExecutable ?? "docker",
+        ["save", "--output", imageTarPath, imageReference],
+        options.root,
+      );
+    }
 
     const layoutPath = join(temporaryRoot, "oci-layout");
     await mkdir(layoutPath, { recursive: true });
-    await runCommand("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
+    await run("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
     await rm(imageTarPath, { force: true });
     const { imageDigest, imageSizeMb } = await writeImportableLayout({
       layoutPath,
       imageReference,
-      platform: "linux/arm64",
+      platform,
       agentId: config.agent!,
       outputRoot: temporaryRoot,
     });
@@ -306,9 +337,15 @@ ENTRYPOINT ["python", "-m", ${JSON.stringify(module)}]
 `;
 }
 
-async function findModuleRoot(root: string, packageName: string): Promise<string> {
+async function findModuleRoot(
+  root: string,
+  packageName: string,
+): Promise<string> {
   const resolvedRoot = await realpath(root);
-  for (const candidate of [join(root, packageName), join(root, "src", packageName)]) {
+  for (const candidate of [
+    join(root, packageName),
+    join(root, "src", packageName),
+  ]) {
     try {
       const info = await lstat(candidate);
       if (info.isSymbolicLink() || !info.isDirectory()) continue;
@@ -335,11 +372,17 @@ async function copyModuleTree(
   const entries = await readdir(resolvedSource, { withFileTypes: true });
   entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of entries) {
-    if (entry.name === "__pycache__" || entry.name === ".DS_Store" || entry.name.endsWith(".pyc")) {
+    if (
+      entry.name === "__pycache__" ||
+      entry.name === ".DS_Store" ||
+      entry.name.endsWith(".pyc")
+    ) {
       continue;
     }
     if (entry.isSymbolicLink()) {
-      throw new Error(`Python package source must not contain symlinks: ${relativePath}/${entry.name}`);
+      throw new Error(
+        `Python package source must not contain symlinks: ${relativePath}/${entry.name}`,
+      );
     }
     const from = join(resolvedSource, entry.name);
     const to = join(destination, entry.name);
@@ -414,7 +457,8 @@ async function captureCommand(
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+      else
+        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
     });
   });
 }
@@ -440,7 +484,8 @@ async function runCommand(
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+      else
+        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
     });
   });
 }

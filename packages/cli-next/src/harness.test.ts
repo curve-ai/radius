@@ -140,4 +140,3 @@ test("npx and uvx are spawned through their own runner, with -y only for npx", a
     assert.deepEqual([...resolved.command], expected);
   }
 });
-

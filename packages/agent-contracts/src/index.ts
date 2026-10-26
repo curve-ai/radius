@@ -218,7 +218,10 @@ export const HarnessRuntimeConfigSchema = z
      */
     configRoot: z
       .string()
-      .regex(/^\/[A-Za-z0-9._\-/]*[A-Za-z0-9._-]$/, "configRoot must be an absolute POSIX path")
+      .regex(
+        /^\/[A-Za-z0-9._\-/]*[A-Za-z0-9._-]$/,
+        "configRoot must be an absolute POSIX path",
+      )
       .default("/opt/data"),
     toolchains: z.array(HarnessToolchainSchema).default([]),
   })
@@ -387,7 +390,7 @@ export const AgentBuildReceiptSchema = z.object({
   verifiedAt: z.string().datetime(),
   verification: z.object({
     kind: z.literal("microvm-acp"),
-    platform: z.literal("linux/arm64"),
+    platform: z.enum(["linux/arm64", "linux/amd64"]),
     /**
      * Whether the check actually ran.
      *

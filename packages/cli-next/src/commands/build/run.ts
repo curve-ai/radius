@@ -11,6 +11,8 @@ import {
   buildPythonOciLayout,
   buildTypeScriptOciLayout,
   canonicalJson,
+  hostImagePlatform,
+  type HostImagePlatform,
   isBuildError,
   type HarnessOciBuildResult,
   type PythonOciBuildResult,
@@ -34,9 +36,7 @@ interface BuildFlags {
 }
 
 type AnyBuildResult =
-  | TypeScriptOciBuildResult
-  | PythonOciBuildResult
-  | HarnessOciBuildResult;
+  TypeScriptOciBuildResult | PythonOciBuildResult | HarnessOciBuildResult;
 
 async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
   const context = this;
@@ -67,7 +67,11 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
   // next action, not an internal defect. Without this an expected condition —
   // a harness with no Linux build, a Docker driver that cannot export OCI —
   // reached the developer as "Internal error, please report this".
-  const build = await buildFor(config, root, (message) =>
+  const platform = hostImagePlatform(
+    context.process.platform,
+    context.process.arch,
+  );
+  const build = await buildFor(config, root, platform, (message) =>
     context.out(`  ${message}`),
   ).catch((error: unknown) => {
     if (isBuildError(error)) {
@@ -122,23 +126,23 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
         "The image is built and the receipt records that it was never booted.",
       );
     } else {
-    verification = {
-      protocolVersion: result.protocolVersion,
-      advertisedAgents: result.advertisedAgents,
-    };
-    context.out(`  verified     ACP v${result.protocolVersion}`);
-    // Named rather than counted: the point is whether these are the project's
-    // own agents or the harness's defaults, and only a name shows that.
-    context.out(
-      `  agents       ${
-        result.advertisedAgents.length > 0
-          ? result.advertisedAgents.join(", ")
-          : "none advertised — this agent offers one"
-      }`,
-    );
-    if (result.authMethods.length > 0) {
-      context.out(`  auth         ${result.authMethods.join(", ")}`);
-    }
+      verification = {
+        protocolVersion: result.protocolVersion,
+        advertisedAgents: result.advertisedAgents,
+      };
+      context.out(`  verified     ACP v${result.protocolVersion}`);
+      // Named rather than counted: the point is whether these are the project's
+      // own agents or the harness's defaults, and only a name shows that.
+      context.out(
+        `  agents       ${
+          result.advertisedAgents.length > 0
+            ? result.advertisedAgents.join(", ")
+            : "none advertised — this agent offers one"
+        }`,
+      );
+      if (result.authMethods.length > 0) {
+        context.out(`  auth         ${result.authMethods.join(", ")}`);
+      }
     }
   } else {
     context.note("Skipping microVM verification (--skip-verify).");
@@ -161,11 +165,9 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
     verifiedAt: new Date().toISOString(),
     verification: {
       kind: "microvm-acp",
-      platform: "linux/arm64",
+      platform,
       verified: verification !== null,
-      ...(verification === null && skippedBecause
-        ? { skippedBecause }
-        : {}),
+      ...(verification === null && skippedBecause ? { skippedBecause } : {}),
       ...(verification
         ? { advertisedAgents: [...verification.advertisedAgents] }
         : {}),
@@ -201,13 +203,14 @@ async function run(this: RadiusContext, flags: BuildFlags): Promise<void> {
 async function buildFor(
   config: AgentConfig,
   root: string,
+  platform: HostImagePlatform,
   onProgress: (message: string) => void,
 ): Promise<AnyBuildResult> {
   switch (config.runtime.kind) {
     case "typescript":
-      return buildTypeScriptOciLayout({ root, config });
+      return buildTypeScriptOciLayout({ root, config, platform });
     case "python":
-      return buildPythonOciLayout({ root, config });
+      return buildPythonOciLayout({ root, config, platform });
     case "harness": {
       // Specified in the harness-packaging work but not built: a pinned
       // package does not pin its transitive dependencies, so npx and uvx need
@@ -221,7 +224,7 @@ async function buildFor(
             "`radius dev` runs this harness today; packaging it needs a lockfile so the build stays reproducible.",
         );
       }
-      return buildHarnessOciLayout({ root, config, onProgress });
+      return buildHarnessOciLayout({ root, config, platform, onProgress });
     }
     case "command":
       throw new UsageError(
@@ -249,9 +252,8 @@ async function writeReceipt(
   return receiptPath;
 }
 
-
 function projectRelative(root: string, target: string): string {
-  const relativePath = relative(root, target);
+  const relativePath = relative(root, target).replaceAll("\\", "/");
   return relativePath.startsWith("..") ? target : relativePath;
 }
 
