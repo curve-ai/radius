@@ -1,14 +1,18 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   copyFile,
   mkdir,
+  mkdtemp,
   readFile,
+  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
+import { createGzip } from "node:zlib";
 
 import { canonicalJson } from "./manifest.js";
 import type { HostImagePlatform } from "./host-image.js";
@@ -66,22 +70,43 @@ export async function normalizeDockerArchive(input: {
     const hash = createHash("sha256");
     for await (const chunk of createReadStream(path)) hash.update(chunk);
     const hex = hash.digest("hex");
-    await copyFile(path, join(blobs, hex));
+    const destination = join(blobs, hex);
+    if (resolve(path) !== resolve(destination))
+      await copyFile(path, destination);
     return {
       mediaType,
       digest: `sha256:${hex}`,
       size: (await stat(path)).size,
     };
   }
+  const configDescriptor = await store(
+    configPath,
+    "application/vnd.oci.image.config.v1+json",
+  );
+  const layers = [];
+  const scratch = await mkdtemp(join(input.layoutPath, ".oci-layers-"));
+  try {
+    for (const [position, name] of entry.Layers.entries()) {
+      const compressed = join(scratch, `${position}.tar.gz`);
+      // Docker save layers are uncompressed. OCI build-size accounting and
+      // the guest importer expect the same compressed layers buildx emits.
+      await pipeline(
+        createReadStream(source(name)),
+        createGzip(),
+        createWriteStream(compressed),
+      );
+      layers.push(
+        await store(compressed, "application/vnd.oci.image.layer.v1.tar+gzip"),
+      );
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
   const manifest = {
     schemaVersion: 2,
     mediaType: "application/vnd.oci.image.manifest.v1+json",
-    config: await store(configPath, "application/vnd.oci.image.config.v1+json"),
-    layers: await Promise.all(
-      entry.Layers.map((name) =>
-        store(source(name), "application/vnd.oci.image.layer.v1.tar"),
-      ),
-    ),
+    config: configDescriptor,
+    layers,
   };
   const bytes = canonicalJson(manifest);
   const hex = createHash("sha256").update(bytes).digest("hex");
@@ -104,4 +129,12 @@ export async function normalizeDockerArchive(input: {
       ],
     }),
   );
+  // Do not ship the original uncompressed Docker archive beside the OCI
+  // blobs. Keep the config if Docker already stored it by its blob digest.
+  const retainedConfig = join(blobs, configDescriptor.digest.slice(7));
+  for (const path of new Set([configPath, ...entry.Layers.map(source)])) {
+    if (resolve(path) !== resolve(retainedConfig))
+      await rm(path, { force: true });
+  }
+  await rm(join(input.layoutPath, "manifest.json"));
 }

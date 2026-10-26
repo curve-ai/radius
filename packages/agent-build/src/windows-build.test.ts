@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,9 +83,17 @@ async function shippedImage(layout: string) {
     ).toString(),
   );
   const release = parseAgentReleaseDescriptor(template);
+  const layerBytes = await readFile(
+    join(layout, "blobs", "sha256", manifest.layers[0].digest.slice(7)),
+  );
+  assert.equal(
+    manifest.layers[0].mediaType,
+    "application/vnd.oci.image.layer.v1.tar+gzip",
+  );
+  assert.equal(gunzipSync(layerBytes).toString(), "fixture image layer");
   assert.equal(
     manifest.layers[0].digest,
-    `sha256:${createHash("sha256").update("fixture image layer").digest("hex")}`,
+    `sha256:${createHash("sha256").update(layerBytes).digest("hex")}`,
   );
   return { release, config, index };
 }
