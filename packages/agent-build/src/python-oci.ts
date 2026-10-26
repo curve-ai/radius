@@ -21,10 +21,25 @@ import {
   type AgentManifest,
 } from "@curve-ai/agent-contracts";
 
+import { BuildError } from "./errors.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
+import {
+  releaseTemplateLabels,
+  synthesiseReleaseTemplate,
+} from "./release-template.js";
+import { writeImportableLayout } from "./importable.js";
 
 const PYTHON_IMAGE =
   "python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7";
+/**
+ * Compressed size of the pinned Python base plus the uv layer, measured once.
+ * Same reasoning as the TypeScript pipeline: rootfsMb has to be in the
+ * template, which is embedded in the image it describes, so it is estimated
+ * from pinned inputs and verified against the built layout afterwards.
+ * Python installs dependencies into the image, so the floor is higher.
+ */
+const BASE_IMAGE_COMPRESSED_BYTES = 120_000_000;
+
 const UV_IMAGE =
   "ghcr.io/astral-sh/uv:0.8.22@sha256:9874eb7afe5ca16c363fe80b294fe700e460df29a55532bbfea234a0f12eddb1";
 
@@ -44,6 +59,44 @@ export interface PythonOciBuildResult {
   contextPath: string;
   manifest: AgentManifest;
   bundleSha256: string;
+  /** The release version embedded in the layout, `<version>+<digest16>`. */
+  releaseVersion: string;
+  /** Where the bundled-agent index entry was written. */
+  indexPath: string;
+}
+
+/** Deterministic: pinned base plus the agent's own sources. */
+/**
+ * Dependencies are installed inside the image, so their size is the one input
+ * not known before the build.
+ *
+ * The estimate used to be the base image plus the bytes of `pyproject.toml`
+ * and `uv.lock` — two text files. Any agent with real dependencies therefore
+ * claimed a few hundred megabytes, built something far larger, and failed the
+ * post-build check. The lockfile at least says how many packages there are,
+ * which is a much better signal than how long it is, and the allowance is
+ * deliberately generous because undershooting fails the build while
+ * overshooting only reserves rootfs the guest does not use.
+ */
+const PER_PACKAGE_BYTES = 16 * 1024 * 1024;
+const MINIMUM_DEPENDENCY_BYTES = 512 * 1024 * 1024;
+
+export function countLockedPackages(lockfile: string): number {
+  return (lockfile.match(/^name = "/gm) ?? []).length;
+}
+
+export function estimatePythonImageMb(
+  sourceBytes: number,
+  lockedPackages = 0,
+): number {
+  const dependencies = Math.max(
+    MINIMUM_DEPENDENCY_BYTES,
+    lockedPackages * PER_PACKAGE_BYTES,
+  );
+  return Math.ceil(
+    ((BASE_IMAGE_COMPRESSED_BYTES + sourceBytes) * 4 + dependencies) /
+      (1024 * 1024),
+  );
 }
 
 export async function buildPythonOciLayout(
@@ -130,6 +183,20 @@ export async function buildPythonOciLayout(
       .digest("hex");
     const imageReference = `radius.local/dev/${safeImageName(config.name)}:${buildDigest.slice(0, 16)}`;
 
+    const sourceBytes = Buffer.byteLength(pyproject) + Buffer.byteLength(lockfile);
+    const template = synthesiseReleaseTemplate({
+      config,
+      buildDigest,
+      imageReference,
+      platform: "linux/arm64",
+      processArguments: ["python", "-m", config.runtime.module],
+      imageSizeMb: estimatePythonImageMb(
+        sourceBytes,
+        countLockedPackages(lockfile.toString()),
+      ),
+    });
+    const labels = releaseTemplateLabels(template);
+
     await writeFile(
       join(contextPath, "Containerfile"),
       renderPythonContainerfile(config.runtime.module),
@@ -151,6 +218,10 @@ export async function buildPythonOciLayout(
         "SOURCE_DATE_EPOCH=0",
         "--tag",
         imageReference,
+        ...Object.entries(labels).flatMap(([key, value]) => [
+          "--label",
+          `${key}=${value}`,
+        ]),
         "--output",
         `type=oci,dest=${imageTarPath}`,
         "--file",
@@ -164,12 +235,24 @@ export async function buildPythonOciLayout(
     await mkdir(layoutPath, { recursive: true });
     await runCommand("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
     await rm(imageTarPath, { force: true });
-    const index = JSON.parse(await readFile(join(layoutPath, "index.json"), "utf8")) as {
-      manifests?: Array<{ digest?: string }>;
-    };
-    const imageDigest = index.manifests?.[0]?.digest;
-    if (!imageDigest || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)) {
-      throw new Error("Python OCI build did not produce a digest-pinned manifest");
+    const { imageDigest, imageSizeMb } = await writeImportableLayout({
+      layoutPath,
+      imageReference,
+      platform: "linux/arm64",
+      agentId: config.agent!,
+      outputRoot: temporaryRoot,
+    });
+
+    const claimedMb = estimatePythonImageMb(
+      sourceBytes,
+      countLockedPackages(lockfile.toString()),
+    );
+    if (imageSizeMb > claimedMb) {
+      throw new BuildError(
+        `This agent's dependencies make a larger image than Radius budgeted for: ${Math.ceil(imageSizeMb)}MB against ${claimedMb}MB.\n` +
+          "The guest would be given a rootfs too small to boot, so the layout was not written.\n" +
+          "Please report this with the dependency list — the per-package allowance in python-oci.ts needs raising.",
+      );
     }
 
     const finalRoot = join(outputRoot, buildDigest);
@@ -178,11 +261,13 @@ export async function buildPythonOciLayout(
     return {
       buildDigest,
       imageReference,
-      imageDigest: imageDigest as `sha256:${string}`,
+      imageDigest,
       layoutPath: join(finalRoot, "oci-layout"),
       contextPath: join(finalRoot, "context"),
       manifest,
       bundleSha256,
+      releaseVersion: String(template.releaseVersion),
+      indexPath: join(finalRoot, "index.json"),
     };
   } catch (error) {
     await rm(temporaryRoot, { recursive: true, force: true });

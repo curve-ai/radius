@@ -882,7 +882,12 @@ async function insertEventSubtype(
         sessionId: event.sessionId,
         createdByEventId: event.eventId,
         providerKey: event.providerKey,
-        providerRunId: event.providerRunId,
+        providerRunId: event.providerSessionId
+          ? event.providerRunId
+          : null,
+        // Older events predate the split and carry the session id in
+        // `providerRunId`; read it from there so history stays queryable.
+        providerSessionId: event.providerSessionId ?? event.providerRunId,
         triggeringMessageEventId: event.triggeringMessageEventId,
         startedAtMs: Date.parse(event.occurredAt),
       });
@@ -1950,14 +1955,14 @@ export async function getLatestAgentProviderSession(
     .select({
       agentRunId: agentRuns.id,
       providerKey: agentRuns.providerKey,
-      providerSessionId: agentRuns.providerRunId,
+      providerSessionId: agentRuns.providerSessionId,
     })
     .from(agentRuns)
     .where(
       and(
         eq(agentRuns.sessionId, sessionId),
         eq(agentRuns.providerKey, providerKey),
-        isNotNull(agentRuns.providerRunId),
+        isNotNull(agentRuns.providerSessionId),
       ),
     )
     .orderBy(desc(agentRuns.startedAtMs))

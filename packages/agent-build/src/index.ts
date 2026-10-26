@@ -1,3 +1,4 @@
+export { BuildError, isBuildError } from "./errors.js";
 export { canonicalJson, createAgentManifest, defineConfig } from "./manifest.js";
 
 export {
@@ -12,6 +13,14 @@ export {
   type PythonOciBuildOptions,
   type PythonOciBuildResult,
 } from "./python-oci.js";
+export {
+  buildHarnessOciLayout,
+  estimateHarnessImageMb,
+  renderHarnessContainerfile,
+  HARNESS_TARGET_PLATFORM,
+  type HarnessOciBuildOptions,
+  type HarnessOciBuildResult,
+} from "./harness-oci.js";
 export {
   pushAgentOciImage,
   pushTypeScriptOciImage,

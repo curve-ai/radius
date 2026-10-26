@@ -44,6 +44,8 @@ test("writes a microVM-verified immutable build receipt", async () => {
       contextPath,
       manifest: createAgentManifest(config),
       bundleSha256: "c".repeat(64),
+      releaseVersion: `0.0.0+${"a".repeat(16)}`,
+      indexPath: join(root, ".radius", "builds", "index.json"),
     }),
     verifyBuild: async () => {
       verified = true;
