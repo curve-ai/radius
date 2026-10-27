@@ -22,12 +22,12 @@ provider credentials, or Curve infrastructure configuration.
 Start the open development registry and API from the Radius repository root:
 
 ```bash
-npx bun@1.3.14 run platform:infra:up
+npx bun@1.4.4 run platform:infra:up
 
 PORT=3110 \
 RADIUS_PLATFORM_DEV_TOKEN=dev-token \
 RADIUS_PLATFORM_REGISTRY=127.0.0.1:5001 \
-npx bun@1.3.14 run --cwd apps/platform-api start
+npx bun@1.4.4 run --cwd apps/platform-api start
 ```
 
 Then start this application in another terminal:
@@ -35,7 +35,7 @@ Then start this application in another terminal:
 ```bash
 RADIUS_PLATFORM_API_URL=http://127.0.0.1:3110 \
 RADIUS_PLATFORM_ACCESS_TOKEN=dev-token \
-npx bun@1.3.14 run platform:web:dev
+npx bun@1.4.4 run platform:web:dev
 ```
 
 Open `http://127.0.0.1:3200`. The access token is read by the Next.js server
@@ -83,9 +83,9 @@ membership authorization without that fixture.
 ## Verification
 
 ```bash
-npx bun@1.3.14 run --filter @curve-ai/radius-platform-web typecheck
-npx bun@1.3.14 run --filter @curve-ai/radius-platform-web lint
-npx bun@1.3.14 run --filter @curve-ai/radius-platform-web build
+npx bun@1.4.4 run --filter @curve-ai/radius-platform-web typecheck
+npx bun@1.4.4 run --filter @curve-ai/radius-platform-web lint
+npx bun@1.4.4 run --filter @curve-ai/radius-platform-web build
 ```
 
 The production build uses Next.js standalone output so the same application

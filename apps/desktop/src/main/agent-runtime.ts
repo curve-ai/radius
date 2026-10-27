@@ -1,3 +1,8 @@
+import { readDistribution } from "./distribution";
+import {
+  assertDesktopAuthenticated,
+  distributionAgentCredential,
+} from "./desktop-auth";
 import {
   clearComposerDraft,
   createSession,
@@ -107,7 +112,10 @@ import {
   type FxRuntimeProfileLease,
 } from "./fx-auth";
 import { initializeStorage, type StorageContext } from "./storage";
-import { resolveAgentReleasePaths } from "./bundled-agents";
+import {
+  resolveAgentReleasePaths,
+  windowsRuntimeAssetPaths,
+} from "./bundled-agents";
 import { browserBridge } from "./browser-bridge";
 import { listDevelopmentAgentConnections } from "./development-agents";
 import { createRuntimeMcpClient } from "./mcp-connector-auth";
@@ -866,7 +874,10 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
       : null;
     agents.push(desktopAgentSummary(release, authentication));
   }
-  return agents;
+  const distribution = readDistribution();
+  return distribution
+    ? agents.filter((agent) => agent.id === distribution.agentId)
+    : agents;
 }
 
 export async function connectAgentAuthentication(
@@ -931,6 +942,8 @@ export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
 export async function startAgentPrompt(
   rawInput: StartAgentPromptInput,
 ): Promise<StartAgentPromptResult> {
+  assertDesktopAuthenticated();
+  distributionAgentCredential(rawInput.agentId);
   const input = parsePromptInput(rawInput);
   const prompt = input.prompt.trim();
   const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
@@ -1738,6 +1751,7 @@ async function runAgentSession(input: {
   const capabilities =
     release?.capabilities ?? developmentConnection!.capabilities;
   let runtime: RunningAgentRuntime | null = null;
+  let credentialExpiryTimer: NodeJS.Timeout | null = null;
   let fxProfile: FxRuntimeProfileLease | null = null;
   let browserTools: BrowserToolServer | null = null;
   let browserToolProviderId: string | null = null;
@@ -1852,8 +1866,20 @@ async function runAgentSession(input: {
 
   let agentRunRecorded = false;
   let userMessageRecorded = false;
+  /**
+   * Records the run against the conversation it belongs to.
+   *
+   * The ACP session id identifies the *conversation*, not this turn, so it
+   * goes in `providerSessionId`. It used to be written to `providerRunId`,
+   * which is unique — so the second message of any conversation with an agent
+   * that supports resuming collided with the first and was rejected, and the
+   * UI reported that the agent could not be started while it was running fine.
+   *
+   * ACP v1 has no per-run identifier, so `providerRunId` stays null until a
+   * provider offers one.
+   */
   const recordAgentRun = async (
-    providerRunId: string | null,
+    providerSessionId: string | null,
   ): Promise<void> => {
     if (agentRunRecorded) return;
     await input.journal.append({
@@ -1861,7 +1887,8 @@ async function runAgentSession(input: {
       agentRunId,
       eventType: "agent_run",
       providerKey,
-      providerRunId,
+      providerRunId: null,
+      providerSessionId,
       triggeringMessageEventId: input.userMessageEventId,
     });
     agentRunRecorded = true;
@@ -2295,9 +2322,41 @@ async function runAgentSession(input: {
         );
       },
     };
+    const companyCredential = distributionAgentCredential(
+      input.target.kind === "release"
+        ? input.target.release.agentId
+        : input.target.connection.agentId,
+    );
+    if (companyCredential)
+      credentialExpiryTimer = setTimeout(
+        () => {
+          input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
+          void runtime?.stop();
+        },
+        Math.max(0, Date.parse(companyCredential.expiresAt) - Date.now()),
+      );
+    const authenticate: AcpAuthenticationHandler = companyCredential
+      ? async (methods) => {
+          assertDesktopAuthenticated();
+          if (!methods.some((method) => method.id === "radius-oauth"))
+            throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
+          return {
+            methodId: "radius-oauth",
+            credential: {
+              accessToken: companyCredential.accessToken,
+              expiresAt: companyCredential.expiresAt,
+            },
+          };
+        }
+      : selectProtocolAuthentication;
     let acpSession: AcpRuntimeSession;
     const sessionStart = input.providerSessionId
-      ? ({ kind: "auto", sessionId: input.providerSessionId } as const)
+      ? ({
+          kind: "auto",
+          sessionId: input.providerSessionId,
+          // Windows fx answers a session it no longer holds with a bare "Session not found".
+          newOnBareMissingSession: process.platform === "win32",
+        } as const)
       : ({ kind: "new" } as const);
     const additionalDirectories = input.projectRoots.slice(1);
     if (developmentConnection) {
@@ -2314,7 +2373,7 @@ async function runAgentSession(input: {
           mcpServers,
           handlers,
           clientName: "radius-desktop-development",
-          onAuthenticate: selectProtocolAuthentication,
+          onAuthenticate: authenticate,
           session: sessionStart,
         },
       );
@@ -2338,9 +2397,9 @@ async function runAgentSession(input: {
         mcpServers,
         handlers,
         onAuthenticate:
-          release && isFxRelease(release)
+          !companyCredential && release && isFxRelease(release)
             ? undefined
-            : selectProtocolAuthentication,
+            : authenticate,
         session: sessionStart,
         onStderr: (chunk) => {
           if (process.env.RADIUS_RUNTIME_DEBUG === "1") {
@@ -2552,6 +2611,7 @@ async function runAgentSession(input: {
     });
     input.startup.reject(error);
   } finally {
+    if (credentialExpiryTimer) clearTimeout(credentialExpiryTimer);
     clearStreamingSessionMessage(input.sessionId);
     clearSessionWorking(input.sessionId);
     runningSessions.delete(input.sessionId);
@@ -2767,9 +2827,11 @@ function resolveMicrovmPaths(
     stateSharePath ||
     process.env.RADIUS_AGENT_DEVELOPER_STATE_SHARE?.trim() ||
     undefined;
+  const windowsPaths =
+    process.platform === "win32" ? windowsRuntimeAssetPaths() : undefined;
   return {
-    runtimeHostPath,
-    kernelPath,
+    runtimeHostPath: windowsPaths?.runtimeHostPath ?? runtimeHostPath,
+    kernelPath: windowsPaths?.kernelPath ?? kernelPath,
     runtimeRoot,
     developerStateSharePath,
     developerStateShareUser: developerStateSharePath

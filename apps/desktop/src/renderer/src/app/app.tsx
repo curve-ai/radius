@@ -1,3 +1,4 @@
+import { AuthGate } from "./auth/auth-gate";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { SettingsPage } from "@renderer/app/settings/page";
@@ -112,11 +113,13 @@ function AppContent(): ReactNode {
 export function App(): ReactNode {
   return (
     <ThemeProvider>
-      <WorkspaceNavigationProvider>
-        <ProjectProvider>
-          <AppContent />
-        </ProjectProvider>
-      </WorkspaceNavigationProvider>
+      <AuthGate>
+        <WorkspaceNavigationProvider>
+          <ProjectProvider>
+            <AppContent />
+          </ProjectProvider>
+        </WorkspaceNavigationProvider>
+      </AuthGate>
     </ThemeProvider>
   );
 }

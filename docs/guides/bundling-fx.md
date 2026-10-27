@@ -81,7 +81,7 @@ Run all commands from the `radius/` repository root.
 5. Prepare FX with the repository's pinned Bun version:
 
    ```bash
-   npx --yes bun@1.3.14 run agent:prepare-fx
+   npx --yes bun@1.4.4 run agent:prepare-fx
    ```
 
    The script downloads both archives and the CA bundle, verifies all three
@@ -92,7 +92,7 @@ Run all commands from the `radius/` repository root.
 6. Prepare the complete bundled-agent resource root and index:
 
    ```bash
-   npx --yes bun@1.3.14 run agents:prepare
+   npx --yes bun@1.4.4 run agents:prepare
    ```
 
 7. Inspect the generated result:
@@ -115,7 +115,7 @@ The normal packaging command rebuilds the runtime helper and bundled-agent
 resources before Electron Builder runs:
 
 ```bash
-npx --yes bun@1.3.14 run package
+npx --yes bun@1.4.4 run package
 ```
 
 Then verify the actual application resources, not only the staging directory:
@@ -132,9 +132,9 @@ test -f "$packaged_agents/fx/notices/THIRD_PARTY_NOTICES.md"
 Run the focused contract and import-integrity tests:
 
 ```bash
-npx --yes bun@1.3.14 run --cwd packages/runtime test
-npx --yes bun@1.3.14 run --cwd apps/desktop test
-npx --yes bun@1.3.14 run runtime:doctor
+npx --yes bun@1.4.4 run --cwd packages/runtime test
+npx --yes bun@1.4.4 run --cwd apps/desktop test
+npx --yes bun@1.4.4 run runtime:doctor
 ```
 
 For a release candidate, launch the packaged application and confirm that:

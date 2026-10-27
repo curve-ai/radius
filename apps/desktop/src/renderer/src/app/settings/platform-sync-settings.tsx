@@ -1,3 +1,4 @@
+import { thisDevice } from "@renderer/lib/device-name";
 import {
   useCallback,
   useEffect,
@@ -39,12 +40,13 @@ function connectionDescription(status: DesktopSyncStatus): string {
       return `Connected to ${where}, but the last sync did not finish.`;
     case "disabled":
       return status.connection
-        ? `Syncing with ${where} is turned off. Conversations stay on this Mac.`
-        : "Conversations stay on this Mac until you connect a platform.";
+        ? `Syncing with ${where} is turned off. Conversations stay on ${thisDevice()}.`
+        : `Conversations stay on ${thisDevice()} until you connect a platform.`;
   }
 }
 
 export function PlatformSyncSettings(): ReactNode {
+  const [company, setCompany] = useState(false);
   const [status, setStatus] = useState<DesktopSyncStatus | null>(null);
   const [showSelfHosted, setShowSelfHosted] = useState(false);
   const [url, setUrl] = useState("");
@@ -59,6 +61,9 @@ export function PlatformSyncSettings(): ReactNode {
   // "setting up your workspace" appear while the Cloud window is open.
   useEffect(() => {
     let active = true;
+    void window.radius.authenticationStatus().then((auth) => {
+      if (active) setCompany(auth.state !== "local");
+    });
     const read = (): void => {
       void window.radius
         .syncStatus()
@@ -139,6 +144,33 @@ export function PlatformSyncSettings(): ReactNode {
       </SettingsCard>
     );
   }
+
+  if (company)
+    return (
+      <SettingsCard>
+        <SettingsRow
+          label={status.connection?.organizationName ?? "Organization account"}
+          description={connectionDescription(status)}
+          descriptionLive
+        >
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void window.radius.signOut().catch(() => setBusy(false));
+            }}
+          >
+            Sign out
+          </Button>
+        </SettingsRow>
+        <SettingsRow
+          label="Automatic sync"
+          description="Your workspace syncs automatically with your organization."
+        />
+      </SettingsCard>
+    );
 
   if (status.state === "disabled") {
     return (

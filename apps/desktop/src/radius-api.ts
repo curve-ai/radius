@@ -450,6 +450,13 @@ export type PlatformConnectionInput =
   { kind: "cloud" } | { kind: "self-hosted"; url: string };
 
 export interface RadiusApi {
+  authenticationStatus(): Promise<
+    import("./auth-types").DesktopAuthenticationStatus
+  >;
+  signIn(): Promise<import("./auth-types").DesktopAuthenticationStatus>;
+  signOut(): Promise<import("./auth-types").DesktopAuthenticationStatus>;
+  cancelSignIn(): Promise<void>;
+
   platform: string;
   handleTitlebarDoubleClick(): Promise<void>;
   setNativeTheme(preference: ThemePreference): Promise<boolean>;

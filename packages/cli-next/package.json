@@ -1,0 +1,38 @@
+{
+  "name": "@curve-ai/cli-next",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "radius": "./bin/radius.mjs",
+    "radius-next": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc --emitDeclarationOnly -p tsconfig.json && bun build src/bin.ts --target=node --format=esm --outfile=dist/bin.js",
+    "typecheck": "bun check -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts",
+    "dev": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@curve-ai/agent-contracts": "0.0.1",
+    "@curve-ai/build": "0.0.1",
+    "@curve-ai/radius-runtime": "0.0.1",
+    "@stricli/core": "1.2.1",
+    "jsonc-parser": "3.3.1",
+    "smol-toml": "1.8.0",
+    "tsx": "4.23.12",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "@types/ws": "8.18.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src"
+  ]
+}

@@ -2,6 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 
 import { provisionPlatformOrganization } from "@curve-ai/platform-database";
 
+import {
+  createNativeAuthRoutes,
+  nativeEntriesFromEnvironment,
+} from "./native-auth.js";
 import { createPlatformApp } from "./app.js";
 import {
   createPostgresBrowserAuth,
@@ -14,12 +18,16 @@ import { createPostgresPlatformServices } from "./postgres-services.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
 const databaseUrl = requiredEnvironment("DATABASE_URL");
+const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
+if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
 const bootstrapDevelopmentAuthority =
   process.env.RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY === "true";
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
 
 const runtime = await createPostgresPlatformServices({
   connectionString: databaseUrl,
+  migrationConnectionString: process.env.RADIUS_DATABASE_MIGRATION_URL?.trim(),
+  requireSyncIsolation: syncEnabled,
   bootstrapDevelopmentAuthority,
   developmentAccessToken: developmentToken,
   migrationsDirectory: process.env.RADIUS_PLATFORM_MIGRATIONS_DIR,
@@ -45,9 +53,19 @@ const provisioning = provisioningToken
   : undefined;
 // Conversation sync is opt-in: it needs a cursor secret, and a deployment
 // that does not want to store conversations should not have the routes at all.
-const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
-if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
+const nativeEntries = nativeEntriesFromEnvironment(process.env);
 const app = createPlatformApp(runtime.services, {
+  nativeAuth: nativeEntries.length
+    ? createNativeAuthRoutes({
+        pool: runtime.pool,
+        entries: nativeEntries,
+        managedBaseDomain: sharedOrigins
+          ? requiredEnvironment("RADIUS_MANAGED_BASE_DOMAIN")
+          : undefined,
+        allowLoopback:
+          process.env.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
+      })
+    : undefined,
   browserAuth,
   provisioning,
   deploymentMode: sharedOrigins ? "managed" : "self_hosted",
@@ -78,8 +96,19 @@ function browserAuthFromEnvironment(
   sharedOrigins: boolean,
 ) {
   const issuer = process.env.RADIUS_OIDC_ISSUER?.trim();
+  const nativeSharedSettings = new Set([
+    "RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK",
+    "RADIUS_OIDC_ALLOWED_EMAILS",
+    "RADIUS_OIDC_ALLOWED_EMAIL_DOMAINS",
+    "RADIUS_OIDC_AUTO_JOIN_ROLE",
+  ]);
   const oidcEnvironmentPresent = Object.keys(process.env).some(
-    (name) => name.startsWith("RADIUS_OIDC_") && process.env[name]?.trim(),
+    (name) =>
+      name.startsWith("RADIUS_OIDC_") &&
+      process.env[name]?.trim() &&
+      !(
+        process.env.RADIUS_NATIVE_AUTH_CONFIG && nativeSharedSettings.has(name)
+      ),
   );
   if (!issuer) {
     if (oidcEnvironmentPresent) {

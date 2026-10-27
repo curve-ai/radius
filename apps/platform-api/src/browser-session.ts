@@ -115,6 +115,7 @@ export async function provisionOidcBrowserSession(
   pool: PlatformPool,
   claims: OidcIdentityClaims,
   policy: OidcProvisioningPolicy,
+  options: { organizationBound?: boolean } = {},
 ): Promise<CreatedBrowserSession> {
   return withPlatformTransaction(pool, async (client) => {
     await client.query(
@@ -223,7 +224,7 @@ export async function provisionOidcBrowserSession(
     }
 
     const sessionId = randomUUID();
-    const sessionToken = `radius_sess_${randomBytes(32).toString("base64url")}`;
+    const sessionToken = `${options.organizationBound ? `radius_native_${organizationId}` : "radius_sess"}_${randomBytes(32).toString("base64url")}`;
     const expiresAt = new Date(Date.now() + policy.sessionTtlSeconds * 1000);
     await client.query(
       `
@@ -307,10 +308,25 @@ export async function authenticateBrowserSession(
     ),
     loadAccountIdentity(pool, row.account_id),
   ]);
+  // The entire token, including its organization binding, is hashed in the
+  // existing session row. Editing the binding invalidates authentication.
+  const boundOrganization = nativeSessionOrganization(sessionToken);
+  if (sessionToken.startsWith("radius_native_") && !boundOrganization)
+    return null;
+  const scopedIdentity = boundOrganization
+    ? {
+        ...identity,
+        organizations: identity.organizations.filter(
+          (organization) => organization.id === boundOrganization,
+        ),
+      }
+    : identity;
+  if (boundOrganization && scopedIdentity.organizations.length === 0)
+    return null;
   return {
     sessionId: row.session_id,
     accountIdentityId: row.account_identity_id,
-    identity,
+    identity: scopedIdentity,
   };
 }
 
@@ -381,4 +397,12 @@ function assertClaimsAllowed(
   ) {
     throw new Error("OIDC identity is not allowed to join this organization");
   }
+}
+
+export function nativeSessionOrganization(token: string): string | null {
+  return (
+    token.match(
+      /^radius_native_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_[A-Za-z0-9_-]{43}$/,
+    )?.[1] ?? null
+  );
 }

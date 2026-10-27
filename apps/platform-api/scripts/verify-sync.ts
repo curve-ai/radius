@@ -18,6 +18,9 @@ import { and, eq } from "drizzle-orm";
 
 import {
   createPlatformDatabase,
+  assertSyncDatabaseIsolation,
+  provisionPlatformRuntimeRole,
+  runtimeRoleCredentials,
   migratePlatformDatabase,
   platformSchema,
   provisionPlatformOrganization,
@@ -99,16 +102,16 @@ async function provisionTenant(
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   await withSyncOwner(database, owner, (transaction) =>
     transaction.insert(syncDevices).values({
-    id: deviceId,
-    ...owner,
-    clientInstallationId: null,
-    displayName: "Verification device",
-    platform: "darwin",
-    publicKeyJwk: publicKey.export({ format: "jwk" }) as JsonWebKey,
-    appVersion: "0.0.1",
-    createdAt: new Date(),
-    lastSeenAt: new Date(),
-    revokedAt: null,
+      id: deviceId,
+      ...owner,
+      clientInstallationId: null,
+      displayName: "Verification device",
+      platform: "darwin",
+      publicKeyJwk: publicKey.export({ format: "jwk" }) as JsonWebKey,
+      appVersion: "0.0.1",
+      createdAt: new Date(),
+      lastSeenAt: new Date(),
+      revokedAt: null,
     }),
   );
   return { owner, deviceId, privateKey };
@@ -127,7 +130,25 @@ async function main(): Promise<void> {
     path.join(tmpdir(), "radius-sync-verify-artifacts-"),
   );
   try {
-    await migratePlatformDatabase(pool);
+    const migrationUrl = process.env.RADIUS_DATABASE_MIGRATION_URL?.trim();
+    if (migrationUrl) {
+      const administrator = createPlatformDatabase({
+        connectionString: migrationUrl,
+        maxConnections: 1,
+      });
+      try {
+        await migratePlatformDatabase(administrator.pool);
+        await provisionPlatformRuntimeRole(
+          administrator.pool,
+          runtimeRoleCredentials(connectionString, migrationUrl),
+        );
+      } finally {
+        await administrator.pool.end();
+      }
+    } else {
+      await migratePlatformDatabase(pool);
+    }
+    await assertSyncDatabaseIsolation(pool);
 
     const acme = await provisionTenant(
       pool,
@@ -144,9 +165,7 @@ async function main(): Promise<void> {
     // --- device signature ------------------------------------------------
     const signedBody = "{}";
     const signedTimestamp = new Date().toISOString();
-    const signedUrl = new URL(
-      "http://localhost/api/platform/v1/sync/push",
-    );
+    const signedUrl = new URL("http://localhost/api/platform/v1/sync/push");
     const signedHash = createHash("sha256").update(signedBody).digest("hex");
     const signedInput = `POST\n${signedUrl.pathname}\n${signedTimestamp}\n${signedHash}`;
     const signature = sign(null, Buffer.from(signedInput), privateKey).toString(
@@ -169,7 +188,7 @@ async function main(): Promise<void> {
           owner.membershipId,
           signedBody,
         ),
-        ),
+      ),
       deviceId,
     );
 
@@ -183,7 +202,7 @@ async function main(): Promise<void> {
           other.owner.membershipId,
           signedBody,
         ),
-        ),
+      ),
       /DEVICE_NOT_REGISTERED/,
     );
 
@@ -690,7 +709,7 @@ async function main(): Promise<void> {
           other.owner.membershipId,
           signedBody,
         ),
-        ),
+      ),
       /DEVICE_NOT_REGISTERED/,
     );
 
@@ -699,16 +718,16 @@ async function main(): Promise<void> {
       (
         await withSyncOwner(database, owner, (transaction) =>
           transaction
-          .select({ id: syncProjects.id })
-          .from(syncProjects)
-          .where(
-            and(
-              eq(syncProjects.organizationId, owner.organizationId),
-              eq(syncProjects.membershipId, owner.membershipId),
-              eq(syncProjects.id, projectId),
+            .select({ id: syncProjects.id })
+            .from(syncProjects)
+            .where(
+              and(
+                eq(syncProjects.organizationId, owner.organizationId),
+                eq(syncProjects.membershipId, owner.membershipId),
+                eq(syncProjects.id, projectId),
+              ),
             ),
-          ),
-      )
+        )
       ).length,
       1,
     );
@@ -716,24 +735,24 @@ async function main(): Promise<void> {
       (
         await withSyncOwner(database, owner, (transaction) =>
           transaction
-          .select({ id: syncReasoningSummaries.eventId })
-          .from(syncReasoningSummaries),
-      )
+            .select({ id: syncReasoningSummaries.eventId })
+            .from(syncReasoningSummaries),
+        )
       ).length >= 1,
     );
     assert.equal(
       (
         await withSyncOwner(database, owner, (transaction) =>
           transaction
-          .select({ id: syncFileArtifacts.artifactId })
-          .from(syncFileArtifacts)
-          .where(
-            and(
-              eq(syncFileArtifacts.membershipId, owner.membershipId),
-              eq(syncFileArtifacts.artifactId, artifactId),
+            .select({ id: syncFileArtifacts.artifactId })
+            .from(syncFileArtifacts)
+            .where(
+              and(
+                eq(syncFileArtifacts.membershipId, owner.membershipId),
+                eq(syncFileArtifacts.artifactId, artifactId),
+              ),
             ),
-          ),
-      )
+        )
       ).length,
       1,
     );
@@ -741,15 +760,15 @@ async function main(): Promise<void> {
       (
         await withSyncOwner(database, owner, (transaction) =>
           transaction
-          .select({ id: syncAgentRunPresentations.eventId })
-          .from(syncAgentRunPresentations)
-          .where(
-            and(
-              eq(syncAgentRunPresentations.agentRunId, agentRunId),
-              eq(syncAgentRunPresentations.mode, "collapsible"),
+            .select({ id: syncAgentRunPresentations.eventId })
+            .from(syncAgentRunPresentations)
+            .where(
+              and(
+                eq(syncAgentRunPresentations.agentRunId, agentRunId),
+                eq(syncAgentRunPresentations.mode, "collapsible"),
+              ),
             ),
-          ),
-      )
+        )
       ).length,
       1,
     );
@@ -757,15 +776,15 @@ async function main(): Promise<void> {
       (
         await withSyncOwner(database, owner, (transaction) =>
           transaction
-          .select({ id: syncFileChanges.eventId })
-          .from(syncFileChanges)
-          .where(
-            and(
-              eq(syncFileChanges.agentRunId, agentRunId),
-              eq(syncFileChanges.projectFileId, projectFileId),
+            .select({ id: syncFileChanges.eventId })
+            .from(syncFileChanges)
+            .where(
+              and(
+                eq(syncFileChanges.agentRunId, agentRunId),
+                eq(syncFileChanges.projectFileId, projectFileId),
+              ),
             ),
-          ),
-      )
+        )
       ).length,
       1,
     );

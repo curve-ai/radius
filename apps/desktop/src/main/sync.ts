@@ -11,6 +11,7 @@ import {
 } from "@curve-ai/radius-storage";
 import { HttpSyncProvider, SyncEngine } from "@curve-ai/radius-sync-core";
 import { app } from "electron";
+import { assertProfileIdentity } from "./desktop-auth-policy";
 
 import { connectViaCloud } from "./cloud-onboarding";
 import {
@@ -61,6 +62,7 @@ let runPromise: Promise<void> | null = null;
 let manualRun: (() => Promise<void>) | null = null;
 let activeAbortController: AbortController | null = null;
 let connectionGeneration = 0;
+let onNativeAuthenticationLost: (() => void) | null = null;
 
 function stableUuid(value: string): string {
   const bytes = Buffer.from(
@@ -132,6 +134,7 @@ async function startConnection(
   context: StorageContext,
   connection: SyncConnectionRecord,
   getAccessToken: AccessTokenProvider | null,
+  registerFirst = false,
 ): Promise<void> {
   const generation = ++connectionGeneration;
   await stopActiveSync();
@@ -217,6 +220,7 @@ async function startConnection(
           errorCode.includes("401")
         ) {
           haltActiveSync();
+          onNativeAuthenticationLost?.();
         }
         status = { ...status, state: "error", errorCode, progress: null };
       }
@@ -236,7 +240,11 @@ async function startConnection(
     progress: null,
   };
   manualRun = run;
-  await run();
+  if (registerFirst) {
+    await provider.registerDevice();
+    deviceRegistered = true;
+    void run();
+  } else await run();
   if (!ownsConnection()) return;
   timer = setInterval(() => void run(), 30_000);
   timer.unref();
@@ -250,6 +258,22 @@ async function startConnection(
 function accessTokenProvider(
   connection: SyncConnectionRecord,
 ): AccessTokenProvider | null {
+  if (connection.credentialRef === "distribution:oauth")
+    return async () => {
+      const stored =
+        await storageContext?.vault.getSecret("distribution:oauth");
+      if (!stored) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+      const value = JSON.parse(stored) as {
+        platformSessionToken: string;
+        platformExpiresAt: string;
+      };
+      if (
+        !value.platformSessionToken ||
+        Date.parse(value.platformExpiresAt) <= Date.now()
+      )
+        throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
+      return value.platformSessionToken;
+    };
   if (connection.credentialRef !== ENVIRONMENT_CREDENTIAL) return null;
   const token = process.env.RADIUS_SYNC_TOKEN?.trim();
   if (!token) throw new Error("SYNC_REAUTHENTICATION_REQUIRED");
@@ -478,4 +502,34 @@ export async function platformRequestCredentials(
     fetch: globalThis.fetch,
     headers: { authorization: `Bearer ${await provider(signal)}` },
   };
+}
+
+/** Distribution startup supplies its validated native session; no UI sync switch. */
+export async function connectNativePlatform(
+  context: StorageContext,
+  distribution: import("@curve-ai/platform-contracts").DesktopDistribution,
+  session: import("@curve-ai/platform-contracts").NativeAuthorizationResponse,
+  getToken: AccessTokenProvider,
+  onAuthenticationLost: () => void,
+): Promise<void> {
+  storageContext = context;
+  onNativeAuthenticationLost = onAuthenticationLost;
+  const previous = await getMostRecentSyncConnection(context.database);
+  assertProfileIdentity(previous?.remoteSubject, session.accountId);
+  const connection = await configureSyncConnection(context.database, {
+    id: stableUuid(
+      `${PROVIDER_KEY}\0${distribution.platformUrl}\0${session.accountId}`,
+    ),
+    providerKey: PROVIDER_KEY,
+    endpointUrl: distribution.platformUrl,
+    credentialRef: "distribution:oauth",
+    remoteSubject: session.accountId,
+    accountLabel: session.organization.displayName,
+    organizationSlug: session.organization.slug,
+    organizationRole: session.organization.role,
+    deploymentMode: await platformDeploymentMode(distribution.platformUrl),
+    sessionPartition: null,
+    enabled: true,
+  });
+  await startConnection(context, connection, getToken, true);
 }

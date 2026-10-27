@@ -26,8 +26,15 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1788528797960,
-      "tag": "0003_sync_row_security",
+      "when": 1788492194401,
+      "tag": "0003_agent_run_session_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793087624617,
+      "tag": "0004_sync_row_security",
       "breakpoints": true
     }
   ]

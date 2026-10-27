@@ -1,7 +1,41 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { RadiusPlatformClient, validatePlatformBaseUrl } from "./index.js";
+import {
+  RadiusPlatformClient,
+  readBoundedText,
+  validatePlatformBaseUrl,
+} from "./index.js";
+
+test("bounded readers enforce byte limits, cancel overflow and release their lock", async () => {
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new TextEncoder().encode("é"));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const error = new Error("AUTH_RESPONSE_INVALID");
+  await assert.rejects(
+    readBoundedText(stream, 3, () => error),
+    (cause) => cause === error,
+  );
+  assert.equal(cancelled, true);
+  assert.equal(stream.locked, false);
+
+  const bytes = new TextEncoder().encode("é");
+  const split = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, 1));
+      controller.enqueue(bytes.subarray(1));
+      controller.close();
+    },
+  });
+  assert.equal(await readBoundedText(split, 2, () => error), "é");
+  assert.equal(split.locked, false);
+});
 
 test("allows HTTPS and explicit loopback HTTP only", () => {
   assert.equal(

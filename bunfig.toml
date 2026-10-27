@@ -1,2 +1,13 @@
 [install]
 registry = "https://registry.npmjs.org"
+linker = "hoisted"
+
+[fmt]
+printWidth = 80
+tabWidth = 2
+semi = true
+singleQuote = false
+sortImports = false
+sortTailwindcss = false
+sortPackageJson = false
+ignorePatterns = ["vendor/", "**/next-env.d.ts", "**/drizzle/", "**/uv.lock"]

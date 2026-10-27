@@ -10,20 +10,21 @@
     "dev": "bun --watch src/server.ts",
     "start": "bun src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "typecheck": "bun check -p tsconfig.json && bun check -p tsconfig.scripts.json",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "verify:sync": "tsx scripts/verify-sync.ts"
+    "verify:sync": "tsx scripts/verify-sync.ts",
+    "verify:sync-database": "bun scripts/verify-sync-database.ts"
   },
   "dependencies": {
     "@curve-ai/platform-contracts": "0.0.1",
     "@curve-ai/platform-database": "0.0.1",
     "@curve-ai/platform-providers": "0.0.1",
     "@curve-ai/radius-sync-protocol": "0.0.1",
-    "hono": "4.13.3",
+    "hono": "4.13.13",
     "openid-client": "6.8.7"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0",
+    "@types/bun": "1.4.4",
     "@types/node": "22.19.1",
     "jose": "6.2.10",
     "tsx": "4.23.12",

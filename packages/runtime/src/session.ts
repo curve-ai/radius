@@ -60,7 +60,12 @@ export type AcpUpdateHandler = (
 export type AcpAuthenticationHandler = (
   authMethods: AuthMethod[],
   signal: AbortSignal,
-) => Promise<string | null | undefined>;
+) => Promise<
+  | string
+  | { methodId: string; credential: { accessToken: string; expiresAt: string } }
+  | null
+  | undefined
+>;
 
 export interface AcpTerminalHandlers {
   create(
@@ -134,7 +139,12 @@ export type AcpRuntimeSessionStart =
   | { kind: "new" }
   | { kind: "load"; sessionId: string }
   | { kind: "resume"; sessionId: string }
-  | { kind: "auto"; sessionId: string };
+  | {
+      kind: "auto";
+      sessionId: string;
+      /** Also start fresh on a bare "Session not found" (Windows fx). Off by default. */
+      newOnBareMissingSession?: boolean;
+    };
 
 export type AcpRuntimeSessionLifecycle = "new" | "load" | "resume";
 
@@ -165,6 +175,46 @@ interface RuntimeUpdateState {
   replaying: boolean;
 }
 
+/**
+ * The agent answered `initialize` with a protocol version Radius does not speak.
+ * ACP says the client SHOULD close the connection in that case, and Radius does.
+ */
+export class AcpProtocolVersionMismatchError extends Error {
+  readonly requestedVersion: number;
+  readonly agentVersion: number;
+
+  constructor(requestedVersion: number, agentVersion: number) {
+    super(
+      `The agent negotiated ACP protocol version ${agentVersion}; Radius speaks version ${requestedVersion}`,
+    );
+    this.name = "AcpProtocolVersionMismatchError";
+    this.requestedVersion = requestedVersion;
+    this.agentVersion = agentVersion;
+  }
+}
+
+/**
+ * The agent refused `session/new` or `session/load` with ACP `auth_required`.
+ * Carries the methods the agent advertised at `initialize` so the caller can
+ * say what the agent wants instead of reporting a generic failure.
+ */
+export class AcpAuthenticationRequiredError extends Error {
+  readonly authMethods: AuthMethod[];
+
+  constructor(authMethods: AuthMethod[], cause: RequestError) {
+    const offered =
+      authMethods.length > 0
+        ? authMethods.map((method) => method.id).join(", ")
+        : "none";
+    super(
+      `The agent requires ACP authentication before starting a session (advertised methods: ${offered})`,
+      { cause },
+    );
+    this.name = "AcpAuthenticationRequiredError";
+    this.authMethods = [...authMethods];
+  }
+}
+
 export class AcpRuntimeSession {
   readonly sessionId: string;
   readonly initializationResponse: InitializeResponse;
@@ -190,6 +240,10 @@ export class AcpRuntimeSession {
     this.sessionId = sessionId;
     this.configOptions = [...(sessionState.configOptions ?? [])];
     this.modes = sessionState.modes;
+  }
+
+  get protocolVersion(): number {
+    return this.initializationResponse.protocolVersion;
   }
 
   get agentCapabilities(): AgentCapabilities {
@@ -344,6 +398,12 @@ export class AcpRuntimeSession {
           },
         },
       );
+      if (initializationResponse.protocolVersion !== PROTOCOL_VERSION) {
+        throw new AcpProtocolVersionMismatchError(
+          PROTOCOL_VERSION,
+          initializationResponse.protocolVersion,
+        );
+      }
       await authenticateIfRequested(
         connection,
         initializationResponse,
@@ -372,10 +432,14 @@ export class AcpRuntimeSession {
       };
       switch (start.kind) {
         case "new": {
-          const response = await connection.agent.request<
-            NewSessionResponse,
-            NewSessionRequest
-          >(methods.agent.session.new, commonRequest);
+          const response = await requireAuthenticated(
+            initializationResponse,
+            () =>
+              connection.agent.request<NewSessionResponse, NewSessionRequest>(
+                methods.agent.session.new,
+                commonRequest,
+              ),
+          );
           sessionId = response.sessionId;
           updateState.expectedSessionId = sessionId;
           lifecycle = "new";
@@ -388,9 +452,13 @@ export class AcpRuntimeSession {
           }
           updateState.replaying = true;
           try {
-            sessionState = await connection.agent.request(
-              methods.agent.session.load,
-              { ...commonRequest, sessionId: start.sessionId },
+            sessionState = await requireAuthenticated(
+              initializationResponse,
+              () =>
+                connection.agent.request(methods.agent.session.load, {
+                  ...commonRequest,
+                  sessionId: start.sessionId,
+                }),
             );
           } finally {
             updateState.replaying = false;
@@ -439,7 +507,14 @@ export class AcpRuntimeSession {
                 ),
               };
             } catch (error) {
-              if (!isMissingSessionError(error, start.sessionId)) throw error;
+              if (
+                !isMissingSessionError(
+                  error,
+                  start.sessionId,
+                  start.newOnBareMissingSession === true,
+                )
+              )
+                throw error;
             }
           }
           if (
@@ -457,7 +532,14 @@ export class AcpRuntimeSession {
                 ),
               };
             } catch (error) {
-              if (!isMissingSessionError(error, start.sessionId)) throw error;
+              if (
+                !isMissingSessionError(
+                  error,
+                  start.sessionId,
+                  start.newOnBareMissingSession === true,
+                )
+              )
+                throw error;
             } finally {
               updateState.replaying = false;
             }
@@ -698,16 +780,38 @@ function supportsAdditionalDirectories(
   );
 }
 
+const ACP_AUTH_REQUIRED_CODE = -32000;
+
+async function requireAuthenticated<T>(
+  initializationResponse: InitializeResponse,
+  request: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await request();
+  } catch (error) {
+    if (
+      error instanceof RequestError &&
+      error.code === ACP_AUTH_REQUIRED_CODE
+    ) {
+      throw new AcpAuthenticationRequiredError(
+        initializationResponse.authMethods ?? [],
+        error,
+      );
+    }
+    throw error;
+  }
+}
+
 async function authenticateIfRequested(
   connection: ClientConnection,
   initializationResponse: InitializeResponse,
   handler: AcpAuthenticationHandler | undefined,
 ): Promise<void> {
   const authMethods = initializationResponse.authMethods ?? [];
-  if (!handler || authMethods.length === 0) return;
-
-  const methodId = await handler([...authMethods], connection.signal);
-  if (methodId == null) return;
+  if (!handler) return;
+  const selected = await handler([...authMethods], connection.signal);
+  if (selected == null) return;
+  const methodId = typeof selected === "string" ? selected : selected.methodId;
   const method = authMethods.find((candidate) => candidate.id === methodId);
   if (!method) {
     throw new Error(
@@ -719,12 +823,37 @@ async function authenticateIfRequested(
       `ACP terminal authentication method ${methodId} requires interactive terminal login`,
     );
   }
-  await connection.agent.request(methods.agent.authenticate, { methodId });
+  if (
+    typeof selected !== "string" &&
+    (methodId !== "radius-oauth" ||
+      !selected.credential.accessToken ||
+      Date.parse(selected.credential.expiresAt) <= Date.now() ||
+      !Number.isFinite(Date.parse(selected.credential.expiresAt)))
+  )
+    throw new Error("Invalid Radius agent credential");
+  await connection.agent.request(methods.agent.authenticate, {
+    methodId,
+    ...(typeof selected === "string"
+      ? {}
+      : { _meta: { "ai.radius/auth": selected.credential } }),
+  });
 }
 
-function isMissingSessionError(error: unknown, sessionId: string): boolean {
+function isMissingSessionError(
+  error: unknown,
+  sessionId: string,
+  acceptBareMissingSession = false,
+): boolean {
   if (!(error instanceof RequestError)) return false;
   const message = error.message.toLowerCase();
+  if (
+    acceptBareMissingSession &&
+    (error.code === -32602 || error.code === -32603) &&
+    error.data === undefined &&
+    message.trim() === "session not found"
+  ) {
+    return true;
+  }
   const normalizedSessionId = sessionId.toLowerCase();
   const data = error.data;
   const dataMatches =

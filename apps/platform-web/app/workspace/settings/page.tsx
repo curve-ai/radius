@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ThemeSwitch } from "@/components/ui/theme-switch";
 import { DeveloperTokenManager } from "@/components/settings/developer-token-manager";
 import { OrganizationMemberManager } from "@/components/settings/organization-member-manager";
@@ -52,6 +53,25 @@ export default async function SettingsPage() {
   return (
     <main className="mx-auto w-full max-w-4xl px-4 pb-12 pt-8 sm:px-6 sm:pb-16 sm:pt-10">
       <div className="space-y-4">
+        {["owner", "admin"].includes(organization.role) && (
+          <Section className="rounded-sm bg-transparent">
+            <SectionHeader>
+              <h2 className="text-base font-normal">Company sign-in</h2>
+            </SectionHeader>
+            <SectionContent>
+              <p className="mb-3 text-sm text-muted-foreground">
+                Connect your identity provider and configure the desktop
+                application.
+              </p>
+              <Link
+                href="/workspace/settings/authentication"
+                className="text-sm underline underline-offset-4"
+              >
+                Set up authentication
+              </Link>
+            </SectionContent>
+          </Section>
+        )}
         <Section className="rounded-sm bg-transparent">
           <SectionHeader>
             <h2 className="text-base font-normal text-foreground">

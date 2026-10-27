@@ -229,7 +229,11 @@ async function insertEventProjection(
         eventId: event.eventId,
         sessionId: event.sessionId,
         providerKey: event.providerKey,
-        providerRunId: event.providerRunId,
+        providerRunId: event.providerSessionId ? event.providerRunId : null,
+        // Optional on the wire, so a desktop that predates the split still
+        // syncs; its session id arrives in providerRunId and is read from
+        // there rather than being dropped.
+        providerSessionId: event.providerSessionId ?? event.providerRunId,
         triggeringMessageEventId: event.triggeringMessageEventId,
         startedAt: new Date(event.occurredAt),
       });
@@ -716,18 +720,21 @@ export async function pullSyncChanges(
   const after = cursor ? decodeCursor(cursor) : null;
   const rows = await withSyncOwner(database, owner, (transaction) =>
     transaction
-    .select({ sequence: syncChanges.sequence, envelope: syncChanges.envelope })
-    .from(syncChanges)
-    .where(
-      after === null
-        ? eq(syncChanges.membershipId, owner.membershipId)
-        : and(
-            eq(syncChanges.membershipId, owner.membershipId),
-            gt(syncChanges.sequence, after),
-          ),
-    )
-    .orderBy(syncChanges.sequence)
-    .limit(limit),
+      .select({
+        sequence: syncChanges.sequence,
+        envelope: syncChanges.envelope,
+      })
+      .from(syncChanges)
+      .where(
+        after === null
+          ? eq(syncChanges.membershipId, owner.membershipId)
+          : and(
+              eq(syncChanges.membershipId, owner.membershipId),
+              gt(syncChanges.sequence, after),
+            ),
+      )
+      .orderBy(syncChanges.sequence)
+      .limit(limit),
   );
   const last = rows.at(-1)?.sequence;
   return {

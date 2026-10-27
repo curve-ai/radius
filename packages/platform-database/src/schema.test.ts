@@ -45,11 +45,15 @@ async function migrations(): Promise<{ core: string; invariants: string }> {
 }
 
 test("the Drizzle migrations parse as PostgreSQL 17", async () => {
-  const { core, invariants } = await migrations();
-  const parsed = await parse(
-    `${core}\n${invariants}`.replaceAll("--> statement-breakpoint", ""),
-  );
-  assert.ok(parsed.stmts.length > 60);
+  const folder = new URL("../drizzle/", import.meta.url);
+  const journal = JSON.parse(
+    await readFile(new URL("meta/_journal.json", folder), "utf8"),
+  ) as { entries: { tag: string }[] };
+  for (const entry of journal.entries) {
+    const sql = await readFile(new URL(`${entry.tag}.sql`, folder), "utf8");
+    const parsed = await parse(sql.replaceAll("--> statement-breakpoint", ""));
+    assert.ok(parsed.stmts.length > 0, entry.tag);
+  }
 });
 
 test("the Drizzle core has one table per approved Platform subject", async () => {

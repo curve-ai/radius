@@ -1,5 +1,5 @@
 {
-  "id": "de45adc1-340d-4af8-89b9-6a299b350ed7",
+  "id": "669956dc-1890-4772-984e-1258069ddf2e",
   "prevId": "3b1d53c7-7b3c-4019-94e0-827460264140",
   "version": "7",
   "dialect": "postgresql",
@@ -3943,18 +3943,7 @@
           ]
         }
       },
-      "policies": {
-        "artifacts_membership_isolation": {
-          "name": "artifacts_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_artifacts_storage_kind_check": {
           "name": "sync_artifacts_storage_kind_check",
@@ -4028,18 +4017,7 @@
         }
       },
       "uniqueConstraints": {},
-      "policies": {
-        "event_artifacts_membership_isolation": {
-          "name": "event_artifacts_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = event_artifacts.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = event_artifacts.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_event_artifacts_relationship_check": {
           "name": "sync_event_artifacts_relationship_check",
@@ -4157,18 +4135,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "file_artifacts_membership_isolation": {
-          "name": "file_artifacts_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_file_artifacts_digest_check": {
           "name": "sync_file_artifacts_digest_check",
@@ -4233,18 +4200,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "link_artifacts_membership_isolation": {
-          "name": "link_artifacts_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.artifacts owner_artifact where owner_artifact.artifact_id = link_artifacts.artifact_id and owner_artifact.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.artifacts owner_artifact where owner_artifact.artifact_id = link_artifacts.artifact_id and owner_artifact.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -4491,18 +4447,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "changes_membership_isolation": {
-          "name": "changes_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_changes_subject_check": {
           "name": "sync_changes_subject_check",
@@ -4661,18 +4606,7 @@
           ]
         }
       },
-      "policies": {
-        "devices_membership_isolation": {
-          "name": "devices_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -4836,18 +4770,7 @@
           ]
         }
       },
-      "policies": {
-        "projects_membership_isolation": {
-          "name": "projects_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_projects_revision_check": {
           "name": "sync_projects_revision_check",
@@ -5090,18 +5013,7 @@
           ]
         }
       },
-      "policies": {
-        "sessions_membership_isolation": {
-          "name": "sessions_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_sessions_status_check": {
           "name": "sync_sessions_status_check",
@@ -5204,18 +5116,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "agent_run_presentations_membership_isolation": {
-          "name": "agent_run_presentations_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = agent_run_presentations.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = agent_run_presentations.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5287,18 +5188,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "agent_run_state_updates_membership_isolation": {
-          "name": "agent_run_state_updates_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = agent_run_state_updates.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = agent_run_state_updates.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5347,6 +5237,12 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "provider_session_id": {
+          "name": "provider_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -5407,6 +5303,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "sync_agent_runs_provider_session_idx": {
+          "name": "sync_agent_runs_provider_session_idx",
+          "columns": [
+            {
+              "expression": "provider_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -5441,18 +5358,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "agent_runs_membership_isolation": {
-          "name": "agent_runs_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = agent_runs.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = agent_runs.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5546,18 +5452,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "approval_decisions_membership_isolation": {
-          "name": "approval_decisions_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = approval_decisions.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = approval_decisions.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5639,18 +5534,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "approval_requests_membership_isolation": {
-          "name": "approval_requests_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = approval_requests.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = approval_requests.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5714,18 +5598,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "errors_membership_isolation": {
-          "name": "errors_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = errors.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = errors.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5811,18 +5684,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "message_parts_membership_isolation": {
-          "name": "message_parts_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = message_parts.message_event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = message_parts.message_event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5892,18 +5754,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "messages_membership_isolation": {
-          "name": "messages_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = messages.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = messages.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -5949,18 +5800,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "reasoning_summaries_membership_isolation": {
-          "name": "reasoning_summaries_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = reasoning_summaries.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = reasoning_summaries.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6167,18 +6007,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "session_events_membership_isolation": {
-          "name": "session_events_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6252,18 +6081,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "task_plans_membership_isolation": {
-          "name": "task_plans_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = task_plans.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = task_plans.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6329,18 +6147,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "task_step_updates_membership_isolation": {
-          "name": "task_step_updates_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = task_step_updates.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = task_step_updates.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6414,18 +6221,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "task_steps_membership_isolation": {
-          "name": "task_steps_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.task_plans owner_plan join radius_sync.session_events owner_event on owner_event.event_id = owner_plan.event_id where owner_plan.plan_id = task_steps.plan_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.task_plans owner_plan join radius_sync.session_events owner_event on owner_event.event_id = owner_plan.event_id where owner_plan.plan_id = task_steps.plan_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6495,18 +6291,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "tool_calls_membership_isolation": {
-          "name": "tool_calls_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = tool_calls.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = tool_calls.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6578,18 +6363,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "tool_progress_events_membership_isolation": {
-          "name": "tool_progress_events_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = tool_progress_events.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = tool_progress_events.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6683,18 +6457,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "tool_results_membership_isolation": {
-          "name": "tool_results_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = tool_results.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = tool_results.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -6877,18 +6640,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "file_changes_membership_isolation": {
-          "name": "file_changes_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = file_changes.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)",
-          "withCheck": "exists (select 1 from radius_sync.session_events owner_event where owner_event.event_id = file_changes.event_id and owner_event.membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
@@ -7048,18 +6800,7 @@
           ]
         }
       },
-      "policies": {
-        "project_file_versions_membership_isolation": {
-          "name": "project_file_versions_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {
         "sync_project_file_versions_digest_check": {
           "name": "sync_project_file_versions_digest_check",
@@ -7171,18 +6912,7 @@
           ]
         }
       },
-      "policies": {
-        "project_files_membership_isolation": {
-          "name": "project_files_membership_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid",
-          "withCheck": "membership_id = nullif(current_setting('radius_sync.membership_id', true), '')::uuid"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     }

@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS builder
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ RUN bun install --frozen-lockfile \
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run --cwd apps/platform-web build
 
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 
 WORKDIR /app
 LABEL org.opencontainers.image.title="Radius Platform Web" \

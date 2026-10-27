@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR?.trim() || ".next",
   allowedDevOrigins: ["127.0.0.1", "*.localhost"],
   experimental: {
-    viewTransition: true,
     optimizePackageImports: [
       "lucide-react",
       "@radix-ui/react-icons",

@@ -13,10 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { ownedByMembership, radiusSync } from "../common.js";
-import {
-  organizationMemberships,
-  organizations,
-} from "../organizations.js";
+import { organizationMemberships, organizations } from "../organizations.js";
 
 /**
  * A device that pushes conversations.

@@ -11,7 +11,12 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { ownedByMembership, ownedThroughArtifact, ownedThroughEvent, radiusSync } from "../common.js";
+import {
+  ownedByMembership,
+  ownedThroughArtifact,
+  ownedThroughEvent,
+  radiusSync,
+} from "../common.js";
 import { organizations } from "../organizations.js";
 import { syncSessionEvents } from "./events.js";
 import { syncSessions } from "./core.js";
@@ -85,14 +90,18 @@ export const syncFileArtifacts = radiusSync.table(
   ],
 );
 
-export const syncLinkArtifacts = radiusSync.table("link_artifacts", {
-  artifactId: uuid("artifact_id")
-    .primaryKey()
-    .references(() => syncArtifacts.id, { onDelete: "cascade" }),
-  url: text("url").notNull(),
-  provider: text("provider").notNull(),
-  externalId: text("external_id"),
-}, () => [ownedThroughArtifact("link_artifacts")]);
+export const syncLinkArtifacts = radiusSync.table(
+  "link_artifacts",
+  {
+    artifactId: uuid("artifact_id")
+      .primaryKey()
+      .references(() => syncArtifacts.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    provider: text("provider").notNull(),
+    externalId: text("external_id"),
+  },
+  () => [ownedThroughArtifact("link_artifacts")],
+);
 
 export const syncEventArtifacts = radiusSync.table(
   "event_artifacts",

@@ -24,6 +24,56 @@ authority; Valkey is the BullMQ transport.
 
 Self-hosted correctness must never require a Curve account or private package.
 
+## Database roles and conversation isolation
+
+The API uses `radius_runtime`, a restricted PostgreSQL login with application
+table and sequence access. It has no superuser, BYPASSRLS, role-creation,
+database-creation or schema-creation privileges. The existing `radius` account
+remains the bootstrap and migration administrator. Keep their passwords distinct.
+
+Compose supplies the runtime connection through `DATABASE_URL` and the
+administrator through `RADIUS_DATABASE_MIGRATION_URL`. On startup the API applies
+the approved migrations using the administrator, provisions or refreshes runtime
+grants, closes that connection, and uses its runtime pool for requests. This also
+works with an existing PostgreSQL volume; it does not depend on first-boot image
+initialization. The operator CLI uses the migration connection for bootstrap.
+
+For an existing installation, add `RADIUS_POSTGRES_RUNTIME_PASSWORD` to the local
+self-host env file before upgrading. Generate a distinct URL-safe value, for
+example with `openssl rand -hex 32`. Retain the existing administrator password
+and volumes. Outside Compose, configure both URLs for the same database, with
+`radius_runtime` as the runtime username. An existing runtime role with privileged
+attributes or role memberships is rejected for operator review.
+
+When `RADIUS_SYNC_ENABLED=true`, set `RADIUS_SYNC_CURSOR_SECRET` and, for artifact
+bytes, `RADIUS_SYNC_ARTIFACT_PATH` on a persistent filesystem. Startup checks the
+effective query role and every sync table's RLS/FORCE/policy flags before serving.
+Superusers bypass even FORCE RLS and cannot be the sync runtime role. Requests
+resolve a membership on the server and set it only inside each sync transaction;
+queries without that context admit no conversation rows.
+
+The migration ledger must be a checksummed prefix of the release history. Main's
+`0003_agent_run_session_id` is retained and RLS is appended as
+`0004_sync_row_security`. A database already migrated along a divergent feature
+branch is rejected before new migration statements run. Preserve a backup and
+review that database's actual history before designing a repair; renumbering SQL
+files does not repair a timestamp-based ledger.
+
+To run the database security and upgrade proof against a disposable PostgreSQL 17
+cluster, use a separate test administrator with database-creation privileges:
+
+```bash
+RADIUS_DATABASE_MIGRATION_URL=postgresql://radius:test-password@127.0.0.1:5432/postgres \
+  RADIUS_DISPOSABLE_DATABASE=true \
+  bun run --cwd apps/platform-api verify:sync-database
+```
+
+The verifier creates unique databases, proves fresh and main-upgrade paths,
+checks both memberships across all 27 populated sync tables, validates connection
+reuse and the device-conflict response, then drops only its allocated databases.
+CI runs this proof against the pinned PostgreSQL 17 image. It does not inspect or
+modify retained development or production databases.
+
 ## Single-node installation
 
 Point DNS for the platform and registry domains at the host, then allow inbound
@@ -222,9 +272,14 @@ exact registry digests. Caddy state preserves ACME continuity. Valkey can be
 restored from AOF or repopulated from PostgreSQL's durable outbox.
 
 For a destructive restore, stop API, jobs, web, ingress, and registry; restore
-the registry volume; recreate the empty `radius` database; run `pg_restore`;
+the registry volume; recreate the empty `radius` database; run
+`pg_restore --no-owner --no-privileges` as the administrator;
 then start the complete stack. Rehearse this on a separate host before relying
 on the backup.
+
+The API recreates runtime grants on startup after a restore. Keep both database
+passwords in the operator's secret backup; logical dumps do not contain role
+credentials.
 
 `bun run platform:self-host:verify` performs this destructive rehearsal against
 its own disposable volumes and confirms that the deployment inventory,

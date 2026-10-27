@@ -17,6 +17,7 @@ export RADIUS_PLATFORM_DOMAIN="127.0.0.1:${SMOKE_API_PORT}"
 export RADIUS_REGISTRY_DOMAIN="127.0.0.1:${SMOKE_REGISTRY_PORT}"
 export RADIUS_ACME_EMAIL="verify@example.com"
 export RADIUS_POSTGRES_PASSWORD="radius_postgres_verify_abcdefghijklmnopqrstuvwxyz"
+export RADIUS_POSTGRES_RUNTIME_PASSWORD="radius_runtime_verify_abcdefghijklmnopqrstuvwxyz"
 export RADIUS_REGISTRY_USERNAME="radius-verify"
 export RADIUS_REGISTRY_PASSWORD="radius_registry_verify_abcdefghijklmnopqrstuvwxyz"
 export RADIUS_REGISTRY_AUTH_FILE="${TMP_DIR}/registry.htpasswd"
@@ -353,7 +354,8 @@ restored_outbox="$(docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" \
 [[ "${restored_outbox}" == "1" ]]
 restored_migrations="$(docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" \
   psql -U radius -d radius -At -c "SELECT count(*) FROM radius_migrations.__drizzle_migrations")"
-[[ "${restored_migrations}" == "2" ]]
+expected_migrations="$(jq '.entries | length' "${ROOT_DIR}/packages/platform-database/drizzle/meta/_journal.json")"
+[[ "${restored_migrations}" == "${expected_migrations}" ]]
 restored_membership_evidence="$(docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" \
   psql -U radius -d radius -At -F '|' -c "
     SELECT membership.role_code, membership.lifecycle_state,

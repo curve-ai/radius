@@ -41,6 +41,10 @@ export default defineConfig(
   },
   eslintConfigPrettier,
   {
+    // Bun fmt owns formatting; ESLint retains semantic and framework checks.
+    rules: { "prettier/prettier": "off" },
+  },
+  {
     files: [
       "src/renderer/src/components/ui/**/*.{ts,tsx}",
       "src/renderer/src/components/loading/LoadingCube.tsx",

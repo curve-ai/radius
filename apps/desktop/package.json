@@ -19,12 +19,12 @@
     "start": "electron-vite preview",
     "build": "bun run typecheck && bun run build:bundle",
     "build:bundle": "electron-vite build",
-    "package": "bun run build && electron-builder --dir",
-    "make": "bun run build && electron-builder",
+    "package": "bun run build && electron-builder --config electron-builder.config.cjs --dir",
+    "make": "bun run build && electron-builder --config electron-builder.config.cjs",
     "lint": "eslint --cache .",
     "test": "ELECTRON_OVERRIDE_DIST_PATH=. tsx --test --test-force-exit 'src/**/*.test.ts'",
-    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
-    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck:node": "bun check -p tsconfig.node.json --composite false",
+    "typecheck:web": "bun check -p tsconfig.web.json --composite false",
     "typecheck": "bun run typecheck:node && bun run typecheck:web",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -49,8 +49,8 @@
     "bufferutil": "4.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "dompurify": "3.4.14",
-    "electron-updater": "6.8.9",
+    "dompurify": "3.4.17",
+    "electron-updater": "6.8.11",
     "katex": "0.18.4",
     "lucide-react": "^0.554.0",
     "material-icon-theme": "5.37.0",
@@ -67,7 +67,8 @@
     "remark-math": "6.0.0",
     "shiki": "4.4.3",
     "tailwind-merge": "^3.4.0",
-    "utf-8-validate": "6.0.6"
+    "utf-8-validate": "6.0.6",
+    "@curve-ai/platform-contracts": "0.0.1"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -79,7 +80,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
-    "electron": "43.4.1",
+    "electron": "43.8.3",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.5",
@@ -141,6 +142,30 @@
         },
         {
           "from": "../runtime-host-macos/.build/provider-assets",
+          "to": "agents"
+        }
+      ]
+    },
+    "win": {
+      "extraResources": [
+        {
+          "from": "../runtime-host-windows/.build/release/radius-runtime-host.exe",
+          "to": "runtime/windows-x64/radius-runtime-host.exe"
+        },
+        {
+          "from": "../runtime-host-windows/.build/release/openvmm.exe",
+          "to": "runtime/windows-x64/openvmm.exe"
+        },
+        {
+          "from": "../runtime-host-windows/Config/runtime-assets.json",
+          "to": "runtime/runtime-assets.json"
+        },
+        {
+          "from": "../runtime-host-windows/.build/runtime-assets/vmlinux-x64",
+          "to": "runtime/vmlinux-x64"
+        },
+        {
+          "from": "../runtime-host-windows/.build/provider-assets",
           "to": "agents"
         }
       ]
