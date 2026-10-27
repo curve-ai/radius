@@ -127,6 +127,6 @@ jobs:
         working-directory: examples/python-agent
         run: uv run --locked ruff check .
 
-      - name: Audit production dependencies
+      - name: Audit dependencies at all severities
         if: runner.os == 'Linux'
-        run: bun audit --audit-level high
+        run: bun audit --audit-level low
