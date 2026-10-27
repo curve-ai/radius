@@ -1,9 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import type {
-  BrowserConnectionStatus,
-  McpApprovalGrantSummary,
-} from "../../../../radius-api";
+import type { McpApprovalGrantSummary } from "../../../../radius-api";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import { Button } from "@renderer/components/ui/button";
@@ -126,7 +123,6 @@ export function AppConnectionSettings(): ReactNode {
 
   return (
     <SettingsCard>
-      <BrowserConnectionSetting />
       <SettingsRow
         label="Work apps"
         description="Manage work applications and services Radius can use."
@@ -253,98 +249,4 @@ function ConnectionPermissionSettings(): ReactNode {
       ))}
     </>
   );
-}
-
-function BrowserConnectionSetting(): ReactNode {
-  const [status, setStatus] = useState<BrowserConnectionStatus | null>(null);
-  const [revealing, setRevealing] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    if (
-      typeof window.radius.browserStatus !== "function" ||
-      typeof window.radius.onBrowserStatus !== "function"
-    ) {
-      queueMicrotask(() => {
-        if (!active) return;
-        setStatus({
-          state: "error",
-          extensionId: "",
-          profile: null,
-          controlledTabs: 0,
-          errorCode: "BROWSER_RESTART_REQUIRED",
-        });
-      });
-      return () => {
-        active = false;
-      };
-    }
-    void window.radius.browserStatus().then((next) => {
-      if (active) setStatus(next);
-    });
-    const unsubscribe = window.radius.onBrowserStatus((next) => {
-      if (active) setStatus(next);
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
-
-  const description = browserDescription(status);
-  const reveal = async (): Promise<void> => {
-    if (typeof window.radius.revealBrowserExtension !== "function") return;
-    setRevealing(true);
-    try {
-      await window.radius.revealBrowserExtension();
-    } finally {
-      setRevealing(false);
-    }
-  };
-
-  return (
-    <SettingsRow
-      label="Chrome browser"
-      description={description}
-      descriptionLive
-    >
-      <Button
-        type="button"
-        size="sm"
-        variant="secondary"
-        className="shrink-0"
-        disabled={
-          revealing ||
-          status?.state === "unsupported" ||
-          status?.errorCode === "BROWSER_RESTART_REQUIRED"
-        }
-        onClick={() => void reveal()}
-      >
-        {revealing ? "Opening" : "Show extension"}
-      </Button>
-    </SettingsRow>
-  );
-}
-
-function browserDescription(status: BrowserConnectionStatus | null): string {
-  if (!status) return "Checking the local Chrome connection.";
-  if (status.state === "connected") {
-    const tabs = status.controlledTabs;
-    return `${status.profile?.label ?? "Chrome"} is connected. ${tabs} controlled ${
-      tabs === 1 ? "tab" : "tabs"
-    }.`;
-  }
-  if (status.state === "paused") {
-    return "Browser access is paused from the Radius Chrome extension.";
-  }
-  if (status.state === "unsupported") {
-    return "Authenticated Chrome control is not available on this platform yet.";
-  }
-  if (status.state === "error") {
-    if (status.errorCode === "BROWSER_RESTART_REQUIRED") {
-      return "Restart Radius to finish browser setup.";
-    }
-    return "Radius could not reach the Chrome extension. Open the extension folder and reconnect.";
-  }
-  return "Install the Radius Chrome extension to let agents use signed-in tabs.";
 }

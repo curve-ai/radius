@@ -60,8 +60,6 @@ contributor tooling.
   infrastructure exclusions.
 - [`security-model.md`](security-model.md) — trust boundaries, permissions, credentials, and runtime hardening.
 - [`tool-broker-and-mcp.md`](tool-broker-and-mcp.md) — host-managed shell and MCP execution.
-- [`browser-control.md`](browser-control.md) - authenticated Chrome and Edge
-  control delegated to provided agents through the Radius browser broker.
 - [`connector-registry-logical-model.md`](connector-registry-logical-model.md)
   — approved host-owned connector publication, installation, configuration,
   credential-reference, profile-sync, and discovered-binding model;
@@ -123,15 +121,10 @@ contributor tooling.
 
 ```text
 apps/desktop          Electron host and React renderer
-apps/browser-extension Manifest V3 bridge for authenticated Chrome and Edge tabs
-apps/browser-native-host Chrome native-messaging relay into the Radius host
 apps/runtime-host-macos Signed Apple Silicon/macOS 26 microVM helper
-packages/browser-protocol Versioned native browser bridge messages
-packages/browser-tools Run-scoped browser MCP provider
 packages/agent-contracts Versioned manifest and agent configuration contracts
 packages/runtime      ACP client and supervised microVM process sidecar
-packages/tool-broker  Capability policy and host tools (planned)
-packages/sdk          TypeScript ACP agent-authoring SDK foundation
+packages/tool-broker  Host tool authorization and brokered MCP servers
 packages/agent-build  Deterministic TypeScript and Python OCI build tooling
 packages/cli          Init, native/sandbox dev, profiles, and dry-run deploy CLI
 packages/platform-contracts Versioned public Platform HTTP and inventory contracts

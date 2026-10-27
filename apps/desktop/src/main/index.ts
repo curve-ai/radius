@@ -95,12 +95,6 @@ import {
   installCatalogConnectorForRenderer,
   listConnectorCatalogForRenderer,
 } from "./connector-catalog";
-import {
-  getBrowserConnectionStatus,
-  initializeBrowserBridge,
-  revealBrowserExtension,
-  stopBrowserBridge,
-} from "./browser-bridge";
 
 const requestedUserDataPath = process.env.RADIUS_USER_DATA_PATH?.trim();
 if (requestedUserDataPath) {
@@ -349,8 +343,6 @@ app.whenReady().then(async () => {
     handleRadiusIpc("radius:set-agent-session-mode", (_event, input) =>
       setAgentSessionMode(input),
     );
-    handleRadiusIpc("radius:browser-status", getBrowserConnectionStatus);
-    handleRadiusIpc("radius:reveal-browser-extension", revealBrowserExtension);
     handleRadiusIpc("radius:start-agent-prompt", (_event, input) =>
       startAgentPrompt(input),
     );
@@ -402,12 +394,6 @@ app.whenReady().then(async () => {
         window.webContents.send(AGENTS_CHANGED_CHANNEL);
       }
     });
-    void initializeBrowserBridge().catch((error) => {
-      console.error(
-        "[browser] Radius could not initialize the Chrome bridge",
-        error,
-      );
-    });
     await initializeConnectorRegistry();
     initializeDesktopUpdater();
     void initializeScheduler(storageContext).catch((error) => {
@@ -433,11 +419,7 @@ app.on("before-quit", (event) => {
   stopDesktopUpdater();
   stopAgentRuntime();
   stopDevelopmentAgentConnections();
-  void Promise.allSettled([
-    stopBrowserBridge(),
-    stopScheduler(),
-    stopSync(),
-  ]).finally(() => {
+  void Promise.allSettled([stopScheduler(), stopSync()]).finally(() => {
     closeStorage();
     app.quit();
   });

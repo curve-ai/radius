@@ -100,7 +100,7 @@ test("streams messages and bridges an exact permission decision", async () => {
     mcpServers: [
       {
         type: "http",
-        name: "radius-browser",
+        name: "radius-test-tools",
         url: "http://192.168.64.1:4567/mcp",
         headers: [{ name: "Authorization", value: "Bearer test" }],
       },
@@ -601,8 +601,10 @@ test("auto continuation recovers FX missing sessions without hiding other errors
         runtime.close();
       }
     } else {
-      await assert.rejects(connecting, (error: unknown) =>
-        error instanceof RequestError && error.code === code,
+      await assert.rejects(
+        connecting,
+        (error: unknown) =>
+          error instanceof RequestError && error.code === code,
       );
     }
     assert.equal(newSessionCalls, shouldRecover ? 1 : 0);

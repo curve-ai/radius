@@ -34,14 +34,14 @@ existing databases, authentication, ports, and shutdown.
 
 ## Repository map
 
-| Directory | Ownership |
-| --- | --- |
-| `apps/` | Desktop, browser integration, native host, and Platform services |
-| `packages/` | Reusable runtime, storage, contracts, tools, build system, and CLI |
-| `examples/` | Agents authored directly with official ACP SDKs |
-| `hosting/` | Self-host Compose distribution and its verification tooling |
-| `scripts/release/` | Cross-package npm release tooling |
-| `docs/` | Architecture, contributor guides, and self-hosting |
+| Directory          | Ownership                                                          |
+| ------------------ | ------------------------------------------------------------------ |
+| `apps/`            | Desktop, native microVM runtime, and Platform services             |
+| `packages/`        | Reusable runtime, storage, contracts, tools, build system, and CLI |
+| `examples/`        | Agents authored directly with official ACP SDKs                    |
+| `hosting/`         | Self-host Compose distribution and its verification tooling        |
+| `scripts/release/` | Cross-package npm release tooling                                  |
+| `docs/`            | Architecture, contributor guides, and self-hosting                 |
 
 The private Curve Cloud service is maintained separately and is not required
 to use or contribute to Radius.
@@ -52,7 +52,7 @@ to use or contribute to Radius.
 JavaScript workspace projects through Turbo. `bun run ci:verify` schedules and
 caches the CI checks together. Run a focused command with
 `bun run --cwd <app-or-package> <command>`.
-`bun run package` prepares the native/browser assets and an unpacked desktop;
+`bun run package` prepares the native runtime assets and an unpacked desktop;
 `bun run make` prepares desktop installers.
 
 - [Contributing and task ownership](CONTRIBUTING.md)

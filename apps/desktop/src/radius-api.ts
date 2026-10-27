@@ -294,15 +294,6 @@ export interface SetAgentSessionModeInput {
   modeId: string;
 }
 
-export interface BrowserConnectionStatus {
-  state:
-    "unsupported" | "waiting_for_extension" | "connected" | "paused" | "error";
-  extensionId: string;
-  profile: { id: string; label: string } | null;
-  controlledTabs: number;
-  errorCode: string | null;
-}
-
 export interface StartAgentPromptInput {
   accessMode: "ask" | "project" | "full";
   agentId: string;
@@ -498,11 +489,6 @@ export interface RadiusApi {
   setAgentSessionMode(
     input: SetAgentSessionModeInput,
   ): Promise<DesktopAgentSessionFeatures | null>;
-  browserStatus(): Promise<BrowserConnectionStatus>;
-  revealBrowserExtension(): Promise<boolean>;
-  onBrowserStatus(
-    listener: (status: BrowserConnectionStatus) => void,
-  ): () => void;
   startAgentPrompt(
     input: StartAgentPromptInput,
   ): Promise<StartAgentPromptResult>;

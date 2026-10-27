@@ -62,14 +62,6 @@ const base = {
       from: "../../packages/storage/drizzle",
       to: "storage-migrations",
     },
-    {
-      from: "../browser-extension/dist",
-      to: "browser-extension",
-    },
-    {
-      from: "../browser-native-host/dist",
-      to: "browser-native-host",
-    },
   ],
 };
 const filename = process.env.RADIUS_DISTRIBUTION_CONFIG;

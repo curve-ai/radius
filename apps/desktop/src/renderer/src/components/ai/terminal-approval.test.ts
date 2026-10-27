@@ -103,8 +103,8 @@ test("shows one-call, tool, and server MCP approval choices", () => {
       ...base,
       eventId: "mcp-call",
       eventType: "tool_call",
-      capability: "mcp.radius-browser",
-      operation: "browser_snapshot",
+      capability: "mcp.radius-test-tools",
+      operation: "list_items",
       inputSchemaId: "radius.mcp.tool-call",
       inputSchemaVersion: 1,
       input: {
@@ -112,8 +112,8 @@ test("shows one-call, tool, and server MCP approval choices", () => {
         allowAlwaysAvailable: true,
         allowServerAvailable: true,
         pendingLocally: true,
-        serverLabel: "Chrome browser",
-        toolName: "browser_snapshot",
+        serverLabel: "Test tools",
+        toolName: "list_items",
       },
     };
   const request: Extract<
@@ -124,7 +124,7 @@ test("shows one-call, tool, and server MCP approval choices", () => {
     eventId: "mcp-approval",
     eventType: "approval_request",
     toolCallEventId: toolCall.eventId,
-    reason: "Allow browser_snapshot on Chrome browser",
+    reason: "Allow list_items on Test tools",
     expiresAt: null,
   };
 
@@ -136,7 +136,7 @@ test("shows one-call, tool, and server MCP approval choices", () => {
     }),
   );
   assert.match(html, /MCP approval required/);
-  assert.match(html, /browser_snapshot wants to use Chrome browser/);
+  assert.match(html, /list_items wants to use Test tools/);
   assert.match(html, /Allow once/);
   assert.match(html, /Always allow tool/);
   assert.match(html, /Always allow server/);

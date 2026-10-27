@@ -18,7 +18,6 @@ import {
   type SessionTranscriptStreamUpdate,
   type SessionWorkingStateUpdate,
 } from "../radius-api";
-import type { BrowserConnectionStatus } from "../radius-api";
 import type { DesktopConnectorCatalogQuery } from "../radius-api";
 import type { NativeControlMenuInput } from "../radius-api";
 import type { StartAgentPromptInput } from "../radius-api";
@@ -122,18 +121,6 @@ const radiusApi = {
     ipcRenderer.invoke("radius:set-agent-session-config-option", input),
   setAgentSessionMode: (input: SetAgentSessionModeInput) =>
     ipcRenderer.invoke("radius:set-agent-session-mode", input),
-  browserStatus: () => ipcRenderer.invoke("radius:browser-status"),
-  revealBrowserExtension: () =>
-    ipcRenderer.invoke("radius:reveal-browser-extension"),
-  onBrowserStatus: (listener: (status: BrowserConnectionStatus) => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      status: BrowserConnectionStatus,
-    ): void => listener(status);
-    ipcRenderer.on("radius:browser-status-changed", handler);
-    return () =>
-      ipcRenderer.removeListener("radius:browser-status-changed", handler);
-  },
   startAgentPrompt: (input: StartAgentPromptInput) =>
     ipcRenderer.invoke("radius:start-agent-prompt", input),
   resolveToolApproval: (input: ResolveToolApprovalInput) =>
