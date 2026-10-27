@@ -38,16 +38,16 @@ agent session.
 
 ## Source files
 
-- `scripts/prepare-fx-agent-macos.sh` pins the upstream FX version, macOS and
+- `apps/runtime-host-macos/scripts/prepare-fx-agent.sh` pins the upstream FX version, macOS and
   Linux archives, their SHA-256 checksums, and the CA bundle checksum.
 - `apps/runtime-host-macos/Config/fx-release-template.json` defines the Radius
   release identity, ACP process, resources, network allowlist, requested
   capabilities, and authentication requirement.
 - `apps/runtime-host-macos/Config/bundled-agents.json` maps the stable Platform
   project `proj_radius_fx` to `fx/oci-layout`.
-- `scripts/build-binary-agent-oci-layout.sh` creates the deterministic OCI
+- `packages/agent-build/scripts/build-binary-oci-layout.sh` creates the deterministic OCI
   layout and embeds the canonical release template in the image configuration.
-- `scripts/prepare-bundled-agents-macos.sh` prepares every bundled agent and
+- `apps/runtime-host-macos/scripts/prepare-agents.sh` prepares every bundled agent and
   writes the packaged `index.json`.
 - `apps/desktop/src/main/bundled-agents.ts` validates and imports packaged
   agents at startup.
@@ -65,7 +65,7 @@ Run all commands from the `radius/` repository root.
    exact macOS arm64 and Linux arm64 archive checksums; do not accept a moving
    tag or unverified download.
 2. Update `fx_version`, the archive names if necessary, and both archive
-   checksums in `scripts/prepare-fx-agent-macos.sh`. Update the pinned CA bundle
+   checksums in `apps/runtime-host-macos/scripts/prepare-fx-agent.sh`. Update the pinned CA bundle
    checksum only after independently verifying the new bundle.
 3. Update `apps/runtime-host-macos/Config/fx-release-template.json`:
    - Use a new `releaseVersion` for every changed binary, manifest, capability,
@@ -81,7 +81,7 @@ Run all commands from the `radius/` repository root.
 5. Prepare FX with the repository's pinned Bun version:
 
    ```bash
-   npx --yes bun@1.4.4 run agent:prepare-fx
+   bash apps/runtime-host-macos/scripts/prepare-fx-agent.sh
    ```
 
    The script downloads both archives and the CA bundle, verifies all three
@@ -92,7 +92,7 @@ Run all commands from the `radius/` repository root.
 6. Prepare the complete bundled-agent resource root and index:
 
    ```bash
-   npx --yes bun@1.4.4 run agents:prepare
+   bash apps/runtime-host-macos/scripts/prepare-agents.sh
    ```
 
 7. Inspect the generated result:
@@ -134,7 +134,7 @@ Run the focused contract and import-integrity tests:
 ```bash
 npx --yes bun@1.4.4 run --cwd packages/runtime test
 npx --yes bun@1.4.4 run --cwd apps/desktop test
-npx --yes bun@1.4.4 run runtime:doctor
+apps/runtime-host-macos/.build/release/radius-runtime-host doctor --json
 ```
 
 For a release candidate, launch the packaged application and confirm that:

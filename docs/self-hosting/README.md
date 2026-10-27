@@ -49,24 +49,24 @@ characters. For a published release, select its exact version, validate the
 model, pull the coherent image set, and start it:
 
 ```bash
-bun run platform:self-host:config
-bun run platform:self-host:pull
-bun run platform:self-host:up
+bun run --cwd hosting self-host:config
+bun run --cwd hosting self-host:pull
+bun run --cwd hosting self-host:up
 ```
 
 To build the same topology from the current checkout instead:
 
 ```bash
-bun run platform:self-host:source:config
-bun run platform:self-host:source:build
-bun run platform:self-host:source:up
+bun run --cwd hosting self-host:source:config
+bun run --cwd hosting self-host:source:build
+bun run --cwd hosting self-host:source:up
 ```
 
 Before using real domains, run the isolated proof once on the target Docker
 host:
 
 ```bash
-bun run platform:self-host:verify
+bun run --cwd hosting test:integration
 ```
 
 This requires Docker, `htpasswd`, `curl`, `jq`, `shasum`, and Node.js. It builds from
@@ -91,7 +91,7 @@ docker compose --env-file hosting/docker/.env.self-host \
 ```
 
 Put the printed Account ID in `RADIUS_OIDC_BOOTSTRAP_ACCOUNT_ID`, keep the token
-in a secret manager, and start the stack with `bun run platform:self-host:up`.
+in a secret manager, and start the stack with `bun run --cwd hosting self-host:up`.
 The first allowlisted OIDC login links to that owner account. Remove the
 bootstrap account ID after linking and recreate `platform-api`. New allowlisted
 users receive `RADIUS_OIDC_AUTO_JOIN_ROLE`, which defaults to viewer.
@@ -226,7 +226,7 @@ the registry volume; recreate the empty `radius` database; run `pg_restore`;
 then start the complete stack. Rehearse this on a separate host before relying
 on the backup.
 
-`bun run platform:self-host:verify` performs this destructive rehearsal against
+`bun run --cwd hosting test:integration` performs this destructive rehearsal against
 its own disposable volumes and confirms that the deployment inventory,
 installation observations, migration ledger, dashboard login surface, and exact
 registry digest survive restoration.
@@ -234,14 +234,14 @@ registry digest survive restoration.
 ## Upgrade and rollback
 
 Take a paired database/registry backup and change only `RADIUS_VERSION`. For a
-published release, pull the image set, inspect `platform:self-host:config`, and
-run `platform:self-host:up`. For a source installation, build and run the
-matching `platform:self-host:source:*` commands. The API applies checksummed
+published release, pull the image set, inspect `self-host:config`, and
+run `self-host:up`. For a source installation, build and run the
+matching `self-host:source:*` commands. The API applies checksummed
 migrations under an advisory lock before serving. Roll application images back
 by restoring the previous coherent version. A release with a
 non-backward-compatible database migration requires its documented database
 restore procedure; Radius does not pretend migrations can always be reversed.
 
 Inspect health with `docker compose ... ps` and follow service logs with
-`bun run platform:self-host:logs`. Next.js telemetry is disabled in the image,
+`bun run --cwd hosting self-host:logs`. Next.js telemetry is disabled in the image,
 and Radius currently emits no optional product telemetry from this stack.

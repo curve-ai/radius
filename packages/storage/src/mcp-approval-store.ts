@@ -8,12 +8,9 @@ import {
   mcpServerApprovalGrants,
   mcpToolApprovalGrantRevocations,
   mcpToolApprovalGrants,
-  capabilityContracts,
-  capabilityOperations,
   toolBindings,
   toolProviders,
 } from "./schema.js";
-import { registerCapabilityContract } from "./connector-store.js";
 
 export type McpApprovalGrantSummary =
   | {
@@ -32,145 +29,6 @@ export type McpApprovalGrantSummary =
       toolName: string;
       grantedAt: string;
     };
-
-export async function ensureBuiltinToolProvider(
-  database: RadiusDatabase,
-  input: {
-    clientInstanceId: string;
-    providerKey: string;
-    label: string;
-    connected: boolean;
-    now?: number;
-  },
-): Promise<string> {
-  const now = input.now ?? Date.now();
-  return database.db.transaction(async (transaction) => {
-    const existing = await transaction.query.toolProviders.findFirst({
-      where: and(
-        eq(toolProviders.clientInstanceId, input.clientInstanceId),
-        eq(toolProviders.providerKey, input.providerKey),
-      ),
-    });
-    if (existing) {
-      await transaction
-        .update(toolProviders)
-        .set({
-          label: input.label,
-          connectionState: input.connected ? "connected" : "disconnected",
-          connectedAtMs: input.connected ? now : existing.connectedAtMs,
-          disconnectedAtMs: input.connected ? null : now,
-          updatedAtMs: now,
-        })
-        .where(eq(toolProviders.id, existing.id));
-      return existing.id;
-    }
-    const providerId = randomUUID();
-    await transaction.insert(toolProviders).values({
-      id: providerId,
-      clientInstanceId: input.clientInstanceId,
-      installationId: null,
-      endpointId: null,
-      profileConnectionId: null,
-      appliedProfileRevision: null,
-      providerKey: input.providerKey,
-      label: input.label,
-      credentialRef: null,
-      connectionState: input.connected ? "connected" : "disconnected",
-      connectedAtMs: input.connected ? now : null,
-      disconnectedAtMs: input.connected ? null : now,
-      updatedAtMs: now,
-    });
-    return providerId;
-  });
-}
-
-export async function ensureBuiltinToolBinding(
-  database: RadiusDatabase,
-  input: {
-    providerId: string;
-    capabilityKey: string;
-    contractVersion: number;
-    displayName: string;
-    description: string;
-    operationName: string;
-    nativeToolName: string;
-    inputSchemaId: string;
-    inputSchemaVersion: number;
-    inputSchemaSha256: string;
-    outputSchemaId: string;
-    outputSchemaVersion: number;
-    riskClass: "read" | "write" | "external_side_effect" | "privileged";
-    now?: number;
-  },
-): Promise<string> {
-  await registerCapabilityContract(database, {
-    capabilityKey: input.capabilityKey,
-    contractVersion: input.contractVersion,
-    displayName: input.displayName,
-    description: input.description,
-    operations: [
-      {
-        operationName: input.operationName,
-        inputSchemaId: input.inputSchemaId,
-        inputSchemaVersion: input.inputSchemaVersion,
-        outputSchemaId: input.outputSchemaId,
-        outputSchemaVersion: input.outputSchemaVersion,
-        riskClass: input.riskClass,
-        approvalEligible: true,
-      },
-    ],
-  });
-  const now = input.now ?? Date.now();
-  return database.db.transaction(async (transaction) => {
-    const provider = await transaction.query.toolProviders.findFirst({
-      where: eq(toolProviders.id, input.providerId),
-    });
-    if (!provider) throw new Error("MCP_PROVIDER_NOT_FOUND");
-    const operation = await transaction
-      .select({ id: capabilityOperations.id })
-      .from(capabilityOperations)
-      .innerJoin(
-        capabilityContracts,
-        eq(capabilityContracts.id, capabilityOperations.contractId),
-      )
-      .where(
-        and(
-          eq(capabilityContracts.capabilityKey, input.capabilityKey),
-          eq(capabilityContracts.contractVersion, input.contractVersion),
-          eq(capabilityOperations.operationName, input.operationName),
-        ),
-      )
-      .get();
-    if (!operation) throw new Error("MCP_CAPABILITY_OPERATION_NOT_FOUND");
-    const existing = await transaction.query.toolBindings.findFirst({
-      where: and(
-        eq(toolBindings.providerId, input.providerId),
-        eq(toolBindings.nativeToolName, input.nativeToolName),
-        eq(toolBindings.inputSchemaSha256, input.inputSchemaSha256),
-      ),
-    });
-    if (existing) {
-      await transaction
-        .update(toolBindings)
-        .set({ enabled: true, disabledAtMs: null })
-        .where(eq(toolBindings.id, existing.id));
-      return existing.id;
-    }
-    const bindingId = randomUUID();
-    await transaction.insert(toolBindings).values({
-      id: bindingId,
-      providerId: input.providerId,
-      operationId: operation.id,
-      nativeToolName: input.nativeToolName,
-      inputSchemaSha256: input.inputSchemaSha256,
-      outputSchemaSha256: null,
-      enabled: true,
-      discoveredAtMs: now,
-      disabledAtMs: null,
-    });
-    return bindingId;
-  });
-}
 
 export async function hasMcpServerApproval(
   database: RadiusDatabase,

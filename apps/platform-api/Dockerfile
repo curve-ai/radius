@@ -6,6 +6,7 @@ COPY package.json bun.lock ./
 COPY apps ./apps
 COPY packages ./packages
 COPY examples ./examples
+COPY hosting ./hosting
 
 RUN bun install --frozen-lockfile \
   --filter @curve-ai/radius-platform-api \

@@ -9,6 +9,38 @@ import {
   type OciCommandRunner,
   type TypeScriptOciBuildResult,
 } from "./index.js";
+import { runOciCommand } from "./push.js";
+
+test("command results include the complete bounded output after the child exits", async () => {
+  const result = await runOciCommand({
+    command: process.execPath,
+    args: [
+      "-e",
+      "process.stdout.write('x'.repeat(262144)+'STDOUT_DONE'); process.stderr.write('y'.repeat(262144)+'STDERR_DONE')",
+    ],
+    cwd: tmpdir(),
+  });
+  assert.equal(result.stdout.length, 65_536);
+  assert.equal(result.stderr.length, 65_536);
+  assert.ok(result.stdout.endsWith("STDOUT_DONE"));
+  assert.ok(result.stderr.endsWith("STDERR_DONE"));
+});
+
+test("a child that closes stdin reports its failure without an uncaught broken pipe", async () => {
+  await assert.rejects(
+    () =>
+      runOciCommand({
+        command: process.execPath,
+        args: [
+          "-e",
+          "require('node:fs').closeSync(0); process.stderr.write('expected-child-failure'); setTimeout(()=>process.exit(7),5)",
+        ],
+        cwd: tmpdir(),
+        stdin: "x".repeat(1_048_576),
+      }),
+    /failed with 7: expected-child-failure/,
+  );
+});
 
 test("uses a temporary Docker config and never places the password in argv", async () => {
   const root = await mkdtemp(join(tmpdir(), "radius-oci-push-"));

@@ -23,7 +23,7 @@ observations, audit events, and job outbox messages commit transactionally.
 Restarting the API preserves state.
 
 ```bash
-npx bun@1.4.4 run platform:stack:up
+bun run --cwd hosting stack:up
 ```
 
 Containerized development may additionally set
@@ -47,7 +47,7 @@ radius deploy --environment staging
 Stop the registry without deleting its volume:
 
 ```bash
-npx bun@1.4.4 run platform:infra:down
+bun run --cwd hosting infra:down
 ```
 
 The development token, database password, and registry credentials are local

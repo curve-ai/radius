@@ -6,8 +6,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  ensureBuiltinToolProvider,
-  ensureBuiltinToolBinding,
   grantMcpServerApproval,
   grantMcpToolApproval,
   hasMcpApproval,
@@ -16,6 +14,11 @@ import {
   listMcpApprovalGrants,
   revokeMcpApproval,
 } from "./mcp-approval-store.js";
+import {
+  installCustomConnector,
+  listReadyMcpProviders,
+  saveConnectorDiscovery,
+} from "./connector-store.js";
 import { migrateRadiusDatabase, openRadiusDatabase } from "./database.js";
 import { clientInstances } from "./schema.js";
 
@@ -53,29 +56,33 @@ test("persists and independently revokes MCP tool and server approvals", async (
       createdAtMs: now,
       updatedAtMs: now,
     });
-    const providerId = await ensureBuiltinToolProvider(database, {
+    const installed = await installCustomConnector(database, {
       clientInstanceId: "client-mcp-approvals",
-      providerKey: "radius-browser",
-      label: "Chrome browser",
-      connected: true,
+      displayName: "Test tools",
+      endpointUrl: "https://tools.example.com/mcp",
       now,
     });
-    const bindingId = await ensureBuiltinToolBinding(database, {
-      providerId,
-      capabilityKey: "mcp.radius-browser",
-      contractVersion: 1,
-      displayName: "Browser MCP",
-      description: "Browser tools exposed through Radius.",
-      operationName: "browser_tabs_list",
-      nativeToolName: "browser_tabs_list",
-      inputSchemaId: "mcp.radius-browser.browser_tabs_list",
-      inputSchemaVersion: 1,
-      inputSchemaSha256: "a".repeat(64),
-      outputSchemaId: "mcp.radius-browser.result",
-      outputSchemaVersion: 1,
-      riskClass: "read",
+    const providerId = await saveConnectorDiscovery(database, {
+      clientInstanceId: "client-mcp-approvals",
+      installationId: installed.id,
+      credentialRef: null,
+      tools: [
+        {
+          name: "list_items",
+          title: "List items",
+          description: "List items from the test service.",
+          inputSchemaSha256: "a".repeat(64),
+          outputSchemaSha256: null,
+        },
+      ],
       now,
     });
+    const providers = await listReadyMcpProviders(
+      database,
+      "client-mcp-approvals",
+    );
+    const bindingId = providers[0]?.bindings[0]?.bindingId;
+    assert.ok(bindingId);
 
     const toolGrantId = await grantMcpToolApproval(
       database,
@@ -104,7 +111,7 @@ test("persists and independently revokes MCP tool and server approvals", async (
           grantId: serverGrantId,
           scope: "server",
           providerId,
-          providerLabel: "Chrome browser",
+          providerLabel: "Test tools",
           toolName: null,
           grantedAt: new Date(now + 2).toISOString(),
         },
@@ -112,8 +119,8 @@ test("persists and independently revokes MCP tool and server approvals", async (
           grantId: toolGrantId,
           scope: "tool",
           providerId,
-          providerLabel: "Chrome browser",
-          toolName: "browser_tabs_list",
+          providerLabel: "Test tools",
+          toolName: "list_items",
           grantedAt: new Date(now + 1).toISOString(),
         },
       ],

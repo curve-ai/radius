@@ -2,7 +2,7 @@
 
 Radius is a local-first desktop runtime and open delivery platform for
 developer-owned AI agents. The desktop provides a consistent user experience
-and mediates access to operating-system capabilities; the SDK, CLI, and
+and mediates access to operating-system capabilities; the CLI, runtime, and
 self-hostable control plane package and distribute agents; developers retain
 their models, prompts, domain tools, data services, and reasoning loops.
 
@@ -38,6 +38,9 @@ The React renderer is unprivileged. Electron owns operating-system integration b
 - Keep synchronization optional and expose it through public, storage-neutral
   provider contracts rather than a required hosted service.
 
+See [repository ownership](repository-layout.md) for package boundaries and
+contributor tooling.
+
 ## Decision records
 
 - [`adr/001-local-first-execution.md`](adr/001-local-first-execution.md) — execute the first agent on the user's desktop.
@@ -57,8 +60,6 @@ The React renderer is unprivileged. Electron owns operating-system integration b
   infrastructure exclusions.
 - [`security-model.md`](security-model.md) — trust boundaries, permissions, credentials, and runtime hardening.
 - [`tool-broker-and-mcp.md`](tool-broker-and-mcp.md) — host-managed shell and MCP execution.
-- [`browser-control.md`](browser-control.md) - authenticated Chrome and Edge
-  control delegated to provided agents through the Radius browser broker.
 - [`connector-registry-logical-model.md`](connector-registry-logical-model.md)
   — approved host-owned connector publication, installation, configuration,
   credential-reference, profile-sync, and discovered-binding model;
@@ -70,9 +71,9 @@ The React renderer is unprivileged. Electron owns operating-system integration b
   — proposed authority, device-local account, release-requirement,
   installed-agent binding, and portable profile-binding model; implementation
   is not yet approved.
-- [`agent-sdk-and-cli.md`](agent-sdk-and-cli.md) — implemented SDK/configuration,
+- [`agent-sdk-and-cli.md`](agent-sdk-and-cli.md) — ACP authoring/configuration,
   local runner, profile, immutable deploy, promotion, rollback, compatibility,
-  and developer security contract, including the implemented contracts, SDK,
+  and developer security contract, including the implemented contracts, runtime,
   CLI, and TypeScript example foundation.
 - [`npm-package-release.md`](npm-package-release.md) — release-unit graph,
   dist-only public staging, checksummed tarballs, and clean external install
@@ -108,9 +109,7 @@ The React renderer is unprivileged. Electron owns operating-system integration b
 - [`../guides/sync-provider.md`](../guides/sync-provider.md) — implement a compatible service and connect a cloned Radius application.
 - [`../guides/bundling-fx.md`](../guides/bundling-fx.md) — prepare, package,
   and verify the built-in FX agent for the Apple Silicon desktop release.
-- [`../../hosting/postgres/README.md`](../../hosting/postgres/README.md) — pinned
-  official PostgreSQL base, empty-by-default extension authority, and image
-  verification workflow used by the self-hosted Platform.
+
 - [`../self-hosting/README.md`](../self-hosting/README.md) — Docker Compose
   installation, bootstrap, authentication, backup, restore, upgrade, and
   verification procedures.
@@ -119,16 +118,10 @@ The React renderer is unprivileged. Electron owns operating-system integration b
 
 ```text
 apps/desktop          Electron host and React renderer
-apps/browser-extension Manifest V3 bridge for authenticated Chrome and Edge tabs
-apps/browser-native-host Chrome native-messaging relay into the Radius host
 apps/runtime-host-macos Signed Apple Silicon/macOS 26 microVM helper
-packages/browser-protocol Versioned native browser bridge messages
-packages/browser-tools Run-scoped browser MCP provider
 packages/agent-contracts Versioned manifest and agent configuration contracts
 packages/runtime      ACP client and supervised microVM process sidecar
-packages/tool-broker  Capability policy and host tools (planned)
-packages/sdk          TypeScript ACP agent-authoring SDK foundation
-sdks/python           Python ACP authoring SDK over the official Python package
+packages/tool-broker  Host tool authorization and brokered MCP servers
 packages/agent-build  Deterministic TypeScript and Python OCI build tooling
 packages/cli          Init, native/sandbox dev, profiles, and dry-run deploy CLI
 packages/platform-contracts Versioned public Platform HTTP and inventory contracts
@@ -145,7 +138,6 @@ apps/platform-api     Open compatibility/auth/deployment API with injected provi
 apps/platform-jobs    BullMQ worker foundation and registry verification
 examples/python-agent pyproject, uv, native, microVM, and deploy proof
 hosting/docker        Full single-node Docker Compose stack
-hosting/postgres      Verified official Postgres base and extension authority
 docs/architecture     Public technical decisions
 ```
 

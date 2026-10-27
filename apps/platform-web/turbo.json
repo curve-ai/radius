@@ -1,0 +1,10 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "cache": false,
+      "outputs": [".next/**", "!.next/cache/**"],
+      "passThroughEnv": ["RADIUS_*", "NEXT_PUBLIC_*", "PORT", "HOST"]
+    }
+  }
+}

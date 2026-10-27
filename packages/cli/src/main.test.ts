@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  acpStreamFromChild,
+  connectAcpRuntime,
+} from "@curve-ai/radius-runtime";
 
 import { runCli } from "./main.js";
 
@@ -55,7 +62,7 @@ test("initializes and validates a TypeScript agent repository", async () => {
   );
   assert.match(
     await readFile(join(root, "radius", "agent.ts"), "utf8"),
-    /defineAgent/,
+    /@agentclientprotocol\/sdk/,
   );
   assert.equal(
     (await readFile(join(root, ".gitignore"), "utf8")).trim(),
@@ -98,7 +105,7 @@ dependencies = []
   assert.match(pyproject, /module = "radius_agent\.agent"/);
   assert.match(
     await readFile(join(root, "radius_agent", "agent.py"), "utf8"),
-    /define_agent/,
+    /class EchoAgent\(Agent\)/,
   );
 
   const validated = captureIo();
@@ -145,4 +152,41 @@ test("documents the separated dev, build, and deploy workflow", async () => {
   assert.match(help, /radius dev \[--endpoint <ws-url>\]/);
   assert.match(help, /radius build \[--config <path>\]/);
   assert.match(help, /radius deploy \[--build <digest-or-receipt>\]/);
+});
+
+test("a generated TypeScript agent serves ACP directly over stdio", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "radius-generated-acp-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(
+    join(root, "package.json"),
+    JSON.stringify({ name: "generated-agent", private: true, type: "module" }),
+  );
+  await runCli(["init", "--skip-install"], { cwd: root, io: captureIo().io });
+  await symlink(
+    fileURLToPath(new URL("../../../node_modules", import.meta.url)),
+    join(root, "node_modules"),
+    "junction",
+  );
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", join(root, "radius", "agent.ts")],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  child.stderr.pipe(process.stderr);
+  try {
+    const runtime = await connectAcpRuntime(acpStreamFromChild(child), {
+      cwd: root,
+      handlers: { onPermissionRequest: async () => ({ outcome: "cancelled" }) },
+    });
+    try {
+      assert.equal(
+        (await runtime.prompt("generated")).text,
+        "Received: generated",
+      );
+    } finally {
+      runtime.close();
+    }
+  } finally {
+    child.kill();
+  }
 });

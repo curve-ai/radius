@@ -100,6 +100,7 @@ async function withDatabase(
 test("installs an immutable release and derives required authentication", async () => {
   await withDatabase(async (database) => {
     const installed = await installAgentRelease(database, releaseInput);
+    assert.equal(installed.updatedAt, new Date(now).toISOString());
     const initial = await getAgentAuthenticationSummary(
       database,
       installed.installationId,

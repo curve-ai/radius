@@ -89,3 +89,13 @@ design system in `../../../../../../../DESIGN.md` also apply here.
 - Renderer CSS changes use Vite HMR. Main-process transparency or vibrancy
   changes require a fresh Electron window; distinguish stale dev or packaged
   windows before diagnosing the material.
+
+## Header scroll transitions
+
+- Keep workspace-header scroll-linked behavior component-local. Pass the actual
+  workbench scroll-container ref from `WorkspaceShell`, use Motion
+  `useScroll`/`useTransform` values for continuous progress, and use Tailwind
+  utilities for static presentation.
+- Do not add page-specific scroll timelines, keyframes, or selectors to
+  `globals.css`. Preserve opacity-only feedback under reduced motion and keep
+  transform plus opacity as the only animated properties.

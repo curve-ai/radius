@@ -65,8 +65,7 @@ const settingsNavigation = [
       {
         id: SETTINGS_SECTIONS.apps.id,
         label: SETTINGS_SECTIONS.apps.label,
-        keywords:
-          "apps connectors agents browser Chrome tabs connections permissions scopes",
+        keywords: "apps connectors agents connections permissions scopes",
         icon: Plug,
       },
       {

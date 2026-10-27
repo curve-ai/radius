@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { test } from "node:test";
 
 import { WebSocket } from "ws";
@@ -46,7 +47,12 @@ test("Radius credentials are never handed to the harness", () => {
 
 test("an upgrade without the bearer token is refused", async () => {
   const sink = { stdout: [] as string[], frames: [] as string[] };
-  const bridge = await startBridge(HARNESS, process.cwd(), process.env, events(sink));
+  const bridge = await startBridge(
+    HARNESS,
+    process.cwd(),
+    process.env,
+    events(sink),
+  );
   try {
     await assert.rejects(
       () =>
@@ -67,7 +73,12 @@ test("an upgrade without the bearer token is refused", async () => {
 
 test("a second connection is refused, because stdio is one stream", async () => {
   const sink = { stdout: [] as string[], frames: [] as string[] };
-  const bridge = await startBridge(HARNESS, process.cwd(), process.env, events(sink));
+  const bridge = await startBridge(
+    HARNESS,
+    process.cwd(),
+    process.env,
+    events(sink),
+  );
   const headers = { Authorization: `Bearer ${bridge.token}` };
   const first = new WebSocket(bridge.endpoint, { headers });
   await new Promise((settle) => first.once("open", settle));
@@ -90,27 +101,42 @@ test("a second connection is refused, because stdio is one stream", async () => 
   }
 });
 
-test("non-ACP stdout is surfaced but never forwarded to the client", async () => {
-  const sink = { stdout: [] as string[], frames: [] as string[] };
-  const bridge = await startBridge(HARNESS, process.cwd(), process.env, events(sink));
-  const socket = new WebSocket(bridge.endpoint, {
-    headers: { Authorization: `Bearer ${bridge.token}` },
-  });
-  await new Promise((settle) => socket.once("open", settle));
-  const received: string[] = [];
-  socket.on("message", (data) => received.push(data.toString()));
-  socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }));
-  await new Promise((settle) => setTimeout(settle, 400));
-  socket.close();
-  await bridge.close();
+test(
+  "non-ACP stdout is surfaced but never forwarded to the client",
+  { timeout: 15_000 },
+  async (context) => {
+    const sink = { stdout: [] as string[], frames: [] as string[] };
+    const bridge = await startBridge(
+      HARNESS,
+      process.cwd(),
+      process.env,
+      events(sink),
+    );
+    const socket = new WebSocket(bridge.endpoint, {
+      headers: { Authorization: `Bearer ${bridge.token}` },
+    });
+    const received: string[] = [];
+    try {
+      await once(socket, "open", { signal: context.signal });
+      socket.on("message", (data) => received.push(data.toString()));
+      const echoed = once(socket, "message", { signal: context.signal });
+      socket.send(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+      );
+      await echoed;
+    } finally {
+      socket.close();
+      await bridge.close();
+    }
 
-  assert.ok(
-    sink.stdout.some((line) => line.includes("starting up")),
-    "a stray stdout line must be surfaced to the developer",
-  );
-  assert.ok(
-    received.every((frame) => !frame.includes("starting up")),
-    "a stray stdout line must never reach the JSON-RPC stream",
-  );
-  assert.equal(received.length, 1, "the echoed frame should still arrive");
-});
+    assert.ok(
+      sink.stdout.some((line) => line.includes("starting up")),
+      "a stray stdout line must be surfaced to the developer",
+    );
+    assert.ok(
+      received.every((frame) => !frame.includes("starting up")),
+      "a stray stdout line must never reach the JSON-RPC stream",
+    );
+    assert.equal(received.length, 1, "the echoed frame should still arrive");
+  },
+);

@@ -25,16 +25,18 @@ import {
 
 import { attachmentFileKey } from "@renderer/components/ai/attachment-files";
 import { composerAgentTriggerPresentation } from "@renderer/components/ai/composer-agent-trigger";
+import { ComposerContextMeter } from "@renderer/components/ai/composer-context-usage";
 import { ComposerContextMenu } from "@renderer/components/ai/composer-context-menu";
 import { ComposerSelectionPanel } from "@renderer/components/ai/composer-selection-panel";
 import { FullAccessDialog } from "@renderer/components/ai/full-access-dialog";
 import type { ComposerSelectionItem } from "@renderer/components/ai/composer-selection-panel";
 import {
-  composerContextUsageLabel,
+  composerContextUsagePresentation,
   composerLegacyModeFallback,
-  composerSessionConfigByCategory,
   composerSessionConfigChoices,
+  composerSessionModelConfig,
   composerSessionConfigSelectedId,
+  composerSessionThinkingConfig,
   composerSessionConfigValue,
   composerSessionConfigValueLabel,
   composerSlashCommandPrompt,
@@ -299,10 +301,10 @@ export function ChatComposer({
     thinkingEfforts[0] ??
     null;
   const liveModelOption = sessionConfigOptions
-    ? composerSessionConfigByCategory(sessionConfigOptions, "model")
+    ? composerSessionModelConfig(sessionConfigOptions)
     : null;
   const liveThinkingOption = sessionConfigOptions
-    ? composerSessionConfigByCategory(sessionConfigOptions, "thought_level")
+    ? composerSessionThinkingConfig(sessionConfigOptions)
     : null;
   const legacyModes = composerLegacyModeFallback(
     sessionConfigOptions,
@@ -311,18 +313,15 @@ export function ChatComposer({
   const agentTriggerPresentation = composerAgentTriggerPresentation({
     agentCount: connectedAgents.length,
     agentLabel: selectedAgent?.label ?? null,
-    modelLabel: sessionConfigOptions
-      ? liveModelOption
-        ? composerSessionConfigValueLabel(liveModelOption)
-        : null
+    modelLabel: liveModelOption
+      ? composerSessionConfigValueLabel(liveModelOption)
       : (selectedModel?.label ?? null),
-    thinkingEffortLabel: sessionConfigOptions
-      ? liveThinkingOption
-        ? composerSessionConfigValueLabel(liveThinkingOption)
-        : null
+    thinkingEffortLabel: liveThinkingOption
+      ? composerSessionConfigValueLabel(liveThinkingOption)
       : (selectedThinkingEffort?.label ?? null),
   });
-  const usageLabel = composerContextUsageLabel(contextUsage);
+  const contextUsagePresentation =
+    composerContextUsagePresentation(contextUsage);
   const matchingSlashCommands = useMemo(
     () =>
       dismissedSlashPrompt === prompt
@@ -829,14 +828,8 @@ export function ChatComposer({
           </Popover>
 
           <div className="ml-auto flex min-w-0 items-center gap-1">
-            {usageLabel ? (
-              <span
-                aria-label={`Session usage: ${usageLabel}`}
-                title={`Session usage: ${usageLabel}`}
-                className="hidden max-w-36 truncate px-1 text-xs text-muted-foreground md:block"
-              >
-                {usageLabel}
-              </span>
+            {contextUsagePresentation ? (
+              <ComposerContextMeter usage={contextUsagePresentation} />
             ) : null}
             <Popover
               open={agentPopoverOpen}

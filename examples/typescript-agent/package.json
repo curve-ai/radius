@@ -8,15 +8,20 @@
     "validate": "radius validate",
     "dev": "radius dev",
     "agent:dev": "tsx watch radius/agent.ts --radius-dev",
-    "build": "radius build",
-    "deploy": "radius deploy"
+    "deploy": "radius deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:image": "radius build",
+    "test": "tsx --test radius/*.test.ts"
   },
   "dependencies": {
-    "@curve-ai/sdk": "0.0.1"
+    "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz"
   },
   "devDependencies": {
     "@curve-ai/build": "0.0.1",
     "@curve-ai/cli": "0.0.1",
-    "tsx": "4.23.12"
+    "tsx": "4.23.12",
+    "@curve-ai/radius-runtime": "0.0.1",
+    "typescript": "^5.9.3",
+    "@types/node": "22.19.1"
   }
 }

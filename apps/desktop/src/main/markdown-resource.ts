@@ -9,7 +9,8 @@ import type {
   MarkdownLinkPreviewResolution,
   MarkdownMediaResolution,
 } from "../radius-api";
-import { BoundedLru } from "./bounded-lru";
+import { BoundedLru } from "../shared/bounded-lru";
+import { MarkdownLinkPreviewCache } from "../shared/markdown-link-preview-cache";
 import {
   MAX_LOCAL_IMAGE_BYTES,
   readBoundedImageFile,
@@ -41,15 +42,10 @@ const mediaCache = new BoundedLru<MarkdownMediaResolution>(
   MAX_CACHE_ENTRIES,
   MAX_CACHE_BYTES,
 );
-const previewCache = new BoundedLru<MarkdownLinkPreviewResolution>(
-  MAX_CACHE_ENTRIES,
-  MAX_CACHE_BYTES,
+const previewCache = new MarkdownLinkPreviewCache((href) =>
+  resolvePreviewUncached(new URL(href)),
 );
 const mediaInflight = new Map<string, Promise<MarkdownMediaResolution>>();
-const previewInflight = new Map<
-  string,
-  Promise<MarkdownLinkPreviewResolution>
->();
 
 function blockedReason(
   reason: Extract<MarkdownMediaResolution, { state: "blocked" }>["reason"],
@@ -597,18 +593,5 @@ export async function resolveMarkdownLinkPreview(
   }
   const url = parsePublicHttpsUrl(value);
   if (!url) return { state: "blocked", reason: "unsafe_url" };
-  const key = url.toString();
-  const cached = previewCache.get(key);
-  if (cached) return cached;
-  const pending = previewInflight.get(key);
-  if (pending) return pending;
-  const promise = resolvePreviewUncached(url)
-    .then((result) => {
-      const bytes = JSON.stringify(result).length;
-      previewCache.set(key, result, bytes);
-      return result;
-    })
-    .finally(() => previewInflight.delete(key));
-  previewInflight.set(key, promise);
-  return promise;
+  return previewCache.resolve(url.toString());
 }

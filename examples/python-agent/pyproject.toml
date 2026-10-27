@@ -2,12 +2,8 @@
 name = "radius-python-example"
 version = "0.0.1"
 requires-python = ">=3.12,<3.15"
-dependencies = [
-  "radius-agent-sdk",
-]
+dependencies = ["agent-client-protocol==0.12.1"]
 
-[tool.uv.sources]
-radius-agent-sdk = { path = "../../sdks/python" }
 
 [tool.radius]
 schemaVersion = 1
@@ -26,3 +22,20 @@ lockfile = "uv.lock"
 cpu = 2
 memoryMb = 4096
 diskMb = 5120
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "pytest-asyncio==1.1.0", "ruff==0.12.12"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+cache_dir = ".pytest_cache"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+cache-dir = ".ruff_cache"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

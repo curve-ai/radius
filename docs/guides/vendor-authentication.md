@@ -21,7 +21,7 @@ Organization owners and admins can open **Settings → Company sign-in → Set u
 For command-line setup, run from the Radius repository:
 
 ```sh
-bun run auth:setup
+bun run --cwd apps/desktop auth:setup
 ```
 
 The command asks for the application name and identifier, Platform URL, organization, agent ID, issuer, agent API audience, public client ID and scopes. It checks issuer discovery before writing files and refuses to overwrite existing files. It never asks for a client secret. The default Platform address for local development is `http://localhost:3100/`.

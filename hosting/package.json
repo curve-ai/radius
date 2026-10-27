@@ -1,0 +1,22 @@
+{
+  "name": "@curve-ai/radius-hosting",
+  "private": true,
+  "scripts": {
+    "infra:up": "docker compose --env-file ../.env.local -p radius-local -f docker/compose.dev.yml up -d postgres jobs-redis registry",
+    "infra:down": "docker compose --env-file ../.env.local -p radius-local -f docker/compose.dev.yml stop postgres jobs-redis registry",
+    "stack:config": "docker compose --profile platform -f docker/compose.dev.yml config",
+    "stack:up": "docker compose --profile platform -f docker/compose.dev.yml up -d --build",
+    "stack:down": "docker compose --profile platform -f docker/compose.dev.yml stop",
+    "stack:logs": "docker compose --profile platform -f docker/compose.dev.yml logs -f",
+    "test:integration": "bash tests/integration.sh",
+    "verify:images": "bash scripts/verify-images.sh",
+    "self-host:config": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml config",
+    "self-host:pull": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml pull",
+    "self-host:up": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml up -d",
+    "self-host:down": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml down",
+    "self-host:logs": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml logs -f",
+    "self-host:source:config": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml -f docker/compose.self-host.source.yml config",
+    "self-host:source:build": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml -f docker/compose.self-host.source.yml build --pull",
+    "self-host:source:up": "docker compose --env-file docker/.env.self-host -f docker/compose.self-host.yml -f docker/compose.self-host.source.yml up -d --build"
+  }
+}

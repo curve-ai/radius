@@ -2,13 +2,16 @@ import {
   useEffect,
   useRef,
   useState,
+  type RefObject,
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { useScroll, useTransform } from "motion/react";
 
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
 import { useProjects } from "@renderer/components/shell/project-context-value";
 import { WORKSPACE_TITLES } from "@renderer/components/shell/types";
+import { motion, useReducedMotion } from "@renderer/components/ui/motion";
 import { useSidebar } from "@renderer/components/ui/sidebar";
 import { cn } from "@renderer/lib/utils";
 import { WorkspaceSessionHeader } from "./workspace-session-header";
@@ -26,10 +29,48 @@ const WINDOW_CONTROL_SELECTOR = [
   '[contenteditable="true"]',
 ].join(",");
 
+function CollapsingHeaderTitle({
+  scrollContainerRef,
+  title,
+}: {
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  title: string;
+}): ReactNode {
+  const reduceMotion = useReducedMotion();
+  const { scrollY } = useScroll({ container: scrollContainerRef });
+  const opacity = useTransform(scrollY, [24, 72], [0, 1]);
+  const transform = useTransform(
+    scrollY,
+    [24, 72],
+    ["translate3d(0, 4px, 0)", "translate3d(0, 0, 0)"],
+  );
+
+  return (
+    <>
+      <motion.span
+        aria-hidden="true"
+        className="min-w-0 flex-1 truncate type-base text-foreground"
+        style={{
+          opacity,
+          transform: reduceMotion ? "none" : transform,
+        }}
+      >
+        {title}
+      </motion.span>
+      <motion.div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border"
+        style={{ opacity }}
+      />
+    </>
+  );
+}
+
 export function WorkspaceHeader({
   collapsingTitle = false,
   minimal = false,
   title,
+  scrollContainerRef,
   toolPanelAvailable = true,
   toolPanelOpen,
   desktopToolPanelVisible,
@@ -38,6 +79,7 @@ export function WorkspaceHeader({
   collapsingTitle?: boolean;
   minimal?: boolean;
   title?: string;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   toolPanelAvailable?: boolean;
   toolPanelOpen: boolean;
   desktopToolPanelVisible: boolean;
@@ -90,7 +132,9 @@ export function WorkspaceHeader({
           "electron-window-drag sticky top-0 z-40 flex h-12 shrink-0 items-center border-b bg-background px-3 sm:px-4",
           minimal
             ? "border-transparent data-[scrolled=true]:border-border"
-            : "border-border",
+            : collapsingTitle
+              ? "border-transparent"
+              : "border-border",
           titlebarControlsOverlapHeader &&
             "radius-workspace-header-content-offset",
         )}
@@ -103,14 +147,13 @@ export function WorkspaceHeader({
           <>
             {activeView === "workspace" && activeSession ? (
               <WorkspaceSessionHeader key={activeSession.session.id} />
+            ) : collapsingTitle ? (
+              <CollapsingHeaderTitle
+                scrollContainerRef={scrollContainerRef}
+                title={title ?? WORKSPACE_TITLES[activeView]}
+              />
             ) : (
-              <span
-                aria-hidden={collapsingTitle ? "true" : undefined}
-                className={cn(
-                  "min-w-0 flex-1 truncate type-base text-foreground",
-                  collapsingTitle && "radius-collapsing-header-title",
-                )}
-              >
+              <span className="min-w-0 flex-1 truncate type-base text-foreground">
                 {title ?? WORKSPACE_TITLES[activeView]}
               </span>
             )}

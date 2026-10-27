@@ -1,0 +1,50 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "cacheDir": ".turbo/cache",
+  "globalDependencies": [
+    "tsconfig.packages.json",
+    "bunfig.toml",
+    ".npmrc",
+    ".env*"
+  ],
+  "globalEnv": [
+    "CI",
+    "RUNNER_OS",
+    "RUNNER_ARCH",
+    "NODE_VERSION",
+    "BUN_VERSION",
+    "NODE_ENV",
+    "TZ"
+  ],
+  "tasks": {
+    "check:inputs": {
+      "dependsOn": ["^check:inputs"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["check:inputs"],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["check:inputs"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["check:inputs"],
+      "outputs": [],
+      "env": ["RADIUS_*", "DATABASE_URL", "JOBS_*", "ELECTRON_*"]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"]
+    },
+    "build:bundle": {
+      "dependsOn": ["check:inputs"],
+      "cache": false,
+      "outputs": ["out/**"],
+      "passThroughEnv": ["RADIUS_*", "VITE_*"]
+    }
+  }
+}
