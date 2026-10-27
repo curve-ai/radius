@@ -87,10 +87,15 @@ test("declaring a python toolchain switches the base and installs from the lock"
 test("a node toolchain copies bun in and answers to the node shebang", () => {
   const containerfile = render({
     include: [".opencode/"],
-    toolchains: [{ kind: "node", version: "22", lockfile: ".opencode/bun.lock" }],
+    toolchains: [
+      { kind: "node", version: "22", lockfile: ".opencode/bun.lock" },
+    ],
   });
   assert.match(containerfile, /COPY --from=bun \/usr\/local\/bin\/bun/);
-  assert.match(containerfile, /ln -sf \/usr\/local\/bin\/bun \/usr\/local\/bin\/node/);
+  assert.match(
+    containerfile,
+    /ln -sf \/usr\/local\/bin\/bun \/usr\/local\/bin\/node/,
+  );
   assert.match(containerfile, /bun install --frozen-lockfile --production/);
   // Installed where the lockfile lives, not at the config root: opencode keeps
   // its plugin dependencies beside .opencode/bun.lock.
@@ -111,7 +116,10 @@ test("the archive is extracted whole and the command is proved present", () => {
   const containerfile = render();
   // A harness may ship assets beside its executable; copying one file loses them.
   assert.match(containerfile, /tar -xf \/tmp\/harness-archive -C \/opt\/agent/);
-  assert.match(containerfile, /unzip -q \/tmp\/harness-archive -d \/opt\/agent/);
+  assert.match(
+    containerfile,
+    /unzip -q \/tmp\/harness-archive -d \/opt\/agent/,
+  );
   assert.match(
     containerfile,
     /test -x \/opt\/agent\/opencode \|\| \(echo "harness archive does not contain/,
@@ -215,6 +223,7 @@ test("a harness with no linux/arm64 build cannot be packaged", async () => {
   await assert.rejects(
     () =>
       buildHarnessOciLayout({
+        platform: "linux/arm64",
         root: process.cwd(),
         config: {
           agent: "agent_harness01",
@@ -247,6 +256,7 @@ test("an expected failure is a BuildError, not an internal defect", async () => 
   await assert.rejects(
     () =>
       buildHarnessOciLayout({
+        platform: "linux/arm64",
         root: process.cwd(),
         config: {
           agent: "agent_harness01",

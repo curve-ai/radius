@@ -32,7 +32,7 @@ outside this repository.
 
 Requirements:
 
-- Bun 1.3.14 or newer.
+- Bun 1.4.4 (the version pinned in `package.json`).
 - Node.js 22 or newer.
 - uv 0.8.22 or newer for Python SDK and Python-agent development.
 - Xcode 26.2 or newer when building the bundled macOS runtime host.
@@ -43,6 +43,19 @@ bun install
 bun run browser:build
 bun run dev
 ```
+
+Use native Bun tooling for feedback while editing:
+
+```bash
+bun run typecheck
+bun fmt <changed-paths>
+bun fmt --check <changed-paths>
+```
+
+Package `typecheck` scripts use `bun check`; declaration-emitting builds retain
+TypeScript. Format only files belonging to the current change. CI checks
+formatting against the pull request's base or the preceding main commit.
+ESLint and the Python, Rust, and Swift checks retain their existing roles.
 
 To run the durable open Platform management plane, start the complete
 single-node development stack:

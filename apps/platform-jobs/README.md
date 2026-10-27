@@ -14,7 +14,7 @@ credentials are resolved from worker configuration and never enter Redis.
 Start the pinned development Redis and registry from the repository root:
 
 ```bash
-npx bun@1.3.14 run platform:infra:up
+npx bun@1.4.4 run platform:infra:up
 ```
 
 Run the worker:
@@ -25,14 +25,14 @@ RADIUS_PLATFORM_REGISTRIES=127.0.0.1:5001 \
 RADIUS_PLATFORM_REGISTRY_USERNAME=radius-dev \
 RADIUS_PLATFORM_REGISTRY_PASSWORD=radius-dev-only \
 RADIUS_PLATFORM_ALLOW_INSECURE_LOOPBACK=true \
-npx bun@1.3.14 run platform:jobs:dev
+npx bun@1.4.4 run platform:jobs:dev
 ```
 
 In another terminal, prove a real API-to-Redis-to-worker round trip:
 
 ```bash
 JOBS_REDIS_URL=redis://127.0.0.1:6381 \
-npx bun@1.3.14 run platform:jobs:verify
+npx bun@1.4.4 run platform:jobs:verify
 ```
 
 Production Redis must use persistence and `maxmemory-policy noeviction`.
@@ -54,5 +54,5 @@ allowlisted registry and run:
 ```bash
 RADIUS_VERIFY_IMAGE_REFERENCE=127.0.0.1:5001/example/agent:smoke \
 RADIUS_VERIFY_IMAGE_DIGEST=sha256:... \
-npx bun@1.3.14 run platform:jobs:verify-deployment
+npx bun@1.4.4 run platform:jobs:verify-deployment
 ```
