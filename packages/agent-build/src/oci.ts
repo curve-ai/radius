@@ -18,6 +18,8 @@ import {
 import { build } from "esbuild";
 
 import { BuildError } from "./errors.js";
+import type { OciCommandRunner } from "./push.js";
+import { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
 import {
   releaseTemplateLabels,
@@ -45,6 +47,8 @@ export interface TypeScriptOciBuildOptions {
   config: AgentConfigInput;
   outputRoot?: string;
   dockerExecutable?: string;
+  platform?: HostImagePlatform;
+  commandRunner?: OciCommandRunner;
 }
 
 export interface TypeScriptOciBuildResult {
@@ -71,6 +75,12 @@ export async function buildTypeScriptOciLayout(
     );
   }
 
+  const platform = options.platform ?? hostImagePlatform();
+  const runner = options.commandRunner;
+  const run = runner
+    ? (command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) =>
+        runner({ command, args, cwd, env }).then(() => {})
+    : runCommand;
   const outputRoot =
     options.outputRoot ?? join(options.root, ".radius", "builds");
   await mkdir(outputRoot, { recursive: true });
@@ -99,6 +109,7 @@ export async function buildTypeScriptOciLayout(
     const manifestJson = canonicalJson(manifest);
     const buildDigest = createHash("sha256")
       .update(manifestJson)
+      .update(platform)
       .update(bundle)
       .digest("hex");
     const imageReference = `radius.local/dev/${safeImageName(config.name)}:${buildDigest.slice(0, 16)}`;
@@ -110,7 +121,7 @@ export async function buildTypeScriptOciLayout(
       config,
       buildDigest,
       imageReference,
-      platform: "linux/arm64",
+      platform,
       processArguments: ["node", "/opt/agent/agent.mjs"],
       imageSizeMb: estimateImageMb(bundle.byteLength),
     });
@@ -124,13 +135,15 @@ export async function buildTypeScriptOciLayout(
     await writeFile(join(contextPath, "manifest.json"), manifestJson, "utf8");
 
     const imageTarPath = join(temporaryRoot, "image.oci.tar");
-    await runCommand(
+    // Docker Desktop's default builder cannot export OCI, so load then docker save.
+    const loadAndSave = process.platform === "win32";
+    await run(
       options.dockerExecutable ?? "docker",
       [
         "buildx",
         "build",
         "--platform",
-        "linux/arm64",
+        platform,
         "--provenance=false",
         "--sbom=false",
         "--build-arg",
@@ -141,28 +154,32 @@ export async function buildTypeScriptOciLayout(
           "--label",
           `${key}=${value}`,
         ]),
-        "--output",
-        `type=oci,dest=${imageTarPath}`,
+        ...(loadAndSave
+          ? ["--load"]
+          : ["--output", `type=oci,dest=${imageTarPath}`]),
         "--file",
         join(contextPath, "Containerfile"),
         contextPath,
       ],
       options.root,
     );
+    if (loadAndSave) {
+      await run(
+        options.dockerExecutable ?? "docker",
+        ["save", "--output", imageTarPath, imageReference],
+        options.root,
+      );
+    }
 
     const layoutPath = join(temporaryRoot, "oci-layout");
     await mkdir(layoutPath, { recursive: true });
-    await runCommand(
-      "tar",
-      ["-xf", imageTarPath, "-C", layoutPath],
-      options.root,
-    );
+    await run("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
     await rm(imageTarPath, { force: true });
 
     const { imageDigest, imageSizeMb } = await writeImportableLayout({
       layoutPath,
       imageReference,
-      platform: "linux/arm64",
+      platform,
       agentId: config.agent!,
       outputRoot: temporaryRoot,
     });

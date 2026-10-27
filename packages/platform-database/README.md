@@ -14,9 +14,9 @@ drizzle/                generated core plus reviewed custom invariant migration
 Run static verification or apply to an explicitly selected database:
 
 ```bash
-npx bun@1.3.14 run --cwd packages/platform-database typecheck
-npx bun@1.3.14 run --cwd packages/platform-database test
-DATABASE_URL=postgresql://... npx bun@1.3.14 run --cwd packages/platform-database migrate
+npx bun@1.4.4 run --cwd packages/platform-database typecheck
+npx bun@1.4.4 run --cwd packages/platform-database test
+DATABASE_URL=postgresql://... npx bun@1.4.4 run --cwd packages/platform-database migrate
 ```
 
 The runner takes a session advisory lock and uses Drizzle's migration ledger to

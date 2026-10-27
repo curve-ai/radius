@@ -54,7 +54,7 @@ Platform jobs -> PostgreSQL outbox -> dedicated Redis -> registry verifier
 Start it from the Radius repository root:
 
 ```bash
-npx bun@1.3.14 run platform:stack:up
+npx bun@1.4.4 run platform:stack:up
 ```
 
 Then open `http://127.0.0.1:3200`. The current development token is
@@ -74,9 +74,9 @@ radius deploy --environment staging
 Useful commands:
 
 ```bash
-npx bun@1.3.14 run platform:stack:config
-npx bun@1.3.14 run platform:stack:logs
-npx bun@1.3.14 run platform:stack:down
+npx bun@1.4.4 run platform:stack:config
+npx bun@1.4.4 run platform:stack:logs
+npx bun@1.4.4 run platform:stack:down
 ```
 
 `platform:stack:down` stops containers without deleting the registry, Redis,
