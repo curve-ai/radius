@@ -25,3 +25,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .turbo/
+
+# Temporary electron-vite configuration bundles
+electron.vite.config.*.mjs
+electron.vite.config.*.cjs
