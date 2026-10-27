@@ -84,7 +84,11 @@ export async function resolveHarness(
     const localPath = isAbsolute(artifact.archive)
       ? artifact.archive
       : resolve(root, artifact.archive);
-    const directory = await extractLocal(localPath, artifact.sha256, onProgress);
+    const directory = await extractLocal(
+      localPath,
+      artifact.sha256,
+      onProgress,
+    );
     return {
       command: [join(directory, launch.cmd), ...launch.args],
       source: localPath,
@@ -133,7 +137,9 @@ async function download(
     );
   }
 
-  const staging = await freshStagingDirectory(`remote-${expected.slice(0, 12)}`);
+  const staging = await freshStagingDirectory(
+    `remote-${expected.slice(0, 12)}`,
+  );
   const archivePath = join(staging, "archive");
   // Streamed rather than buffered: a 144MB harness should not sit in memory
   // twice, and the cap has to be enforced against bytes actually received,
@@ -164,7 +170,9 @@ async function streamToFile(
   label: string,
 ): Promise<string> {
   if (!response.body) {
-    throw new OperationalError(`The harness download returned no body (${label}).`);
+    throw new OperationalError(
+      `The harness download returned no body (${label}).`,
+    );
   }
   const hash = createHash("sha256");
   const handle = await open(destination, "w");
@@ -301,7 +309,9 @@ function capture(command: string, args: string[]): Promise<string> {
       out += chunk.toString("utf8");
     });
     child.once("error", reject);
-    child.once("exit", (code) =>
+    // Process exit can precede the final stdout data. Validate the complete
+    // listing, rather than occasionally treating a truncated one as safe.
+    child.once("close", (code) =>
       code === 0
         ? settle(out)
         : reject(
@@ -326,7 +336,9 @@ async function extractInto(
       // deliberately absent so tar keeps stripping leading slashes.
       ["tar", ["xzf", archivePath, "--no-same-owner", "-C", destination]];
   await new Promise<void>((settle, reject) => {
-    const child = spawn(command as string, args as string[], { stdio: "ignore" });
+    const child = spawn(command as string, args as string[], {
+      stdio: "ignore",
+    });
     child.once("error", reject);
     child.once("exit", (code) =>
       code === 0
