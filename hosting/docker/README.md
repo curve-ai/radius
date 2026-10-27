@@ -20,17 +20,17 @@ bootstrap, backup, restore, and upgrade procedures.
 Run the disposable source-built proof with:
 
 ```bash
-bun run platform:self-host:verify
+bun run --cwd hosting test:integration
 ```
 
 Validate that every Radius-owned release Dockerfile produces a two-platform OCI
 index with the expected labels, healthcheck, and runtime user:
 
 ```bash
-bun run release:platform-images:verify
+bun run --cwd hosting verify:images
 ```
 
-The verifier uses loopback-only ports and a smoke-only internal certificate
+The verifier uses loopback-only ports and a test-only internal certificate
 authority. It validates the production Caddyfile, starts an isolated Compose
 stack, checks same-origin TLS routing and registry authentication, bootstraps
 an owner, deploys through the real CLI, waits for worker verification, destroys
@@ -74,12 +74,12 @@ radius deploy --environment staging
 Useful commands:
 
 ```bash
-npx bun@1.4.4 run platform:stack:config
-npx bun@1.4.4 run platform:stack:logs
-npx bun@1.4.4 run platform:stack:down
+bun run --cwd hosting stack:config
+bun run --cwd hosting stack:logs
+bun run --cwd hosting stack:down
 ```
 
-`platform:stack:down` stops containers without deleting the registry, Redis,
+`stack:down` stops containers without deleting the registry, Redis,
 or Postgres volumes.
 
 ## What this proves

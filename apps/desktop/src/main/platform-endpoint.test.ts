@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  platformBaseFromEndpoint,
   platformSyncEndpoint,
   platformUrl,
   validatedPlatformUrl,
@@ -41,20 +40,5 @@ test("builds the sync endpoint from the platform base URL", () => {
   assert.equal(
     platformSyncEndpoint("https://northwind.curvehq.sh"),
     "https://northwind.curvehq.sh/api/platform/v1/sync/",
-  );
-});
-
-test("recovers the base URL from an address that already names sync", () => {
-  // `RADIUS_SYNC_ENDPOINT` may be set either way, and both must resolve to
-  // the same connection.
-  assert.equal(
-    platformBaseFromEndpoint(
-      "https://northwind.curvehq.sh/api/platform/v1/sync/",
-    ),
-    "https://northwind.curvehq.sh/",
-  );
-  assert.equal(
-    platformBaseFromEndpoint("https://northwind.curvehq.sh"),
-    "https://northwind.curvehq.sh/",
   );
 });

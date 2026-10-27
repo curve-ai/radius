@@ -135,6 +135,7 @@ export class HttpSyncProvider implements SyncProvider {
       new URL("capabilities", this.#endpoint),
       {
         credentials: "include",
+        headers: await this.#headers(),
       },
     );
     if (!response.ok) throw new Error(`SYNC_CAPABILITIES_${response.status}`);

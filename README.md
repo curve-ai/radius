@@ -20,6 +20,7 @@ bun install --frozen-lockfile
 cp .env.example .env.local
 cp apps/platform-api/.env.example apps/platform-api/.env.local
 cp apps/platform-web/.env.example apps/platform-web/.env.local
+# Configure an email provider in apps/platform-api/.env.local.
 bun run --cwd hosting infra:up
 # Separate terminals:
 bun run dev:platform

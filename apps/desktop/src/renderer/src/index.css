@@ -95,6 +95,81 @@ html[data-platform="darwin"] .radius-settings-sidebar-material {
   }
 }
 
+/* Startup owns its opaque canvas. The authenticated wrapper stays transparent
+   so the workspace sidebar can retain native macOS vibrancy. */
+.radius-startup-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+.radius-authenticated-workspace {
+  height: 100dvh;
+  background: transparent;
+}
+.radius-startup-wordmark {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+}
+.radius-startup-wordmark-base {
+  opacity: 0.55;
+}
+.radius-startup-shine-window {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(
+    110deg,
+    transparent 20%,
+    black 50%,
+    transparent 80%
+  );
+}
+.radius-startup-shine-text {
+  display: inline-flex;
+  white-space: nowrap;
+}
+@keyframes radius-startup-shine-window {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(120%);
+  }
+}
+@keyframes radius-startup-shine-text {
+  from {
+    transform: translateX(120%);
+  }
+  to {
+    transform: translateX(-120%);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .radius-startup-shine-window {
+    animation: radius-startup-shine-window 1.4s linear infinite;
+  }
+  .radius-startup-shine-text {
+    animation: radius-startup-shine-text 1.4s linear infinite;
+  }
+}
+.radius-startup-wordmark[data-failed] .radius-startup-shine-window {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .radius-startup-shine-window {
+    display: none;
+  }
+  .radius-startup-wordmark-base {
+    opacity: 1;
+  }
+  .radius-authenticated-workspace {
+    transform: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

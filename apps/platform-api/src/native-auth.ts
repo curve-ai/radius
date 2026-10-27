@@ -16,6 +16,16 @@ import {
 } from "./browser-session.js";
 import { organizationFromManagedHost } from "./browser-auth.js";
 import type { OidcIdentityClaims } from "./oidc.js";
+import {
+  DEVELOPMENT_ACCOUNT_ID,
+  DEVELOPMENT_AUTH,
+  developmentAuth,
+  isLocalDevelopmentAuth,
+} from "./development-auth.js";
+import {
+  readNativeAuthConfiguration,
+  resolveAuthIssuer,
+} from "./auth-configuration.js";
 
 export function validateNativeConfiguration(
   value: unknown,
@@ -86,6 +96,7 @@ export function createNativeAuthRoutes(options: {
   entries: NativeEntry[];
   managedBaseDomain?: string;
   allowLoopback?: boolean;
+  localDevelopment?: boolean;
 }) {
   const app = new Hono();
   const clients = new Map<string, Promise<oidc.Configuration>>();
@@ -209,11 +220,24 @@ export function createNativeAuthRoutes(options: {
       )
         throw new Error("Identity changed");
     }
+    const localOwner =
+      options.localDevelopment === true &&
+      entry.config.clientId === DEVELOPMENT_AUTH.clientId &&
+      entry.config.organizationSlug === DEVELOPMENT_AUTH.organizationSlug;
+    const policy = localOwner
+      ? normalizeOidcProvisioningPolicy({
+          organizationSlug: DEVELOPMENT_AUTH.organizationSlug,
+          bootstrapAccountId: DEVELOPMENT_ACCOUNT_ID,
+          role: "owner",
+          allowedEmails: identityClaims.email ? [identityClaims.email] : [],
+          allowUnprovisionedIdentities: true,
+        })
+      : entry.policy;
     const created = await provisionOidcBrowserSession(
       options.pool,
       identityClaims,
-      entry.policy,
-      { organizationBound: true },
+      policy,
+      { organizationBound: true, localDevelopmentOwner: localOwner },
     );
     const organization = created.identity.organizations.find(
       (org) => org.slug === entry.config.organizationSlug,
@@ -227,6 +251,10 @@ export function createNativeAuthRoutes(options: {
       platformSessionToken: created.sessionToken,
       platformExpiresAt: created.expiresAt,
       accountId: created.identity.accountId,
+      profile: {
+        displayName: identityClaims.displayName,
+        email: identityClaims.emailVerified ? identityClaims.email : null,
+      },
       organization,
       agent: {
         accessToken: tokens.access_token,
@@ -297,17 +325,26 @@ export function createNativeAuthRoutes(options: {
 export function nativeEntriesFromEnvironment(
   environment: NodeJS.ProcessEnv,
 ): NativeEntry[] {
-  if (!environment.RADIUS_NATIVE_AUTH_CONFIG) return [];
-  const entries: unknown = JSON.parse(environment.RADIUS_NATIVE_AUTH_CONFIG);
-  if (!Array.isArray(entries) || !entries.length || entries.length > 256)
+  const entries =
+    readNativeAuthConfiguration(environment) ??
+    (isLocalDevelopmentAuth(environment)
+      ? [developmentAuth(environment)]
+      : undefined);
+  if (entries === undefined) return [];
+  if (!Array.isArray(entries) || entries.length > 256)
     throw new Error(
-      "Native auth configuration must be an array of 1–256 organizations",
+      "Native auth configuration must be an array of at most 256 organizations",
     );
   const seen = new Set<string>();
   const clients = new Set<string>();
   return entries.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(
+        "Native auth organization configuration must be an object",
+      );
+    }
     const config = validateNativeConfiguration(
-      entry,
+      { ...entry, issuer: resolveAuthIssuer(entry.issuer, environment) },
       environment.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
     );
     if (seen.has(config.organizationSlug))

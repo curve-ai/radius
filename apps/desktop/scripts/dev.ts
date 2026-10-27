@@ -1,59 +1,55 @@
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { readFile, writeFile, mkdtemp, rm, access } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { DesktopDistributionSchema } from "../../../packages/platform-contracts/src/index.js";
+import { checkPlatformAuth } from "./auth-readiness.js";
 
-const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+process.chdir(fileURLToPath(new URL("../../..", import.meta.url)));
+
 const args = process.argv.slice(2);
 const flag = args.indexOf("--url");
 if (flag >= 0 && !args[flag + 1])
   throw new Error("--url requires a Platform address");
 let configPath = process.env.RADIUS_DISTRIBUTION_CONFIG;
 if (!configPath) {
-  const candidate = path.resolve(repositoryRoot, ".radius/distribution.json");
+  const candidate = path.resolve(".radius/distribution.json");
   try {
     await access(candidate);
     configPath = candidate;
   } catch {
-    /* generic local-only Radius */
+    /* Standard bundle. */
   }
 }
-let temporary: string | undefined;
-try {
-  if (flag >= 0) {
-    if (!configPath)
-      throw new Error("Run bun run auth:setup before using --url.");
-    const config = JSON.parse(await readFile(configPath, "utf8"));
-    config.platformUrl = new URL(args[flag + 1]!).href;
-    temporary = await mkdtemp(path.join(tmpdir(), "radius-dev-auth-"));
-    configPath = path.join(temporary, "distribution.json");
-    await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
-    args.splice(flag, 2);
-  }
-  const child = spawn(
-    process.execPath,
-    ["run", "--cwd", "apps/desktop", "dev", ...args],
-    {
-      cwd: repositoryRoot,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        ...(configPath
-          ? { RADIUS_DISTRIBUTION_CONFIG: path.resolve(configPath) }
-          : {}),
-      },
+const platformUrl =
+  flag >= 0
+    ? new URL(args[flag + 1]!).href
+    : (process.env.RADIUS_PLATFORM_URL ??
+      (configPath
+        ? DesktopDistributionSchema.parse(
+            JSON.parse(await readFile(configPath, "utf8")),
+          ).platformUrl
+        : "http://localhost:3100/"));
+if (flag >= 0) args.splice(flag, 2);
+await checkPlatformAuth(platformUrl);
+const child = spawn(
+  process.execPath,
+  ["run", "--cwd", "apps/desktop", "dev", ...args],
+  {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      RADIUS_PLATFORM_URL: platformUrl,
+      ...(configPath
+        ? { RADIUS_DISTRIBUTION_CONFIG: path.resolve(configPath) }
+        : {}),
     },
-  );
-  const forward = (): void => {
-    child.kill("SIGTERM");
-  };
-  process.once("SIGINT", forward);
-  process.once("SIGTERM", forward);
-  process.exitCode = await new Promise<number>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code) => resolve(code ?? 1));
-  });
-} finally {
-  if (temporary) await rm(temporary, { recursive: true, force: true });
-}
+  },
+);
+const stop = (): boolean => child.kill("SIGTERM");
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
+process.exitCode = await new Promise<number>((resolve, reject) => {
+  child.once("error", reject);
+  child.once("exit", (code) => resolve(code ?? 1));
+});

@@ -1,6 +1,6 @@
 # ADR-005: Separate pluggable sync capability from operated sync services
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-009
 **Date:** 2026-08-21
 **Deciders:** Radius maintainers
 
@@ -30,14 +30,13 @@ Radius will eventually provide:
 - A provider interface for push, pull, acknowledgements, capabilities, status,
   and revocation.
 - Retry, cursor, deduplication, compatibility, and recovery behavior.
-- No-op/local-only behavior, import/export, opt-in settings, and observable sync
-  status.
+- Local-first behavior, import/export, and observable sync status.
 - A way for trusted builds or extensions to register a compatible provider.
-- A low-prominence Settings switch and provider setup; sync health does not
-  occupy normal workspace navigation or status surfaces.
+- Sync health that does not occupy normal workspace navigation or Settings.
 
-Radius will not require a sync provider, Cloud account, Turso account, or raw
-remote database credential. Sync is disabled by default in a community clone.
+Radius will not require a Cloud account, Turso account, or raw remote database
+credential. ADR-009 requires each desktop bundle to target one Radius Platform,
+defaulting to the open local self-host at `http://localhost:3100/`.
 
 Curve Cloud will eventually own its private desktop provider, authenticated
 sync API, user and device registration, tenant policy, remote projections,
@@ -87,9 +86,9 @@ sync outbox or surface clear status and conflicts in the product. Rejected.
 
 - Sync protocol and core packages belong in Radius; Curve-specific providers
   and server implementation belong in Cloud.
-- Community builds start local-only and remain fully functional.
-- Self-hosters point Radius at a compatible service endpoint or install a
-  trusted provider; they do not expose a database directly to the desktop.
+- Community builds target the local self-hosted Radius Platform by default.
+- Self-hosters embed a compatible Platform endpoint in the desktop bundle; they
+  do not expose a database directly to the desktop.
 - The first synchronized record model, persistence changes, and migrations
   require a separate logical-schema review and explicit approval.
 - A public reference self-hosted server may be added later in a separate
@@ -97,11 +96,12 @@ sync outbox or surface clear status and conflicts in the product. Rejected.
 
 ## Validation
 
-1. Run every local workflow with no provider configured and no network.
+1. Run every local workflow against the default local Platform with no Cloud
+   dependency.
 2. Exercise the same protocol against Curve Cloud and a minimal independent
    conformance service.
 3. Verify duplicate delivery, interruption, retry, revocation, incompatible
    versions, conflicts, and partial failures.
 4. Verify renderer and agent processes never receive provider secrets or raw
    database access.
-5. Verify disabling sync leaves local data usable and exportable.
+5. Verify interrupted sync leaves canonical local data intact and exportable.

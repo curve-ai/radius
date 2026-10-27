@@ -145,14 +145,6 @@ const radiusApi = {
   }) => ipcRenderer.invoke("radius:resolve-session-artifact-image", input),
   cancelAgentSession: (sessionId: string) =>
     ipcRenderer.invoke("radius:cancel-agent-session", sessionId),
-  syncStatus: () => ipcRenderer.invoke("radius:sync-status"),
-  syncNow: () => ipcRenderer.invoke("radius:sync-now"),
-  setSyncEnabled: (enabled: boolean) =>
-    ipcRenderer.invoke("radius:set-sync-enabled", enabled),
-  connectPlatform: (
-    input: { kind: "cloud" } | { kind: "self-hosted"; url: string },
-  ) => ipcRenderer.invoke("radius:connect-platform", input),
-  disconnectPlatform: () => ipcRenderer.invoke("radius:disconnect-platform"),
   updateStatus: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.status),
   checkForUpdates: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.check),
   performUpdate: () => ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.perform),

@@ -2,14 +2,14 @@ FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb472
 
 WORKDIR /app
 
-COPY package.json bun.lock ./
+COPY package.json bun.lock tsconfig.packages.json ./
 COPY apps ./apps
 COPY packages ./packages
 COPY examples ./examples
-COPY hosting ./hosting
 
 RUN bun install --frozen-lockfile \
   --filter @curve-ai/radius-platform-api \
+  && bun run --cwd apps/platform-api build:auth-ui \
   && bun build apps/platform-api/src/server.ts \
   --target=bun \
   --format=esm \
@@ -30,10 +30,12 @@ LABEL org.opencontainers.image.title="Radius Platform API" \
 COPY --from=builder --chown=bun:bun /out/platform-api.js ./platform-api.js
 COPY --from=builder --chown=bun:bun /out/platform-admin.js ./platform-admin.js
 COPY --from=builder --chown=bun:bun /app/packages/platform-database/drizzle ./drizzle
+COPY --from=builder --chown=bun:bun /app/apps/platform-api/dist/auth-ui ./auth-ui
 
 ENV NODE_ENV=production \
   PORT=3100 \
-  RADIUS_PLATFORM_MIGRATIONS_DIR=/app/drizzle
+  RADIUS_PLATFORM_MIGRATIONS_DIR=/app/drizzle \
+  RADIUS_AUTH_UI_DIR=/app/auth-ui
 USER bun
 EXPOSE 3100
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=5 \
