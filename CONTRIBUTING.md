@@ -42,7 +42,7 @@ Never include credentials, customer data, private source code, proprietary promp
 ## Task and file ownership
 
 Run commands in the owning app/package. The root build, test, typecheck, and
-lint commands aggregate JavaScript workspaces; component-only tasks stay local.
+lint commands delegate to Turbo; component-only tasks stay local.
 Python examples use `uv` and their own `pyproject.toml`, for example:
 
 ```sh
@@ -69,3 +69,29 @@ Hosting operations belong to `hosting/package.json`. Its `test:integration`
 command builds and exercises a disposable stack; `verify:images` inspects
 multi-architecture build artifacts. Run these for hosting/release changes,
 rather than as routine unit tests.
+
+## Cached verification
+
+`bun run ci:verify` schedules JavaScript typechecks, lint, tests, and the desktop
+bundle together. Turbo caches successful pure checks and tracks dependency
+source changes through the output-free `check:inputs` graph. Library builds
+cache their `dist/` output. Desktop and dashboard builds remain uncached because
+they can read injected distribution/runtime configuration; the desktop bundle
+always rebuilds in CI. Database-backed auth verification, Python checks, native
+packaging, hosting operations, and release publication run outside this cache.
+
+Task hashes include shared TypeScript/tooling configuration, environment-file
+contents, relevant environment values, and CI OS/architecture/runtime versions.
+The desktop also tracks its tooling imports from Platform API source. Update
+these inputs when adding cross-package imports outside declared dependencies.
+The per-checkout `.turbo/` directory is generated and ignored.
+
+GitHub Actions restores Turbo results between commits and caches Bun/Electron
+downloads separately. Cache entries are separated by OS, architecture, and
+Bun/Node versions. It never restores an entire `node_modules` tree. Successful
+verification results are saved before the independent dependency audit, so an
+audit failure does not throw away completed check work. No remote-cache account
+or credentials are required.
+
+Use `bunx turbo run <task> --dry=json` to inspect task inputs and hashes.
+Use `bunx turbo run <task> --force` when an uncached verification is needed.

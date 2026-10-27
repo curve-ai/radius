@@ -34,13 +34,17 @@
   "scripts": {
     "dev": "bun run --cwd apps/desktop dev:local",
     "dev:platform": "bun run --cwd apps/platform-api dev:local",
-    "build": "bun run --filter './packages/*' --filter './apps/*' build",
-    "test": "bun run --filter './packages/*' --filter './apps/*' --if-present test",
-    "typecheck": "bun run --filter './packages/*' --filter './apps/*' typecheck",
-    "lint": "bun run --filter './apps/*' --if-present lint",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
     "package": "bun run --cwd apps/desktop package:app",
     "make": "bun run --cwd apps/desktop make:app",
-    "release:npm:verify": "bun run --filter './packages/*' build && bun scripts/release/npm.ts --verify",
-    "release:npm:pack": "bun run --filter './packages/*' build && bun scripts/release/npm.ts --output .radius/releases/npm"
+    "release:npm:verify": "turbo run build --filter='./packages/*' && bun scripts/release/npm.ts --verify",
+    "release:npm:pack": "turbo run build --filter='./packages/*' && bun scripts/release/npm.ts --output .radius/releases/npm",
+    "ci:verify": "turbo run typecheck lint test build:bundle --summarize --output-logs=errors-only"
+  },
+  "devDependencies": {
+    "turbo": "2.11.10"
   }
 }

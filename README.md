@@ -49,7 +49,8 @@ to use or contribute to Radius.
 ## Development commands
 
 `bun run build`, `test`, `typecheck`, and `lint` delegate to the owning
-JavaScript workspace projects. Run a focused command with
+JavaScript workspace projects through Turbo. `bun run ci:verify` schedules and
+caches the CI checks together. Run a focused command with
 `bun run --cwd <app-or-package> <command>`.
 `bun run package` prepares the native/browser assets and an unpacked desktop;
 `bun run make` prepares desktop installers.

@@ -10,8 +10,9 @@ owns libraries with explicit APIs or independent build/release boundaries.
 `examples/` demonstrates official ACP SDK authoring. `hosting/` owns the
 self-host distribution; PostgreSQL uses the pinned official image directly.
 
-The root commands aggregate JavaScript workspace tasks using Bun. Workspace
-manifests own their implementation and dependency ordering. Native runtime,
+The root commands use Turbo to schedule and cache JavaScript workspace tasks.
+Bun remains the package manager and script runtime; package manifests own task
+implementations and dependencies. Native runtime,
 Python, hosting, and integration operations are run from their component.
 
 ## Package boundary review
