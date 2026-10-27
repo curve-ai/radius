@@ -20,10 +20,10 @@ the restricted `com.apple.vm.networking` entitlement.
 ## Commands
 
 ```bash
-bun run runtime:build
-bun run runtime:prepare-assets
-bun run runtime:test
-bun run runtime:doctor
+sh apps/runtime-host-macos/scripts/build.sh
+sh apps/runtime-host-macos/scripts/prepare-assets.sh
+swift test --package-path apps/runtime-host-macos
+apps/runtime-host-macos/.build/release/radius-runtime-host doctor --json
 ```
 
 `doctor` validates the host and the signed helper. `run` is the low-level
@@ -75,5 +75,6 @@ their encrypted ext4 state volume before distribution.
 ## Third-party software
 
 Apple Containerization and its transitive packages retain their respective
-licenses. See `THIRD_PARTY_NOTICES.md`. Release packaging must include those
+licenses. Apple Containerization is Copyright 2025-2026 Apple Inc. and its
+contributors, under Apache-2.0. Release packaging must include those
 notices and verify the entitlements of the nested helper after signing.

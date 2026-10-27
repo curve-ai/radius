@@ -14,8 +14,6 @@ export {
   type SaveComposerDraftInput,
 } from "./composer-draft-store.js";
 export {
-  ensureBuiltinToolProvider,
-  ensureBuiltinToolBinding,
   grantMcpServerApproval,
   grantMcpToolApproval,
   hasMcpApproval,

@@ -27,8 +27,6 @@ export default defineConfig({
         exclude: [
           "@curve-ai/platform-client",
           "@curve-ai/platform-contracts",
-          "@curve-ai/radius-browser-protocol",
-          "@curve-ai/radius-browser-tools",
           "@curve-ai/radius-connector-protocol",
           "@curve-ai/radius-mcp-connector",
           "@curve-ai/radius-scheduler",

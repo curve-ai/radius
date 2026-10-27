@@ -1,0 +1,17 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "check:inputs": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/apps/platform-api/src/**"
+      ]
+    },
+    "build": {
+      "cache": false,
+      "outputs": ["out/**"],
+      "passThroughEnv": ["RADIUS_*", "VITE_*"]
+    }
+  }
+}

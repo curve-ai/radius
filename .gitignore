@@ -19,3 +19,13 @@ coverage/
 .radius/
 __pycache__/
 *.pyc
+
+# Local investigations and tool caches
+.scratch/
+.ruff_cache/
+.pytest_cache/
+.turbo/
+
+# Temporary electron-vite configuration bundles
+electron.vite.config.*.mjs
+electron.vite.config.*.cjs

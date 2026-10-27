@@ -13,7 +13,8 @@
     "test": "tsx --test src/**/*.test.ts",
     "health": "bun scripts/health.ts",
     "verify": "bun scripts/verify.ts",
-    "verify:deployment": "bun scripts/verify-deployment.ts"
+    "verify:deployment": "bun scripts/verify-deployment.ts",
+    "dev:local": "bun --env-file=../../.env.local --env-file=.env.local --watch src/server.ts"
   },
   "dependencies": {
     "@curve-ai/platform-database": "0.0.1",

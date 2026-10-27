@@ -6,8 +6,6 @@ import {
 import {
   clearComposerDraft,
   createSession,
-  ensureBuiltinToolBinding,
-  ensureBuiltinToolProvider,
   getLatestAgentProviderSession,
   getSessionProjectContext,
   getSessionRevision,
@@ -48,11 +46,6 @@ import {
   type MicrovmRuntimePaths,
   type SessionUpdate,
 } from "@curve-ai/radius-runtime";
-import {
-  startBrowserToolServer,
-  type BrowserToolServer,
-} from "@curve-ai/radius-browser-tools";
-import type { BrowserBridgeOperation } from "@curve-ai/radius-browser-protocol";
 import { resolveLocalArtifactPath } from "@curve-ai/radius-sync-core";
 import { app, BrowserWindow } from "electron";
 import { createHash, randomUUID } from "node:crypto";
@@ -63,6 +56,7 @@ import type {
   DesktopAgentSummary,
   DesktopRuntimeStatus,
   SessionTranscriptStreamUpdate,
+  SessionWorkingStateUpdate,
   SetAgentSessionConfigOptionInput,
   StartAgentPromptInput,
   StartAgentPromptResult,
@@ -73,6 +67,7 @@ import type {
 import {
   SESSION_RUN_ACTIVITY_DETAIL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
+  SESSION_WORKING_STATE_CHANNEL,
 } from "../radius-api";
 import { splitGeneratedImageLinks } from "../generated-image-link";
 import {
@@ -116,7 +111,6 @@ import {
   resolveAgentReleasePaths,
   windowsRuntimeAssetPaths,
 } from "./bundled-agents";
-import { browserBridge } from "./browser-bridge";
 import { listDevelopmentAgentConnections } from "./development-agents";
 import { createRuntimeMcpClient } from "./mcp-connector-auth";
 import { decodeAgentImage, MAX_AGENT_IMAGE_BYTES } from "./agent-image-content";
@@ -128,8 +122,6 @@ import {
   radiusImageMimeTypeForPath,
 } from "./image-content";
 import {
-  BROWSER_MCP_TOOL_BINDINGS,
-  browserMcpToolName,
   mcpAvailableSelections,
   mcpOptionIdForSelection,
   mcpPermissionOptionIds,
@@ -844,12 +836,21 @@ export function isAgentSessionWorking(sessionId: string): boolean {
   return workingSessions.has(sessionId);
 }
 
+function broadcastSessionWorkingState(update: SessionWorkingStateUpdate): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(SESSION_WORKING_STATE_CHANNEL, update);
+  }
+}
+
 function markSessionWorking(sessionId: string): void {
+  if (workingSessions.has(sessionId)) return;
   workingSessions.add(sessionId);
+  broadcastSessionWorkingState({ sessionId, working: true });
 }
 
 function clearSessionWorking(sessionId: string): void {
-  workingSessions.delete(sessionId);
+  if (!workingSessions.delete(sessionId)) return;
+  broadcastSessionWorkingState({ sessionId, working: false });
 }
 
 export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
@@ -872,7 +873,9 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
           preferCachedDuringRuntime: true,
         })
       : null;
-    agents.push(desktopAgentSummary(release, authentication));
+    agents.push(
+      desktopAgentSummary(release, authentication, installation.updatedAt),
+    );
   }
   const distribution = readDistribution();
   return distribution
@@ -892,7 +895,7 @@ export async function connectAgentAuthentication(
     context,
     installation.installationId,
   );
-  return desktopAgentSummary(release, authentication);
+  return desktopAgentSummary(release, authentication, installation.updatedAt);
 }
 
 export async function disconnectAgentAuthentication(
@@ -907,7 +910,7 @@ export async function disconnectAgentAuthentication(
     context,
     installation.installationId,
   );
-  return desktopAgentSummary(release, authentication);
+  return desktopAgentSummary(release, authentication, installation.updatedAt);
 }
 
 export async function getDesktopRuntimeStatus(): Promise<DesktopRuntimeStatus> {
@@ -1204,7 +1207,9 @@ export function stopAgentRuntime(): void {
   }
   runningSessions.clear();
   runningTerminalManagers.clear();
-  workingSessions.clear();
+  for (const sessionId of [...workingSessions]) {
+    clearSessionWorking(sessionId);
+  }
   agentSessionFeatures.clear();
   agentSessionConfigOverrides.clear();
   agentSessionModeOverrides.clear();
@@ -1753,10 +1758,6 @@ async function runAgentSession(input: {
   let runtime: RunningAgentRuntime | null = null;
   let credentialExpiryTimer: NodeJS.Timeout | null = null;
   let fxProfile: FxRuntimeProfileLease | null = null;
-  let browserTools: BrowserToolServer | null = null;
-  let browserToolProviderId: string | null = null;
-  const browserToolBindingIds = new Map<string, string>();
-  let browserMcpContext: ActiveMcpPermissionContext | null = null;
   const connectorMcpClients: McpConnectorClient[] = [];
   const connectorMcpServers: BrokeredMcpServer[] = [];
   const connectorMcpContexts: ActiveMcpPermissionContext[] = [];
@@ -1922,70 +1923,6 @@ async function runAgentSession(input: {
         input.thinkingEffortId,
       );
     }
-    if (capabilities.some((capability) => capability.startsWith("browser."))) {
-      browserToolProviderId = await ensureBuiltinToolProvider(
-        input.context.database,
-        {
-          clientInstanceId: input.context.vault.clientInstanceId,
-          providerKey: "radius-browser",
-          label: "Chrome browser",
-          connected: true,
-        },
-      );
-      for (const binding of BROWSER_MCP_TOOL_BINDINGS) {
-        const inputSchemaVersion = 1;
-        browserToolBindingIds.set(
-          binding.nativeToolName,
-          await ensureBuiltinToolBinding(input.context.database, {
-            providerId: browserToolProviderId,
-            capabilityKey: "mcp.radius-browser",
-            contractVersion: 1,
-            displayName: "Chrome browser MCP",
-            description: "Browser tools exposed through Radius.",
-            operationName: binding.nativeToolName,
-            nativeToolName: binding.nativeToolName,
-            inputSchemaId: `mcp.radius-browser.${binding.nativeToolName}`,
-            inputSchemaVersion,
-            inputSchemaSha256: createHash("sha256")
-              .update(
-                `mcp.radius-browser.${binding.nativeToolName}@${inputSchemaVersion}`,
-              )
-              .digest("hex"),
-            outputSchemaId: "mcp.radius-browser.result",
-            outputSchemaVersion: 1,
-            riskClass: binding.riskClass,
-          }),
-        );
-      }
-      browserMcpContext = {
-        providerId: browserToolProviderId,
-        serverLabel: "Chrome browser",
-        serverName: "radius-browser",
-        bindingIds: browserToolBindingIds,
-        allowedTools: new Set(),
-        oneTimeTools: new Map(),
-      };
-      browserTools = await startBrowserToolServer(browserBridge, {
-        authorize: async (operation) => {
-          if (!browserOperationRequested(capabilities, operation)) return false;
-          const toolName = browserMcpToolName(operation);
-          const bindingId = browserToolBindingIds.get(toolName);
-          if (
-            browserToolProviderId &&
-            bindingId &&
-            (await hasMcpApproval(input.context.database, {
-              providerId: browserToolProviderId,
-              bindingId,
-            }))
-          ) {
-            return true;
-          }
-          return browserMcpContext
-            ? consumeMcpToolAllowance(browserMcpContext, toolName)
-            : false;
-        },
-      });
-    }
     if (capabilities.includes("mcp.connectors")) {
       const readyProviders = await listReadyMcpProviders(
         input.context.database,
@@ -2122,24 +2059,12 @@ async function runAgentSession(input: {
       if (canReadFiles) updateState.hostToolKinds.add("read");
       if (canWriteFiles) updateState.hostToolKinds.add("edit");
     }
-    const mcpServers = [
-      ...(browserTools
-        ? [
-            {
-              type: "http" as const,
-              name: "radius-browser",
-              url: browserTools.url,
-              headers: browserTools.headers,
-            },
-          ]
-        : []),
-      ...connectorMcpServers.map((server) => ({
-        type: "http" as const,
-        name: server.name,
-        url: server.url,
-        headers: server.headers,
-      })),
-    ];
+    const mcpServers = connectorMcpServers.map((server) => ({
+      type: "http" as const,
+      name: server.name,
+      url: server.url,
+      headers: server.headers,
+    }));
     const handleElicitation = async (
       request: Parameters<AcpElicitationHandler>[0],
       signal: Parameters<AcpElicitationHandler>[1],
@@ -2210,15 +2135,11 @@ async function runAgentSession(input: {
       ) => {
         const rawToolName =
           request.toolCall.name?.trim() || request.toolCall.title?.trim() || "";
-        const contexts = [
-          ...(browserMcpContext ? [browserMcpContext] : []),
-          ...connectorMcpContexts,
-        ];
         const permissionContext =
-          contexts.find((context) =>
+          connectorMcpContexts.find((context) =>
             rawToolName.startsWith(`mcp__${context.serverName}__`),
           ) ??
-          contexts.find((context) =>
+          connectorMcpContexts.find((context) =>
             Boolean(resolveMcpPermissionTool(context, rawToolName)),
           );
         if (!permissionContext) return { outcome: "cancelled" };
@@ -2354,8 +2275,8 @@ async function runAgentSession(input: {
       ? ({
           kind: "auto",
           sessionId: input.providerSessionId,
-          // Windows fx answers a session it no longer holds with a bare "Session not found".
-          newOnBareMissingSession: process.platform === "win32",
+          // FX can omit the requested ID when a saved session no longer exists.
+          newOnBareMissingSession: Boolean(release && isFxRelease(release)),
         } as const)
       : ({ kind: "new" } as const);
     const additionalDirectories = input.projectRoots.slice(1);
@@ -2620,7 +2541,6 @@ async function runAgentSession(input: {
     await cancelPendingTerminalApprovals(input.sessionId);
     agentElicitations.cancelSession(input.sessionId);
     if (runtime) await runtime.stop();
-    await browserTools?.close();
     await Promise.allSettled(
       connectorMcpServers.map((server) => server.close()),
     );
@@ -2643,33 +2563,6 @@ function connectorMcpServerName(
     .slice(0, 32);
   const identity = providerId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
   return `radius-${slug || "connector"}-${identity || index + 1}`;
-}
-
-function browserOperationRequested(
-  capabilities: string[],
-  operation: BrowserBridgeOperation,
-): boolean {
-  const requested = new Set(capabilities);
-  if (operation === "browser.status") {
-    return [...requested].some((capability) =>
-      capability.startsWith("browser."),
-    );
-  }
-  if (operation === "tabs.list") return requested.has("browser.tabs.read");
-  if (operation === "tabs.create") {
-    return requested.has("browser.tabs.create");
-  }
-  if (
-    operation === "tabs.activate" ||
-    operation === "tabs.close" ||
-    operation === "control.release"
-  ) {
-    return requested.has("browser.tabs.manage");
-  }
-  if (operation === "page.snapshot" || operation === "page.screenshot") {
-    return requested.has("browser.page.read");
-  }
-  return requested.has("browser.page.interact");
 }
 
 async function appendRuntimeUpdate(
@@ -2900,11 +2793,13 @@ async function ensureAgentInstallation(
 function desktopAgentSummary(
   release: AgentReleaseDescriptor,
   authentication: Awaited<ReturnType<typeof getFxAuthenticationStatus>> | null,
+  updatedAt: string,
 ): DesktopAgentSummary {
   return {
     id: release.agentId,
     label: release.displayName,
-    detail: `${release.releaseVersion} · local microVM`,
+    releaseVersion: release.releaseVersion,
+    updatedAt,
     models:
       authentication?.models ??
       release.models.map((model) => ({
@@ -2936,7 +2831,8 @@ function developmentAgentSummary(
   return {
     id: connection.agentId,
     label: connection.displayName,
-    detail: "Development connection",
+    releaseVersion: null,
+    updatedAt: connection.registeredAt,
     models: [],
     defaultModelId: null,
     promptCapabilities: agentPromptCapabilities.get(

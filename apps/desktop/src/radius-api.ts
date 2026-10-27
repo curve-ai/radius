@@ -73,6 +73,11 @@ export interface ProjectSessionSummary {
   working: boolean;
 }
 
+export interface SessionWorkingStateUpdate {
+  sessionId: string;
+  working: boolean;
+}
+
 export interface ProjectRootSummary {
   id: string;
   name: string;
@@ -108,6 +113,7 @@ export interface SessionTranscriptStreamUpdate {
 }
 export const SESSION_TRANSCRIPT_STREAM_CHANNEL =
   "radius:session-transcript-stream";
+export const SESSION_WORKING_STATE_CHANNEL = "radius:session-working-state";
 export const SESSION_RUN_ACTIVITY_DETAIL = {
   connectingAgent: "Connecting to the development agent",
   resumingWork: "Continuing with approved access",
@@ -165,7 +171,8 @@ export interface DesktopSyncStatus {
 export interface DesktopAgentSummary {
   id: string;
   label: string;
-  detail?: string;
+  releaseVersion: string | null;
+  updatedAt?: string | null;
   models: Array<{
     id: string;
     label: string;
@@ -306,15 +313,6 @@ export interface SetAgentSessionModeInput {
   sessionId: string;
   agentId: string;
   modeId: string;
-}
-
-export interface BrowserConnectionStatus {
-  state:
-    "unsupported" | "waiting_for_extension" | "connected" | "paused" | "error";
-  extensionId: string;
-  profile: { id: string; label: string } | null;
-  controlledTabs: number;
-  errorCode: string | null;
 }
 
 export interface StartAgentPromptInput {
@@ -472,6 +470,9 @@ export interface RadiusApi {
   onSessionTranscriptStream(
     listener: (update: SessionTranscriptStreamUpdate) => void,
   ): () => void;
+  onSessionWorkingStateChanged(
+    listener: (update: SessionWorkingStateUpdate) => void,
+  ): () => void;
   chooseProjectFolder(): Promise<ProjectFolderSelection | null>;
   createProject(input: {
     selectionIds?: string[];
@@ -517,11 +518,6 @@ export interface RadiusApi {
   setAgentSessionMode(
     input: SetAgentSessionModeInput,
   ): Promise<DesktopAgentSessionFeatures | null>;
-  browserStatus(): Promise<BrowserConnectionStatus>;
-  revealBrowserExtension(): Promise<boolean>;
-  onBrowserStatus(
-    listener: (status: BrowserConnectionStatus) => void,
-  ): () => void;
   startAgentPrompt(
     input: StartAgentPromptInput,
   ): Promise<StartAgentPromptResult>;

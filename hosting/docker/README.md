@@ -54,7 +54,7 @@ Platform jobs -> PostgreSQL outbox -> dedicated Redis -> registry verifier
 Start it from the Radius repository root:
 
 ```bash
-npx bun@1.4.4 run platform:stack:up
+bun run --cwd hosting stack:up
 ```
 
 Then open `http://127.0.0.1:3200`. The current development token is

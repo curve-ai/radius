@@ -18,6 +18,8 @@ export interface InitOptions {
 }
 
 const TOOLCHAIN_VERSION = "0.0.1";
+const ACP_TYPESCRIPT_VERSION = "1.4.0";
+const ACP_PYTHON_VERSION = "0.12.1";
 
 export async function initializeAgentProject(
   options: InitOptions,
@@ -158,9 +160,10 @@ async function ensureGitignore(root: string): Promise<void> {
 
 function installToolchain(root: string): void {
   const packageManager = detectPackageManager(root);
-  const dependencies = [`@curve-ai/sdk@${TOOLCHAIN_VERSION}`];
+  const dependencies = [`@agentclientprotocol/sdk@${ACP_TYPESCRIPT_VERSION}`];
   const devDependencies = [
     `@curve-ai/build@${TOOLCHAIN_VERSION}`,
+    `@curve-ai/radius-runtime@${TOOLCHAIN_VERSION}`,
     `@curve-ai/cli@${TOOLCHAIN_VERSION}`,
   ];
   const commands: Array<[string, string[]]> =
@@ -196,7 +199,7 @@ function installToolchain(root: string): void {
 }
 
 function installPythonToolchain(root: string): void {
-  const args = ["add", `radius-agent-sdk==${TOOLCHAIN_VERSION}`];
+  const args = ["add", `agent-client-protocol==${ACP_PYTHON_VERSION}`];
   const result = spawnSync("uv", args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -223,7 +226,7 @@ function renderConfig(config: AgentConfig): string {
 }
 
 function renderAgent(): string {
-  return `import { defineAgent } from "@curve-ai/sdk";\n\nconst agent = defineAgent({\n  name: "radius-agent",\n  async run({ text }) {\n    return { text: \`Received: \${text}\` };\n  },\n});\n\nif (process.argv.includes("--radius-dev")) {\n  const { serveDevelopmentAgent } = await import("@curve-ai/sdk/development");\n  const server = await serveDevelopmentAgent(agent);\n  console.log(\`Radius ACP development endpoint: \${server.endpoint}\`);\n} else {\n  agent.serveStdio();\n}\n`;
+  return 'import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from "@agentclientprotocol/sdk";\nimport { randomUUID } from "node:crypto";\nimport { Readable, Writable } from "node:stream";\n\nexport function createAgent() {\n  const sessions = new Set<string>();\n  return agent({ name: "radius-agent" })\n    .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION }))\n    .onRequest(methods.agent.session.new, () => {\n      const sessionId = randomUUID();\n      sessions.add(sessionId);\n      return { sessionId };\n    })\n    .onRequest(methods.agent.session.prompt, async ({ params, client }) => {\n      if (!sessions.has(params.sessionId)) throw new Error("Unknown session");\n      const text = params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\\n");\n      await client.notify(methods.client.session.update, {\n        sessionId: params.sessionId,\n        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Received: ${text}` } },\n      });\n      return { stopReason: "end_turn" };\n    });\n}\n\nif (process.argv.includes("--radius-dev")) {\n  const { serveDevelopmentAgent } = await import("@curve-ai/radius-runtime/development");\n  const server = await serveDevelopmentAgent(createAgent);\n  console.log(`Radius ACP development endpoint: ${server.endpoint}`);\n} else {\n  createAgent().connect(ndJsonStream(\n    Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,\n    Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,\n  ));\n}\n';
 }
 
 function renderPythonConfig(config: AgentConfig): string {
@@ -251,16 +254,5 @@ diskMb = ${config.resources.diskMb}
 }
 
 function renderPythonAgent(): string {
-  return `from radius_agent_sdk import RunContext, define_agent, serve_stdio
-
-
-async def run(context: RunContext) -> str:
-    return f"Received: {context.text}"
-
-
-agent = define_agent(name="radius-agent", run=run)
-
-if __name__ == "__main__":
-    serve_stdio(agent)
-`;
+  return 'from typing import Any\nfrom uuid import uuid4\n\nfrom acp import (\n    Agent, InitializeResponse, NewSessionResponse, PromptResponse,\n    run_agent, text_block, update_agent_message,\n)\nfrom acp.interfaces import Client\n\n\nclass EchoAgent(Agent):\n    def __init__(self) -> None:\n        self.client: Client | None = None\n        self.sessions: set[str] = set()\n\n    def on_connect(self, conn: Client) -> None:\n        self.client = conn\n\n    async def initialize(self, protocol_version: int, **kwargs: Any) -> InitializeResponse:\n        return InitializeResponse(protocol_version=protocol_version)\n\n    async def new_session(self, cwd: str, **kwargs: Any) -> NewSessionResponse:\n        session_id = uuid4().hex\n        self.sessions.add(session_id)\n        return NewSessionResponse(session_id=session_id)\n\n    async def prompt(self, session_id: str, prompt: list[Any], **kwargs: Any) -> PromptResponse:\n        if session_id not in self.sessions or self.client is None:\n            raise ValueError("Unknown or disconnected session")\n        text = "\\n".join(block.text for block in prompt if getattr(block, "type", None) == "text")\n        await self.client.session_update(\n            session_id=session_id,\n            update=update_agent_message(text_block(f"Received: {text}")),\n        )\n        return PromptResponse(stop_reason="end_turn")\n\n\nif __name__ == "__main__":\n    import asyncio\n\n    asyncio.run(run_agent(EchoAgent()))\n';
 }

@@ -9,8 +9,8 @@ It currently provides:
   dependency is pinned to the exact `1.4.0` tarball in `package.json` rather
   than a semver range on purpose: `websocket.ts` imports from the package's
   `experimental/` entry points, which carry no compatibility promise, so a
-  patch bump can break the transport. Bump it deliberately, alongside
-  `packages/sdk`, which pins the same tarball for the same reason;
+  patch bump can break the transport. Bump it deliberately, alongside the
+  TypeScript example that pins the same tarball;
 - typed session initialization, prompt streaming, permission requests,
   cancellation, and shutdown;
 - child-process stdin/stdout transport without a shell or callback port;
@@ -50,7 +50,7 @@ developer environment paths:
 The developer state share is accepted only by the native helper's guarded
 development interface. It is not the distributed agent-state design.
 
-`scripts/build-binary-agent-oci-layout.sh` produces a deterministic arm64 OCI
+`packages/agent-build/scripts/build-binary-oci-layout.sh` produces a deterministic arm64 OCI
 layout for a verified static agent binary. The native helper can import that
 layout directly, so small provider packages do not require Docker or Podman in
 the development or product execution path. Pass an explicit CA bundle as its

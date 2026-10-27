@@ -1,5 +1,6 @@
 // Adapted from OpenAI Codex rust-v0.133.0 under Apache-2.0.
-// See the repository THIRD_PARTY_NOTICES.md.
+// Source: https://github.com/openai/codex/tree/rust-v0.133.0
+// License: https://www.apache.org/licenses/LICENSE-2.0
 
 export const basePolicy = `(version 1)
 

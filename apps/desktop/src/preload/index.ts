@@ -7,6 +7,7 @@ import {
 import {
   AGENTS_CHANGED_CHANNEL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
+  SESSION_WORKING_STATE_CHANNEL,
   type RadiusApi,
   type ComposerDraftContext,
   type GetAgentSessionFeaturesInput,
@@ -15,8 +16,8 @@ import {
   type SetAgentSessionConfigOptionInput,
   type SetAgentSessionModeInput,
   type SessionTranscriptStreamUpdate,
+  type SessionWorkingStateUpdate,
 } from "../radius-api";
-import type { BrowserConnectionStatus } from "../radius-api";
 import type { DesktopConnectorCatalogQuery } from "../radius-api";
 import type { NativeControlMenuInput } from "../radius-api";
 import type { StartAgentPromptInput } from "../radius-api";
@@ -57,6 +58,17 @@ const radiusApi = {
     ipcRenderer.on(SESSION_TRANSCRIPT_STREAM_CHANNEL, handler);
     return () =>
       ipcRenderer.removeListener(SESSION_TRANSCRIPT_STREAM_CHANNEL, handler);
+  },
+  onSessionWorkingStateChanged: (
+    listener: (update: SessionWorkingStateUpdate) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      update: SessionWorkingStateUpdate,
+    ): void => listener(update);
+    ipcRenderer.on(SESSION_WORKING_STATE_CHANNEL, handler);
+    return () =>
+      ipcRenderer.removeListener(SESSION_WORKING_STATE_CHANNEL, handler);
   },
   chooseProjectFolder: () => ipcRenderer.invoke("radius:choose-project-folder"),
   createProject: (input: { selectionIds?: string[]; name: string }) =>
@@ -109,18 +121,6 @@ const radiusApi = {
     ipcRenderer.invoke("radius:set-agent-session-config-option", input),
   setAgentSessionMode: (input: SetAgentSessionModeInput) =>
     ipcRenderer.invoke("radius:set-agent-session-mode", input),
-  browserStatus: () => ipcRenderer.invoke("radius:browser-status"),
-  revealBrowserExtension: () =>
-    ipcRenderer.invoke("radius:reveal-browser-extension"),
-  onBrowserStatus: (listener: (status: BrowserConnectionStatus) => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      status: BrowserConnectionStatus,
-    ): void => listener(status);
-    ipcRenderer.on("radius:browser-status-changed", handler);
-    return () =>
-      ipcRenderer.removeListener("radius:browser-status-changed", handler);
-  },
   startAgentPrompt: (input: StartAgentPromptInput) =>
     ipcRenderer.invoke("radius:start-agent-prompt", input),
   resolveToolApproval: (input: ResolveToolApprovalInput) =>

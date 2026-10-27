@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.packages.json",
-  "compilerOptions": {
-    "lib": ["ES2022", "DOM"],
-    "noEmit": true,
-    "types": ["chrome"]
-  },
-  "include": ["src/**/*.ts"]
-}

@@ -30,8 +30,6 @@ jobs:
             dockerfile: apps/platform-jobs/Dockerfile
           - image: radius-platform-web
             dockerfile: apps/platform-web/Dockerfile
-          - image: radius-postgres
-            dockerfile: hosting/postgres/Containerfile
 
     steps:
       - name: Check out the tagged source
@@ -136,7 +134,7 @@ jobs:
             --arg revision "${GITHUB_SHA}" \
             --arg source "https://github.com/${GITHUB_REPOSITORY}" \
             '{schemaVersion: 1, version: $version, revision: $revision, source: $source, images: {}}')"
-          for image in radius-platform-api radius-platform-jobs radius-platform-web radius-postgres; do
+          for image in radius-platform-api radius-platform-jobs radius-platform-web; do
             reference="${REGISTRY}/${OWNER}/${image}:${VERSION}"
             digest="$(docker buildx imagetools inspect "${reference}" --format '{{json .Manifest}}' | jq -er '.digest')"
             manifest="$(jq \

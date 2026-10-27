@@ -152,7 +152,7 @@ export async function runOciCommand(options: {
       stderr = (stderr + chunk).slice(-65_536);
     });
     child.once("error", reject);
-    child.once("exit", (code) => {
+    child.once("close", (code) => {
       if (code === 0) resolve({ stdout, stderr });
       else
         reject(
@@ -160,6 +160,11 @@ export async function runOciCommand(options: {
             `${options.command} failed with ${code}: ${stderr.trim().slice(-2_000)}`,
           ),
         );
+    });
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      // A command may exit before reading stdin; report its exit status after
+      // both output streams close instead of crashing on the broken pipe.
+      if (error.code !== "EPIPE") reject(error);
     });
     child.stdin.end(options.stdin ?? "");
   });
