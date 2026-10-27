@@ -22,7 +22,7 @@ provider credentials, or Curve infrastructure configuration.
 Start the open development registry and API from the Radius repository root:
 
 ```bash
-npx bun@1.3.14 run platform:infra:up
+bun run --cwd hosting infra:up
 
 PORT=3110 \
 RADIUS_PLATFORM_DEV_TOKEN=dev-token \
@@ -35,7 +35,7 @@ Then start this application in another terminal:
 ```bash
 RADIUS_PLATFORM_API_URL=http://127.0.0.1:3110 \
 RADIUS_PLATFORM_ACCESS_TOKEN=dev-token \
-npx bun@1.3.14 run platform:web:dev
+bun run --cwd apps/platform-web dev:local
 ```
 
 Open `http://127.0.0.1:3200`. The access token is read by the Next.js server

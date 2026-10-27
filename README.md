@@ -1,206 +1,67 @@
 # Radius
 
 Radius is an open-source desktop runtime and delivery platform for specialized
-AI agents. It gives developers a reusable Electron client, local runner,
-permissioned tools, SDK and CLI, immutable packaging and deployment contracts,
-durable sessions, and a self-hostable management plane without taking
-ownership of their model or reasoning loop.
+AI agents. It includes an Electron workspace, local execution, permissioned
+tools, durable sessions, and a self-hostable management plane.
 
-> **Status:** pre-alpha architecture and desktop shell. Radius is not ready to run untrusted agent packages.
+Agent authors use the official [Agent Client Protocol SDKs](https://agentclientprotocol.com).
+Radius owns installation, execution, packaging, and deployment; agents own their
+model and reasoning loop.
 
-## What belongs here
+## Local development
 
-- Electron desktop host and React workspace.
-- Local agent runtime and lifecycle management.
-- Versioned package, event, capability, and artifact protocols.
-- Permission and approval broker.
-- Host-managed shell and MCP integrations.
-- Vendor SDKs and reference packages.
-- Developer CLI for repository initialization, local execution, package upload,
-  deployment, promotion, and rollback.
-- Open customer dashboard, control-plane API, deployment workers, and
-  self-hosting assets.
-- Provider-neutral synchronization against the bundle's Platform origin, which
-  defaults to a local self-host at `http://localhost:3100/`.
-- Durable local schedules with persisted missed-run and dispatch recovery.
-- Public security model and architecture decisions.
+Use the Bun version pinned in `package.json`, Node.js 22.12 or newer, and Docker
+Compose (or your own PostgreSQL, Redis/Valkey, and OCI registry).
+The macOS runtime requires Apple Silicon, macOS 26, and Xcode 26.2.
+Python tooling is only needed for Python agents.
 
-Curve-specific operated infrastructure, marketing, private integrations,
-marketplace economics, customer details, and internal delivery plans are
-outside this repository.
-
-## Development
-
-Requirements:
-
-- Bun 1.3.14 or newer.
-- Node.js 22 or newer.
-- uv 0.8.22 or newer for Python SDK and Python-agent development.
-- Xcode 26.2 or newer when building the bundled macOS runtime host.
-- Apple Silicon and macOS 26 or newer when running local agent packages.
-
-```bash
+```sh
 bun install --frozen-lockfile
 cp .env.example .env.local
-docker compose --env-file .env.local -p radius-local \
-  -f hosting/docker/compose.dev.yml up -d --build postgres jobs-redis registry
-# Separate terminals, from the repository root:
-bun run platform:dev
-bun run platform:jobs:dev
-PORT=3201 bun run platform:web:dev
+cp apps/platform-api/.env.example apps/platform-api/.env.local
+cp apps/platform-web/.env.example apps/platform-web/.env.local
+# Configure an email provider in apps/platform-api/.env.local.
+bun run --cwd hosting infra:up
+# Separate terminals:
+bun run dev:platform
+bun run --cwd apps/platform-jobs dev:local
+bun run --cwd apps/platform-web dev:local
 bun run dev
 ```
 
-Follow the [local development guide](docs/guides/local-development.md) for
-dependencies, existing-database configuration, default organization/auth,
-example agents, verification, and shutdown. Docker supplies dependencies only;
-the application does not install a database or start Docker itself.
+See [local development](docs/guides/local-development.md) for email setup,
+existing databases, authentication, ports, and shutdown.
 
-To run the durable open Platform management plane, start the complete
-single-node development stack:
+## Repository map
 
-```bash
-bun run platform:stack:up
-```
+| Directory | Ownership |
+| --- | --- |
+| `apps/` | Desktop, browser integration, native host, and Platform services |
+| `packages/` | Reusable runtime, storage, contracts, tools, build system, and CLI |
+| `examples/` | Agents authored directly with official ACP SDKs |
+| `hosting/` | Self-host Compose distribution and its verification tooling |
+| `scripts/release/` | Cross-package npm release tooling |
+| `docs/` | Architecture, contributor guides, and self-hosting |
 
-This applies approved, checksummed PostgreSQL migrations under an advisory
-lock, bootstraps a local development authority, persists immutable agent
-deployments and environment history, and dispatches the transactional outbox
-through BullMQ.
-Open `http://127.0.0.1:3200`; the local token is `radius-dev-token` unless
-overridden before startup.
+The private Curve Cloud service is maintained separately and is not required
+to use or contribute to Radius.
 
-For first-run ownership without the development fixture, use the
-[one-time operator bootstrap](docs/self-hosting/README.md#initial-owner-bootstrap).
-Owners can then rotate scoped deployment credentials through `radius tokens
-list|create|revoke` without direct database access.
-`radius login --profile <name>` validates a token and stores it in the native
-operating-system credential manager; `radius logout` removes it. CI continues
-to use `RADIUS_ACCESS_TOKEN` as an explicit override.
+## Development commands
 
-With browser-session authentication configured, the open dashboard provides
-the same token lifecycle in Settings and revision-checked Promote or Roll back
-controls on verified agent deployments. The UI follows organization membership
-roles and does not place a Platform service token in the browser.
+`bun run build`, `test`, `typecheck`, and `lint` delegate to the owning
+JavaScript workspace projects. Run a focused command with
+`bun run --cwd <app-or-package> <command>`.
+`bun run package` prepares the native/browser assets and an unpacked desktop;
+`bun run make` prepares desktop installers.
 
-The API and web application are documented in
-[`apps/platform-api/README.md`](apps/platform-api/README.md) and
-[`apps/platform-web/README.md`](apps/platform-web/README.md).
-
-To verify or stage the externally installable TypeScript SDK/CLI release set
-without publishing it:
-
-```bash
-bun run release:npm:verify
-bun run release:npm:pack
-bun run release:python:verify
-```
-
-See the [npm release boundary](docs/architecture/npm-package-release.md).
-The [Platform image release boundary](docs/architecture/platform-container-release.md)
-defines the coherent signed GHCR image set and released/source Docker Compose
-modes.
-
-To prove the production-oriented single-node self-host path with disposable
-volumes, authenticated TLS routing, a real CLI deployment, worker verification,
-and paired database/registry recovery:
-
-```bash
-bun run platform:self-host:verify
-```
-
-The container release boundary has a separate multi-architecture artifact
-check:
-
-```bash
-bun run release:platform-images:verify
-```
-
-To build and run the complete current single-node container stack:
-
-```bash
-bun run platform:stack:up
-```
-
-This remains a development profile with local fixture credentials, not a
-production deployment. See the [self-hosting guide](docs/self-hosting/README.md)
-for the current boundary.
-
-For authenticated browser development, open Chrome's extensions page, enable
-Developer mode, and load `apps/browser-extension/dist` as an unpacked
-extension. Radius registers its per-user native-messaging host when the desktop
-starts. The Apps & connections settings section reports the live profile
-connection and reveals the built extension directory.
-
-Useful checks:
-
-```bash
-bun run typecheck
-bun run lint
-bun run test
-bun run runtime:test
-bun run runtime:build
-bun run sdk:python:test
-bun run sdk:python:lint
-bun run package
-```
-
-The current desktop shell uses macOS vibrancy when available and keeps Node.js disabled in the renderer. Privileged APIs must be exposed through narrow preload contracts.
-
-Desktop development and packaged smokes use the normal Radius Application
-Support profile by default. See the
-[desktop testing profile guide](docs/guides/desktop-testing.md) before using
-`RADIUS_USER_DATA_PATH` or cloning encrypted local state.
-
-Maintainers preparing the built-in FX agent should follow the
-[FX bundling runbook](docs/guides/bundling-fx.md) for the pinned binaries,
-deterministic OCI layout, packaged resources, and verification gates.
-
-## Desktop updates
-
-Packaged Radius clients check the public `curve-ai/radius` GitHub Releases feed
-at startup and every four hours. When a newer signed release is available, the
-sidebar account row shows a download action. After download, the same action
-restarts Radius and installs the update.
-
-Release builds must be signed; macOS will not apply unsigned updates. Build and
-publish the platform artifacts plus update metadata with electron-builder, for
-example from a release runner configured with `GH_TOKEN` and the platform code
-signing credentials:
-
-```bash
-bun run --cwd apps/desktop make -- --publish always
-```
-
-Development and unpacked directory builds intentionally do not check for
-updates.
-
-## Architecture
-
-Start with [the architecture index](docs/architecture/README.md). The accepted
-decisions cover local-first execution, OCI agent packages, the vendor-owned
-agent loop, local persistence, durable local scheduling, optional
-provider-based sync, capability brokering, and the security boundary. The
-proposed [SDK and CLI contract](docs/architecture/agent-sdk-and-cli.md) covers
-the implemented `init` → `dev` → `deploy` developer loop. TypeScript and Python
-now have first-party SDK paths, while ACP and OCI keep other-language agents
-compatible with the same package and deployment contracts. If you are
-cloning Radius and want to connect your own service, read the
-[sync-provider implementation guide](docs/guides/sync-provider.md).
-
-## Contributing
-
-Radius is early. Open an issue before starting a substantial feature so protocol and security changes can be discussed first. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+- [Contributing and task ownership](CONTRIBUTING.md)
+- [Agent authoring and CLI](docs/architecture/agent-sdk-and-cli.md)
+- [Architecture](docs/architecture/README.md)
+- [Self-hosting](docs/self-hosting/README.md)
+- [Desktop testing](docs/guides/desktop-testing.md)
+- [Company sign-in](docs/guides/vendor-authentication.md)
+- [npm release tooling](docs/architecture/npm-package-release.md)
 
 ## License
 
-Radius is available under the [MIT License](LICENSE). Third-party
-components retain their own licenses and
-[notices](THIRD_PARTY_NOTICES.md).
-
-### Company sign-in
-
-Use `bun run auth:setup` or Platform **Settings → Company sign-in → Set up authentication**
-to connect a hosted OIDC provider and generate a company desktop configuration.
-See [vendor authentication](docs/guides/vendor-authentication.md) for client registration,
-SDK integration, automatic sync, and verification.
+Radius source is available under the [MIT License](LICENSE).

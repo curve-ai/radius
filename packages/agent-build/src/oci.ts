@@ -68,7 +68,7 @@ export async function buildTypeScriptOciLayout(
       sourcemap: false,
       legalComments: "external",
       logLevel: "silent",
-      external: ["@curve-ai/sdk/development"],
+      external: ["@curve-ai/radius-runtime/development"],
     });
 
     const bundle = await readFile(bundlePath);

@@ -77,6 +77,17 @@ jobs:
       - name: Test
         run: bun run test
 
+      - name: Verify ACP examples
+        run: bun run --cwd examples/typescript-agent typecheck && bun run --cwd examples/typescript-agent test
+
+      - name: Test Python agent
+        working-directory: examples/python-agent
+        run: uv run --locked pytest
+
+      - name: Lint Python agent
+        working-directory: examples/python-agent
+        run: uv run --locked ruff check .
+
       - name: Build
         run: bun run --cwd apps/desktop build:bundle
 

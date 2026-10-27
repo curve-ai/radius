@@ -63,7 +63,7 @@ server-only `RADIUS_SYNC_CURSOR_SECRET`. Secrets do not belong in the native
 client file.
 
 `bun run dev` checks native-auth readiness before starting Electron. Start the
-dependencies and `bun run platform:dev` in separate terminals first. Platform
+dependencies and `bun run dev:platform` in separate terminals first. Platform
 discovers `.radius/native-auth.json` when no explicit native configuration was
 supplied. A different service occupying port 3100 is reported and is never
 terminated automatically.
@@ -71,8 +71,8 @@ terminated automatically.
 To start Platform separately or diagnose a packaged application's server:
 
 ```sh
-bun run platform:dev
-bun run auth:check http://localhost:3100/
+bun run dev:platform
+bun run --cwd apps/desktop auth:check http://localhost:3100/
 ```
 
 With `RADIUS_AUTH_MODE=embedded`, Platform mounts Better Auth at `/api/auth`,
@@ -110,7 +110,7 @@ Organization owners and admins can open **Settings → Company sign-in → Set u
 For command-line setup, run from the Radius repository:
 
 ```sh
-bun run auth:setup
+bun run --cwd apps/desktop auth:setup
 ```
 
 The command asks for the application name and identifier, Platform URL, organization, agent ID, issuer, agent API audience, public client ID and scopes. It checks issuer discovery before writing files and refuses to overwrite existing files. It never asks for a client secret. The default Platform address for local development is `http://localhost:3100/`.
@@ -203,41 +203,40 @@ Company data lives in a separate `Radius-<distribution-id>` Application Support 
 The SDK advertises `radius-oauth` when you provide `authenticate`. Verify the received access token at your API, then use it for requests. Do not accept the presence of a token or its unverified claims as authorization.
 
 ```ts
-import { defineAgent } from "@curve-ai/sdk";
+import { PROTOCOL_VERSION, agent, methods } from "@agentclientprotocol/sdk";
+import { createRadiusAuthentication } from "@curve-ai/radius-runtime/authentication";
 
-const api = "https://api.yourcompany.com";
-
-const agent = defineAgent({
-  name: "your-agent",
-  async authenticate({ accessToken }, signal) {
-    // This API validates issuer/signature, audience, expiry, user, tenant,
-    // membership and agent:run permission. It returns no credential values.
-    const response = await fetch(`${api}/agent/session`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal,
+function createAgent() {
+  const auth = createRadiusAuthentication(async ({ accessToken }, signal) => {
+    // Verify issuer, audience, expiry, and permissions at your resource server.
+    await verifyVendorToken(accessToken, signal);
+  });
+  return agent({ name: "company-agent" })
+    .onConnect((connection) => { void connection.closed.then(() => auth.clear()); })
+    .onRequest(methods.agent.initialize, () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      authMethods: auth.authMethods,
+    }))
+    .onRequest(methods.agent.authenticate, ({ params, signal }) =>
+      auth.authenticate(params, signal))
+    .onRequest(methods.agent.session.new, () => {
+      auth.requireCredential();
+      return createVendorSession();
+    })
+    .onRequest(methods.agent.session.prompt, ({ params, client, signal }) => {
+      const credential = auth.requireCredential();
+      return runVendorPrompt(params, client, credential.accessToken, signal);
     });
-    if (!response.ok) throw new Error("Access denied");
-  },
-  async run({ authentication, text, signal }) {
-    if (!authentication) throw new Error("Sign-in required");
-    const response = await fetch(`${api}/agent/query`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authentication.accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query: text }),
-      signal,
-    });
-    if (!response.ok) throw new Error("Query failed");
-    return response.text();
-  },
-});
-
-agent.serveStdio();
+}
 ```
 
-The SDK isolates credentials and sessions per connection, rejects session creation before authentication, and checks credential expiration before prompts. Its development server creates a fresh agent instance for each connection. For custom transport servers, use `createConnectionApp()` per accepted connection; do not share an authenticated app instance across users.
+The vendor implements `verifyVendorToken`, `createVendorSession`, and
+`runVendorPrompt`; the example shows where they fit into official ACP handlers.
+Create the authentication adapter inside the per-connection agent factory so
+credentials cannot cross connections. Protect every privileged handler, not
+only session creation. The adapter checks expiration when credentials are
+read, clears failed reauthentication, and delegates token verification to the
+vendor. Use ACP's own session and cancellation APIs for the agent lifecycle.
 
 For other languages or custom ACP agents, advertise `authMethods: [{ id: "radius-oauth", name: "Organization sign-in" }]` during initialization and handle:
 

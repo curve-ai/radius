@@ -14,7 +14,7 @@ separate public manifests from reviewed built output.
 
 ## First release graph
 
-The first coherent npm release unit contains seven packages at one version:
+The first coherent npm release unit contains six packages at one version:
 
 ```text
 @curve-ai/agent-contracts
@@ -23,7 +23,6 @@ The first coherent npm release unit contains seven packages at one version:
     └── @curve-ai/platform-client
 
 @curve-ai/radius-runtime
-@curve-ai/sdk
 
 @curve-ai/cli
 ├── agent-contracts
@@ -32,20 +31,20 @@ The first coherent npm release unit contains seven packages at one version:
 └── radius-runtime
 ```
 
-Publishing only the CLI or SDK while their exact-version public dependencies
+Publishing only the CLI while their exact-version public dependencies
 are unavailable is invalid. The graph is prepared and verified as one release
 set.
 
 ## Artifact rules
 
-`scripts/npm-release.ts`:
+`scripts/release/npm.ts`:
 
 1. requires built `dist/index.js` and `dist/index.d.ts` for every package and
-   retains the SDK's explicit `dist/development.*` WebSocket entrypoint;
+   retains the runtime's development-server and authentication subpath exports;
 2. excludes test output and all source/workspace-only files;
 3. stages a public manifest with `private` removed, Node 22 engines, dist-only
    exports, public access metadata, repository links, and exact dependencies;
-4. includes the Radius MIT license, third-party notices, and a package
+4. includes the Radius MIT license and a package
    description;
 5. creates npm tarballs and a SHA-256/size release manifest; and
 6. installs and executes the complete graph in a clean external project.
@@ -67,7 +66,8 @@ publish. To test without weakening the real artifacts, verification:
   temporary tarballs;
 - resolves all third-party dependencies from `https://registry.npmjs.org/`
   with an isolated npm configuration; and
-- imports `@curve-ai/sdk`, `@curve-ai/sdk/development`,
+- imports `@curve-ai/radius-runtime/development`,
+  `@curve-ai/radius-runtime/authentication`,
   `@curve-ai/agent-contracts`, and
   `@curve-ai/platform-client`, then runs packaged CLI help, init, and validate.
 
@@ -91,16 +91,5 @@ The pack command refuses a non-empty output directory. Publishing, changing
 package names/scopes, creating npm credentials, tags, provenance attestations,
 or GitHub releases remains a separate explicit release action.
 
-## Python SDK companion
-
-The first-party `radius-agent-sdk` wheel has a parallel external-release check:
-
-```bash
-bun run release:python:verify
-```
-
-It builds the wheel twice with the deterministic ZIP epoch and requires equal
-SHA-256 digests, rejects tests/cache files, verifies package/dependency/Python
-metadata and the embedded MIT license, installs into a fresh Python 3.12 virtual
-environment using the public PyPI index, imports `define_agent`, and constructs
-an agent. PyPI publication is not performed.
+Python agents depend directly on the official ACP Python SDK and have no separate
+Radius wheel or Python release pipeline.

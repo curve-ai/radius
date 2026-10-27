@@ -13,7 +13,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, parse, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 import {
   AgentConfigSchema,
@@ -54,7 +54,9 @@ export async function buildPythonOciLayout(
     throw new Error("Python OCI build requires a Python runtime config");
   }
   if (config.runtime.python !== "3.12") {
-    throw new Error("Python OCI builds currently support the pinned Python 3.12 line");
+    throw new Error(
+      "Python OCI builds currently support the pinned Python 3.12 line",
+    );
   }
 
   const lockfilePath = join(options.root, config.runtime.lockfile);
@@ -63,9 +65,9 @@ export async function buildPythonOciLayout(
   await requireRegularFile(pyprojectPath, "pyproject.toml");
   const modulePackage = config.runtime.module.split(".")[0];
   const moduleRoot = await findModuleRoot(options.root, modulePackage);
-  const sdkRoot = await findPythonSdk(options.root);
 
-  const outputRoot = options.outputRoot ?? join(options.root, ".radius", "builds");
+  const outputRoot =
+    options.outputRoot ?? join(options.root, ".radius", "builds");
   await mkdir(outputRoot, { recursive: true });
   const temporaryRoot = await mkdtemp(join(outputRoot, ".python-sandbox-"));
   const contextPath = join(temporaryRoot, "context");
@@ -86,8 +88,6 @@ export async function buildPythonOciLayout(
         options.root,
         "--no-dev",
         "--no-emit-project",
-        "--no-emit-package",
-        "radius-agent-sdk",
         "--format",
         "requirements.txt",
         "--no-annotate",
@@ -98,21 +98,12 @@ export async function buildPythonOciLayout(
     if (!requirements.trim()) {
       throw new Error("Python lockfile exported no runtime dependencies");
     }
-    await writeFile(join(contextPath, "requirements.txt"), requirements, "utf8");
-
-    const wheelsPath = join(contextPath, "wheels");
-    await mkdir(wheelsPath, { recursive: true });
-    await runCommand(
-      uv,
-      ["build", "--wheel", "--project", sdkRoot, "--out-dir", wheelsPath],
-      sdkRoot,
-      { ...process.env, SOURCE_DATE_EPOCH: "315532800" },
+    await writeFile(
+      join(contextPath, "requirements.txt"),
+      requirements,
+      "utf8",
     );
-    const wheels = (await readdir(wheelsPath)).filter((name) => name.endsWith(".whl"));
-    if (wheels.length !== 1) {
-      throw new Error("Radius Python SDK build must produce exactly one wheel");
-    }
-    const sdkWheel = await readFile(join(wheelsPath, wheels[0]));
+
     const pyproject = await readFile(pyprojectPath);
     const lockfile = await readFile(lockfilePath);
     const manifest = createAgentManifest(config);
@@ -120,7 +111,6 @@ export async function buildPythonOciLayout(
     const bundleSha256 = createHash("sha256")
       .update(sourceHash.digest())
       .update(requirements)
-      .update(sdkWheel)
       .digest("hex");
     const buildDigest = createHash("sha256")
       .update(manifestJson)
@@ -162,14 +152,22 @@ export async function buildPythonOciLayout(
 
     const layoutPath = join(temporaryRoot, "oci-layout");
     await mkdir(layoutPath, { recursive: true });
-    await runCommand("tar", ["-xf", imageTarPath, "-C", layoutPath], options.root);
+    await runCommand(
+      "tar",
+      ["-xf", imageTarPath, "-C", layoutPath],
+      options.root,
+    );
     await rm(imageTarPath, { force: true });
-    const index = JSON.parse(await readFile(join(layoutPath, "index.json"), "utf8")) as {
+    const index = JSON.parse(
+      await readFile(join(layoutPath, "index.json"), "utf8"),
+    ) as {
       manifests?: Array<{ digest?: string }>;
     };
     const imageDigest = index.manifests?.[0]?.digest;
     if (!imageDigest || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)) {
-      throw new Error("Python OCI build did not produce a digest-pinned manifest");
+      throw new Error(
+        "Python OCI build did not produce a digest-pinned manifest",
+      );
     }
 
     const finalRoot = join(outputRoot, buildDigest);
@@ -200,13 +198,11 @@ FROM ${PYTHON_IMAGE}
 COPY --from=uv /uv /uvx /bin/
 RUN groupadd --gid 10000 radius \\
   && useradd --uid 10000 --gid 10000 --home-dir /opt/data --no-create-home radius \\
-  && mkdir -p /opt/agent/src /opt/agent/wheels /opt/data \\
+  && mkdir -p /opt/agent/src /opt/data \\
   && chown -R 10000:10000 /opt/agent /opt/data
 
 COPY requirements.txt /opt/agent/requirements.txt
-COPY wheels /opt/agent/wheels
 RUN uv pip install --system --require-hashes -r /opt/agent/requirements.txt \\
-  && uv pip install --system --no-deps /opt/agent/wheels/*.whl \\
   && rm -rf /root/.cache
 
 COPY --chown=10000:10000 src /opt/agent/src
@@ -221,9 +217,15 @@ ENTRYPOINT ["python", "-m", ${JSON.stringify(module)}]
 `;
 }
 
-async function findModuleRoot(root: string, packageName: string): Promise<string> {
+async function findModuleRoot(
+  root: string,
+  packageName: string,
+): Promise<string> {
   const resolvedRoot = await realpath(root);
-  for (const candidate of [join(root, packageName), join(root, "src", packageName)]) {
+  for (const candidate of [
+    join(root, packageName),
+    join(root, "src", packageName),
+  ]) {
     try {
       const info = await lstat(candidate);
       if (info.isSymbolicLink() || !info.isDirectory()) continue;
@@ -250,11 +252,17 @@ async function copyModuleTree(
   const entries = await readdir(resolvedSource, { withFileTypes: true });
   entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of entries) {
-    if (entry.name === "__pycache__" || entry.name === ".DS_Store" || entry.name.endsWith(".pyc")) {
+    if (
+      entry.name === "__pycache__" ||
+      entry.name === ".DS_Store" ||
+      entry.name.endsWith(".pyc")
+    ) {
       continue;
     }
     if (entry.isSymbolicLink()) {
-      throw new Error(`Python package source must not contain symlinks: ${relativePath}/${entry.name}`);
+      throw new Error(
+        `Python package source must not contain symlinks: ${relativePath}/${entry.name}`,
+      );
     }
     const from = join(resolvedSource, entry.name);
     const to = join(destination, entry.name);
@@ -267,24 +275,6 @@ async function copyModuleTree(
       await copyFile(from, to);
     }
   }
-}
-
-async function findPythonSdk(start: string): Promise<string> {
-  let current = start;
-  const filesystemRoot = parse(current).root;
-  for (;;) {
-    const candidate = join(current, "sdks", "python", "pyproject.toml");
-    try {
-      await requireRegularFile(candidate, "Radius Python SDK");
-      return dirname(candidate);
-    } catch {
-      if (current === filesystemRoot) break;
-      current = dirname(current);
-    }
-  }
-  throw new Error(
-    "Could not locate the Radius Python SDK source. Published SDK wheel packaging is not available yet.",
-  );
 }
 
 async function requireRegularFile(path: string, label: string): Promise<void> {
@@ -329,7 +319,8 @@ async function captureCommand(
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+      else
+        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
     });
   });
 }
@@ -355,7 +346,8 @@ async function runCommand(
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+      else
+        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
     });
   });
 }

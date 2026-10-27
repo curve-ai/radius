@@ -102,7 +102,7 @@ browser profile and controlled-tab count through the sandboxed preload API.
 
 ## Setup and packaging
 
-`bun run browser:build` produces:
+`bun run --cwd apps/desktop prepare:browser` produces:
 
 - `apps/browser-extension/dist`, loadable as an unpacked extension for local
   development;

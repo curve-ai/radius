@@ -12,7 +12,8 @@
     "build": "next build",
     "start": "next start --port ${PORT:-3200}",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev:local": "bun --env-file=../../.env.local --env-file=.env.local run dev"
   },
   "dependencies": {
     "@curve-ai/platform-client": "0.0.1",

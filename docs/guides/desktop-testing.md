@@ -49,7 +49,7 @@ isolated. They do not need a copy of the desktop profile.
 Quit every Radius dev and packaged process first, then run:
 
 ```bash
-bash scripts/clone-desktop-test-profile.sh <short-name>
+bash apps/desktop/scripts/clone-test-profile.sh <short-name>
 ```
 
 The script refuses to copy while the main database is open. It creates:

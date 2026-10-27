@@ -8,6 +8,14 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./development": {
+      "types": "./src/dev-server.ts",
+      "default": "./src/dev-server.ts"
+    },
+    "./authentication": {
+      "types": "./src/authentication.ts",
+      "default": "./src/authentication.ts"
     }
   },
   "scripts": {

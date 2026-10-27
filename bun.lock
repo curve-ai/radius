@@ -192,13 +192,19 @@
       "name": "@curve-ai/example-typescript-agent",
       "version": "0.0.1",
       "dependencies": {
-        "@curve-ai/sdk": "0.0.1",
+        "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
       },
       "devDependencies": {
         "@curve-ai/build": "0.0.1",
         "@curve-ai/cli": "0.0.1",
+        "@curve-ai/radius-runtime": "0.0.1",
+        "@types/node": "22.19.1",
         "tsx": "4.23.12",
+        "typescript": "^5.9.3",
       },
+    },
+    "hosting": {
+      "name": "@curve-ai/radius-hosting",
     },
     "packages/agent-build": {
       "name": "@curve-ai/build",
@@ -387,21 +393,6 @@
         "typescript": "5.9.3",
       },
     },
-    "packages/sdk": {
-      "name": "@curve-ai/sdk",
-      "version": "0.0.1",
-      "dependencies": {
-        "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
-        "ws": "8.21.3",
-      },
-      "devDependencies": {
-        "@curve-ai/radius-runtime": "0.0.1",
-        "@types/node": "22.19.1",
-        "@types/ws": "8.18.1",
-        "tsx": "4.23.12",
-        "typescript": "5.9.3",
-      },
-    },
     "packages/storage": {
       "name": "@curve-ai/radius-storage",
       "version": "0.0.1",
@@ -577,6 +568,8 @@
 
     "@curve-ai/radius-desktop": ["@curve-ai/radius-desktop@workspace:apps/desktop"],
 
+    "@curve-ai/radius-hosting": ["@curve-ai/radius-hosting@workspace:hosting"],
+
     "@curve-ai/radius-mcp-connector": ["@curve-ai/radius-mcp-connector@workspace:packages/mcp-connector"],
 
     "@curve-ai/radius-platform-api": ["@curve-ai/radius-platform-api@workspace:apps/platform-api"],
@@ -596,8 +589,6 @@
     "@curve-ai/radius-sync-protocol": ["@curve-ai/radius-sync-protocol@workspace:packages/sync-protocol"],
 
     "@curve-ai/radius-tool-broker": ["@curve-ai/radius-tool-broker@workspace:packages/tool-broker"],
-
-    "@curve-ai/sdk": ["@curve-ai/sdk@workspace:packages/sdk"],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

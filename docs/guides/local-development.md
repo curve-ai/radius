@@ -15,7 +15,7 @@ workspace. The private Cloud repository is not needed.
   and an OCI Distribution registry instances you control.
 - For the macOS desktop, Apple Silicon and macOS 26 or newer. Xcode 26.2 or
   newer is needed when compiling the microVM runtime for packaged agents.
-- `uv` is needed only for Python agents and Python SDK checks.
+- `uv` is needed only for Python agents and Python example checks.
 - Internet access for dependencies and Resend email delivery. For offline
   email testing, use the optional Mailpit profile instead of Resend.
 
@@ -26,11 +26,14 @@ git clone https://github.com/curve-ai/radius.git
 cd radius
 bun install --frozen-lockfile
 cp .env.example .env.local
+cp apps/platform-api/.env.example apps/platform-api/.env.local
+cp apps/platform-web/.env.example apps/platform-web/.env.local
 ```
 
 The example contains development-only values. Keep `.env.local` untracked and
 never use its passwords or tokens for a public installation. Bun loads this
-root file for the commands below; it is also passed explicitly to Compose.
+shared file for repository commands; component `dev:local` commands also load
+the app-specific `.env.local`. Compose receives the shared file explicitly.
 
 The defaults are:
 
@@ -44,7 +47,7 @@ The defaults are:
 | Authentication issuer and sign-in page | `http://localhost:3100/api/auth`, `/sign-in` |
 
 The Platform API includes Better Auth; no private Cloud service is needed.
-Set `RESEND_API_KEY` and `AUTH_EMAIL_FROM` in `.env.local` to your Resend key
+Set `RESEND_API_KEY` and `AUTH_EMAIL_FROM` in `apps/platform-api/.env.local` to your Resend key
 and verified sender. Never commit the populated file. The service fails at
 startup if Resend delivery is selected without these values. Local development
 creates one private persistent signing secret at `.radius/auth-secret`; other
@@ -62,7 +65,7 @@ docker compose --env-file .env.local -p radius-local \
 
 Then set `RADIUS_AUTH_EMAIL_PROVIDER=smtp`,
 `RADIUS_AUTH_SMTP_URL=smtp://127.0.0.1:1025`, and
-`AUTH_EMAIL_FROM=Radius <auth@radius.localhost>` in `.env.local`. Read codes at
+`AUTH_EMAIL_FROM=Radius <auth@radius.localhost>` in `apps/platform-api/.env.local`. Read codes at
 `http://localhost:8025`; they are not sent to an external mailbox. Keep this
 inbox loopback-only and never use it to verify real email ownership in a shared
 or production environment. Resend does not require Mailpit.
@@ -76,7 +79,7 @@ the conflicting service before starting Platform.
 
 ```sh
 docker compose --env-file .env.local -p radius-local \
-  -f hosting/docker/compose.dev.yml up -d --build postgres jobs-redis registry
+  -f hosting/docker/compose.dev.yml up -d postgres jobs-redis registry
 docker compose --env-file .env.local -p radius-local \
   -f hosting/docker/compose.dev.yml ps
 ```
@@ -101,17 +104,17 @@ Open a terminal for each command, all at the repository root:
 
 ```sh
 # Platform API. Applies checked-in Platform migrations and seeds local fixtures.
-bun run platform:dev
+bun run dev:platform
 ```
 
 ```sh
 # Deployment/outbox worker. Required when exercising builds and deployments.
-bun run platform:jobs:dev
+bun run --cwd apps/platform-jobs dev:local
 ```
 
 ```sh
 # Dashboard. Uses the local development token from .env.local.
-PORT=3201 bun run platform:web:dev
+PORT=3201 bun run --cwd apps/platform-web dev:local
 ```
 
 ```sh
@@ -169,7 +172,7 @@ and [FX bundling guide](bundling-fx.md).
 
 ```sh
 curl --fail http://localhost:3100/health
-bun run auth:check http://localhost:3100/
+bun run --cwd apps/desktop auth:check http://localhost:3100/
 bun run --cwd apps/platform-api typecheck
 bun run --cwd apps/platform-api test
 bun run --cwd apps/desktop typecheck

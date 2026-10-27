@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.auth-ui.json",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "verify:sync": "tsx scripts/verify-sync.ts",
-    "verify:auth": "bun scripts/verify-embedded-auth.ts"
+    "verify:auth": "bun scripts/verify-embedded-auth.ts",
+    "dev:local": "bun --env-file=../../.env.local --env-file=.env.local scripts/dev.ts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.2",
