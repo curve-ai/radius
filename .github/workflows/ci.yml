@@ -9,8 +9,34 @@ permissions:
   contents: read
 
 jobs:
+  sync-database-changes:
+    name: Detect sync database changes
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.changes.outputs.required }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Test database change detection
+        run: bun test scripts/ci/sync-database-changes.test.ts
+      - name: Detect affected inputs
+        id: changes
+        env:
+          CI_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_DIFF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_DIFF_EVENT: ${{ github.event_name }}
+        run: bun scripts/ci/sync-database-changes.ts
+
   sync-database:
     name: PostgreSQL sync isolation and upgrades
+    needs: sync-database-changes
+    # Keep this check's name stable. A skipped job reports success; detector
+    # failures or missing outputs instead run the real database verification.
+    if: ${{ !cancelled() && (needs.sync-database-changes.result != 'success' || needs.sync-database-changes.outputs.required != 'false') }}
     runs-on: ubuntu-latest
     services:
       postgres:
