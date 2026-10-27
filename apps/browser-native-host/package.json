@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "mkdir -p dist && bun build src/index.ts --outfile dist/index.cjs --target=node --format=cjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun check -p tsconfig.json",
     "test": "tsx --test src/**/*.test.ts"
   },
   "devDependencies": {

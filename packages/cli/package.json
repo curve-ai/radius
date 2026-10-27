@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsc --emitDeclarationOnly -p tsconfig.json && bun build src/index.ts --target=node --format=esm --external @napi-rs/keyring --outfile=dist/index.js && bun build src/cli.ts --target=node --format=esm --external @napi-rs/keyring --outfile=dist/cli.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun check -p tsconfig.json",
     "test": "tsx --test src/**/*.test.ts",
     "dev": "tsx src/cli.ts"
   },

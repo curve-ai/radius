@@ -1,3 +1,4 @@
+import { thisDevice } from "@renderer/lib/device-name";
 import {
   Bot,
   CircleAlert,
@@ -31,9 +32,9 @@ function authenticationLabel(agent: DesktopAgentSummary): string {
     case "error":
       return "Codex authentication needs attention.";
     case "not_required":
-      return "Ready on this Mac.";
+      return `Ready on ${thisDevice()}.`;
     case "needs_authentication":
-      return "Sign in to a Codex subscription to use fx on this Mac.";
+      return `Sign in to a Codex subscription to use fx on ${thisDevice()}.`;
   }
 }
 
@@ -136,7 +137,7 @@ export function AgentsPage(): ReactNode {
           <h2 className="type-md-lg text-foreground">Agents</h2>
           <p className="mt-2 max-w-2xl text-base text-muted-foreground">
             Agents delivered to this Radius installation appear here. Sign in
-            only when an agent requires an account on this Mac.
+            only when an agent requires an account on {thisDevice()}.
           </p>
         </div>
         <Button

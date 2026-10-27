@@ -10,6 +10,7 @@ import {
   buildPythonOciLayout,
   buildTypeScriptOciLayout,
   canonicalJson,
+  hostImagePlatform,
   type PythonOciBuildResult,
   type TypeScriptOciBuildResult,
 } from "@curve-ai/build";
@@ -88,7 +89,7 @@ export async function buildAgent(
       indexPath: projectRelativePath(options.root, build.indexPath),
     },
     verifiedAt: new Date().toISOString(),
-    verification: { kind: "microvm-acp", platform: "linux/arm64" },
+    verification: { kind: "microvm-acp", platform: hostImagePlatform() },
   });
   const receiptPath = join(
     options.root,

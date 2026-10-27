@@ -70,6 +70,7 @@ export async function resolveRuntimeAssets(input: {
   readonly projectRoot: string;
   readonly env: NodeJS.ProcessEnv;
   readonly platform: string;
+  readonly arch?: string;
   readonly onProgress?: (message: string) => void;
 }): Promise<RuntimeAssets> {
   const overriddenHost = input.env.RADIUS_RUNTIME_HOST_PATH?.trim();
@@ -81,6 +82,8 @@ export async function resolveRuntimeAssets(input: {
       source: "RADIUS_RUNTIME_HOST_PATH / RADIUS_KERNEL_PATH",
     };
   }
+
+  if (input.platform === "win32") return resolveWindowsRuntimeAssets(input);
 
   const tried: string[] = [];
 
@@ -144,6 +147,68 @@ export async function resolveRuntimeAssets(input: {
       "",
       "Override with RADIUS_APP_PATH, or RADIUS_RUNTIME_HOST_PATH and RADIUS_KERNEL_PATH together.",
     ].join("\n"),
+  );
+}
+
+async function resolveWindowsRuntimeAssets(input: {
+  readonly projectRoot: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly arch?: string;
+}): Promise<RuntimeAssets> {
+  if ((input.arch ?? process.arch) !== "x64") {
+    throw new RuntimeUnavailableError(
+      "The Windows runtime requires an x64 computer.",
+    );
+  }
+  const env = input.env;
+  const bundles = [
+    ...(env.RADIUS_APP_PATH?.trim() ? [env.RADIUS_APP_PATH.trim()] : []),
+    ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, "Programs", "Radius")] : []),
+    ...(env.ProgramFiles ? [join(env.ProgramFiles, "Radius")] : []),
+    ...repoCandidates(input.projectRoot).map((root) =>
+      join(root, "apps", "desktop", "dist", "win-unpacked"),
+    ),
+  ];
+  const candidates = [
+    ...bundles.map((bundle) => ({
+      host: join(
+        bundle,
+        "resources",
+        "runtime",
+        "windows-x64",
+        "radius-runtime-host.exe",
+      ),
+      kernel: join(bundle, "resources", "runtime", "vmlinux-x64"),
+      source: bundle,
+    })),
+    ...repoCandidates(input.projectRoot).map((root) => {
+      const base = join(root, "apps", "runtime-host-windows", ".build");
+      return {
+        host: join(base, "release", "radius-runtime-host.exe"),
+        kernel: join(base, "runtime-assets", "vmlinux-x64"),
+        source: `${base} (repo checkout)`,
+      };
+    }),
+  ];
+  for (const candidate of candidates) {
+    const host = env.RADIUS_RUNTIME_HOST_PATH?.trim() ?? candidate.host;
+    const kernel = env.RADIUS_KERNEL_PATH?.trim() ?? candidate.kernel;
+    if (await bothExist(host, kernel)) {
+      try {
+        await access(join(host, "..", "openvmm.exe"));
+        return {
+          runtimeHostPath: host,
+          kernelPath: kernel,
+          source: candidate.source,
+        };
+      } catch {
+        /* Try the next complete runtime. */
+      }
+    }
+  }
+  throw new RuntimeUnavailableError(
+    "Could not find the Windows Radius runtime and its x64 kernel.",
+    "Install Radius, build the Windows runtime in a checkout, or set RADIUS_RUNTIME_HOST_PATH and RADIUS_KERNEL_PATH. Use --skip-verify to produce an image without booting it.",
   );
 }
 

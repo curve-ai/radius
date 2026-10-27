@@ -3,6 +3,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join, parse as parsePath } from "node:path";
 
 import type { AgentConfig } from "@curve-ai/agent-contracts";
+import { hostImagePlatform, type HostImagePlatform } from "@curve-ai/build";
 import {
   MicrovmAcpRuntime,
   parseAgentReleaseDescriptor,
@@ -65,9 +66,14 @@ export async function verifyBuild(
   options: VerifyOptions,
 ): Promise<VerifyResult> {
   const { context } = options;
-  if (context.process.platform !== "darwin" || context.process.arch !== "arm64") {
+  const windowsX64 =
+    context.process.platform === "win32" && context.process.arch === "x64";
+  if (
+    !windowsX64 &&
+    (context.process.platform !== "darwin" || context.process.arch !== "arm64")
+  ) {
     throw new UsageError(
-      "Verifying a build boots a microVM, which currently requires Apple Silicon macOS. Producing the layout does not — rerun with --skip-verify.",
+      "Verifying a build boots a microVM, which requires Apple Silicon macOS or Windows x64 with WHP. Producing the layout does not — rerun with --skip-verify.",
     );
   }
 
@@ -75,6 +81,7 @@ export async function verifyBuild(
     projectRoot: options.root,
     env: context.env,
     platform: context.process.platform,
+    arch: context.process.arch,
     onProgress: (message) => context.out(`  ${message}`),
   });
   const runtimeHostPath = options.runtimeHostPath ?? assets.runtimeHostPath;
@@ -87,6 +94,18 @@ export async function verifyBuild(
   context.out(`  runtime      ${assets.source}`);
   await mkdir(runtimeRoot, { recursive: true });
 
+  const platform = hostImagePlatform(
+    context.process.platform,
+    context.process.arch,
+  );
+  const shipped = await readShippedTemplate(options.build.layoutPath, platform);
+  if (
+    (shipped.image as { platform?: string } | undefined)?.platform !== platform
+  ) {
+    throw new OperationalError(
+      `The built release does not target ${platform}.`,
+    );
+  }
   const loadedDigest = await loadImage({
     runtimeHostPath,
     layoutPath: options.build.layoutPath,
@@ -98,7 +117,6 @@ export async function verifyBuild(
   // The descriptor the image carries is the one the desktop will import, so
   // verification runs against that rather than against a second, hand-built
   // one that could disagree with it.
-  const shipped = await readShippedTemplate(options.build.layoutPath);
   const release = parseAgentReleaseDescriptor({
     ...shipped,
     // Identity is scoped to this verification run; the shipped agent id
@@ -143,14 +161,34 @@ export async function verifyBuild(
  * Parsing the layout rather than recomputing the descriptor is the whole
  * point: if the two ever disagree, the one that ships is the one that matters.
  */
-async function readShippedTemplate(
+export async function readShippedTemplate(
   layoutPath: string,
+  platform: HostImagePlatform,
 ): Promise<Record<string, unknown>> {
   const index = JSON.parse(
     await readFile(join(layoutPath, "index.json"), "utf8"),
-  ) as { manifests: Array<{ digest: string }> };
+  ) as {
+    manifests: Array<{
+      digest: string;
+      platform?: { os: string; architecture: string };
+    }>;
+  };
+  const matching = index.manifests.filter(
+    (entry) =>
+      `${entry.platform?.os}/${entry.platform?.architecture}` === platform,
+  );
+  const descriptor =
+    matching.length === 1
+      ? matching[0]
+      : index.manifests.length === 1 && !index.manifests[0]!.platform
+        ? index.manifests[0]
+        : undefined;
+  if (!descriptor)
+    throw new OperationalError(
+      `The built OCI layout does not uniquely identify ${platform}.`,
+    );
   const manifest = JSON.parse(
-    await readBlob(layoutPath, index.manifests[0]!.digest),
+    await readBlob(layoutPath, descriptor.digest),
   ) as { config: { digest: string } };
   const imageConfig = JSON.parse(
     await readBlob(layoutPath, manifest.config.digest),
@@ -257,9 +295,12 @@ function run(command: string, args: readonly string[]): Promise<string> {
  * treated as a failure — a single-agent harness advertises neither.
  */
 function advertisedAgents(session: {
-  sessionModes: {
-    availableModes?: ReadonlyArray<{ id?: string; name?: string }>;
-  } | null | undefined;
+  sessionModes:
+    | {
+        availableModes?: ReadonlyArray<{ id?: string; name?: string }>;
+      }
+    | null
+    | undefined;
   sessionConfigOptions: readonly SessionConfigOption[];
 }): string[] {
   const fromModes = (session.sessionModes?.availableModes ?? [])
