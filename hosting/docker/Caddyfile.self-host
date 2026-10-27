@@ -12,6 +12,11 @@
 		X-Content-Type-Options "nosniff"
 	}
 
+	@auth path /api/auth/* /.well-known/* /auth-ui/* /sign-in /consent
+	handle @auth {
+		reverse_proxy platform-api:3100
+	}
+
 	handle /api/platform/* {
 		reverse_proxy platform-api:3100
 	}

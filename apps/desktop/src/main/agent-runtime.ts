@@ -1,7 +1,7 @@
-import { readDistribution } from "./distribution";
 import {
   assertDesktopAuthenticated,
-  distributionAgentCredential,
+  platformAgentCredential,
+  platformAgentId,
 } from "./desktop-auth";
 import {
   clearComposerDraft,
@@ -216,17 +216,6 @@ interface ActiveMcpPermissionContext {
   allowedTools: Set<string>;
   oneTimeTools: Map<string, number>;
 }
-
-const selectProtocolAuthentication: AcpAuthenticationHandler = async (
-  methods,
-) => {
-  const supported = methods.filter(
-    (method) => !("type" in method && method.type === "terminal"),
-  );
-  if (supported.length === 0) return null;
-  if (supported.length === 1) return supported[0]!.id;
-  throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
-};
 
 function resolveMcpPermissionTool(
   context: ActiveMcpPermissionContext,
@@ -877,10 +866,8 @@ export async function listDesktopAgents(): Promise<DesktopAgentSummary[]> {
       desktopAgentSummary(release, authentication, installation.updatedAt),
     );
   }
-  const distribution = readDistribution();
-  return distribution
-    ? agents.filter((agent) => agent.id === distribution.agentId)
-    : agents;
+  const agentId = platformAgentId();
+  return agentId ? agents.filter((agent) => agent.id === agentId) : agents;
 }
 
 export async function connectAgentAuthentication(
@@ -946,7 +933,7 @@ export async function startAgentPrompt(
   rawInput: StartAgentPromptInput,
 ): Promise<StartAgentPromptResult> {
   assertDesktopAuthenticated();
-  distributionAgentCredential(rawInput.agentId);
+  platformAgentCredential(rawInput.agentId);
   const input = parsePromptInput(rawInput);
   const prompt = input.prompt.trim();
   const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
@@ -2243,33 +2230,41 @@ async function runAgentSession(input: {
         );
       },
     };
-    const companyCredential = distributionAgentCredential(
+    const platformCredential = platformAgentCredential(
       input.target.kind === "release"
         ? input.target.release.agentId
         : input.target.connection.agentId,
     );
-    if (companyCredential)
+    if (platformCredential)
       credentialExpiryTimer = setTimeout(
         () => {
           input.startup.reject(new Error("AUTH_SESSION_EXPIRED"));
           void runtime?.stop();
         },
-        Math.max(0, Date.parse(companyCredential.expiresAt) - Date.now()),
+        Math.max(0, Date.parse(platformCredential.expiresAt) - Date.now()),
       );
-    const authenticate: AcpAuthenticationHandler = companyCredential
-      ? async (methods) => {
-          assertDesktopAuthenticated();
-          if (!methods.some((method) => method.id === "radius-oauth"))
-            throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
-          return {
-            methodId: "radius-oauth",
-            credential: {
-              accessToken: companyCredential.accessToken,
-              expiresAt: companyCredential.expiresAt,
-            },
-          };
-        }
-      : selectProtocolAuthentication;
+    const authenticate: AcpAuthenticationHandler = async (methods) => {
+      assertDesktopAuthenticated();
+      if (!platformCredential) {
+        const supported = methods.filter(
+          (method) =>
+            method.id !== "radius-oauth" &&
+            !("type" in method && method.type === "terminal"),
+        );
+        if (!supported.length) return null;
+        if (supported.length === 1) return supported[0]!.id;
+        throw new Error("ACP_AUTHENTICATION_SELECTION_REQUIRED");
+      }
+      if (!methods.some((method) => method.id === "radius-oauth"))
+        throw new Error("AGENT_NATIVE_AUTH_UNSUPPORTED");
+      return {
+        methodId: "radius-oauth",
+        credential: {
+          accessToken: platformCredential.accessToken,
+          expiresAt: platformCredential.expiresAt,
+        },
+      };
+    };
     let acpSession: AcpRuntimeSession;
     const sessionStart = input.providerSessionId
       ? ({
@@ -2318,7 +2313,7 @@ async function runAgentSession(input: {
         mcpServers,
         handlers,
         onAuthenticate:
-          !companyCredential && release && isFxRelease(release)
+          !platformCredential && release && isFxRelease(release)
             ? undefined
             : authenticate,
         session: sessionStart,

@@ -77,7 +77,7 @@ bundle together. Turbo caches successful pure checks and tracks dependency
 source changes through the output-free `check:inputs` graph. Library builds
 cache their `dist/` output. Desktop and dashboard builds remain uncached because
 they can read injected distribution/runtime configuration; the desktop bundle
-always rebuilds in CI. Database-backed sync verification, Python checks, native
+always rebuilds in CI. Database-backed auth verification, Python checks, native
 packaging, hosting operations, and release publication run outside this cache.
 
 Task hashes include shared TypeScript/tooling configuration, environment-file

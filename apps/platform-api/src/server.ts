@@ -15,12 +15,49 @@ import {
 import { normalizeOidcProvisioningPolicy } from "./browser-session.js";
 import { normalizePlatformOidcOptions } from "./oidc.js";
 import { createPostgresPlatformServices } from "./postgres-services.js";
+import { resolveAuthIssuer } from "./auth-configuration.js";
+import { isLocalDevelopmentAuth } from "./development-auth.js";
+import {
+  authMode,
+  embeddedAuthSecret,
+  embeddedAuthUrl,
+} from "./embedded-auth-config.js";
+import {
+  createEmbeddedAuth,
+  registerEmbeddedClients,
+} from "./embedded-auth.js";
+import { createAuthEmailSender } from "./auth-email.js";
+import { createAuthUi } from "./auth-ui.js";
+import { Hono } from "hono";
+import { ensureDevelopmentAuthSecret } from "./development-auth-secret.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
 const databaseUrl = requiredEnvironment("DATABASE_URL");
 const bootstrapDevelopmentAuthority =
   process.env.RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY === "true";
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
+// Reject invalid operator configuration before opening storage or starting services.
+const nativeEntries = nativeEntriesFromEnvironment(process.env);
+const localDevelopment = isLocalDevelopmentAuth(process.env);
+const embedded = authMode(process.env) === "embedded";
+// Validate delivery and issuer before opening the database or applying migrations.
+const emailSender = embedded ? createAuthEmailSender(process.env) : undefined;
+if (embedded) {
+  ensureDevelopmentAuthSecret(process.env);
+  embeddedAuthSecret(process.env);
+  const issuer = embeddedAuthUrl(process.env);
+  if (nativeEntries.some((entry) => entry.config.issuer !== issuer))
+    throw new Error(
+      "Embedded native clients must use RADIUS_AUTH_URL; select external auth mode for another issuer",
+    );
+  if (
+    process.env.RADIUS_OIDC_ISSUER === issuer &&
+    process.env.RADIUS_OIDC_CLIENT_SECRET?.trim()
+  )
+    throw new Error(
+      "The embedded dashboard uses a registered public PKCE client; omit RADIUS_OIDC_CLIENT_SECRET",
+    );
+}
 
 const runtime = await createPostgresPlatformServices({
   connectionString: databaseUrl,
@@ -51,7 +88,6 @@ const provisioning = provisioningToken
 // that does not want to store conversations should not have the routes at all.
 const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
 if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
-const nativeEntries = nativeEntriesFromEnvironment(process.env);
 const app = createPlatformApp(runtime.services, {
   nativeAuth: nativeEntries.length
     ? createNativeAuthRoutes({
@@ -62,6 +98,7 @@ const app = createPlatformApp(runtime.services, {
           : undefined,
         allowLoopback:
           process.env.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
+        localDevelopment,
       })
     : undefined,
   browserAuth,
@@ -69,9 +106,62 @@ const app = createPlatformApp(runtime.services, {
   deploymentMode: sharedOrigins ? "managed" : "self_hosted",
   syncDatabase: syncEnabled ? runtime.db : undefined,
 });
+const router = new Hono();
+if (embedded) {
+  const auth = createEmbeddedAuth({
+    database: runtime.db,
+    environment: process.env,
+    sendEmail: emailSender,
+  });
+  await registerEmbeddedClients(
+    runtime.db,
+    nativeEntries.map((entry) => entry.config),
+    {
+      // Explicit operator configuration identifies Radius's own clients;
+      // unrelated OAuth registrations do not inherit this trust.
+      trustedClientIds: new Set(
+        nativeEntries.map((entry) => entry.config.clientId),
+      ),
+    },
+  );
+  if (
+    process.env.RADIUS_OIDC_CLIENT_ID &&
+    process.env.RADIUS_OIDC_ISSUER === embeddedAuthUrl(process.env)
+  ) {
+    await registerEmbeddedClients(
+      runtime.db,
+      [
+        {
+          issuer: embeddedAuthUrl(process.env),
+          clientId: process.env.RADIUS_OIDC_CLIENT_ID,
+          redirectUri: requiredEnvironment("RADIUS_OIDC_REDIRECT_URI"),
+          scopes: ["openid", "email", "profile"],
+          resource: `${new URL(embeddedAuthUrl(process.env)).origin}/api/platform`,
+          organizationSlug: requiredEnvironment("RADIUS_OIDC_ORGANIZATION"),
+          displayName: "Radius dashboard",
+          agentId: "radius-dashboard",
+        },
+      ],
+      { trustedClientIds: new Set([process.env.RADIUS_OIDC_CLIENT_ID]) },
+    );
+  }
+  router.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  router.get("/.well-known/*", (c) => auth.handler(c.req.raw));
+  router.route(
+    "/",
+    createAuthUi({
+      directory: process.env.RADIUS_AUTH_UI_DIR,
+      googleEnabled: Boolean(
+        process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
+      ),
+    }),
+  );
+}
+router.route("/", app);
 const server = Bun.serve({
+  hostname: process.env.HOST ?? "0.0.0.0",
   port: Number(process.env.PORT ?? 3100),
-  fetch: app.fetch,
+  fetch: router.fetch,
 });
 
 async function shutdown(signal: string): Promise<void> {
@@ -93,7 +183,13 @@ function browserAuthFromEnvironment(
   pool: import("@curve-ai/platform-database").PlatformPool,
   sharedOrigins: boolean,
 ) {
-  const issuer = process.env.RADIUS_OIDC_ISSUER?.trim();
+  const browserConfigured =
+    process.env.RADIUS_OIDC_ISSUER !== undefined ||
+    process.env.RADIUS_OIDC_CLIENT_ID !== undefined ||
+    process.env.RADIUS_OIDC_CLIENT_ID_PREFIX !== undefined;
+  const issuer = browserConfigured
+    ? resolveAuthIssuer(process.env.RADIUS_OIDC_ISSUER, process.env)
+    : undefined;
   const nativeSharedSettings = new Set([
     "RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK",
     "RADIUS_OIDC_ALLOWED_EMAILS",
@@ -104,9 +200,7 @@ function browserAuthFromEnvironment(
     (name) =>
       name.startsWith("RADIUS_OIDC_") &&
       process.env[name]?.trim() &&
-      !(
-        process.env.RADIUS_NATIVE_AUTH_CONFIG && nativeSharedSettings.has(name)
-      ),
+      !(nativeEntries.length && nativeSharedSettings.has(name)),
   );
   if (!issuer) {
     if (oidcEnvironmentPresent) {

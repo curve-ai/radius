@@ -1,8 +1,6 @@
 /**
- * A Radius platform is reached at one base URL that serves both sign-in and
- * the API. Curve Cloud gives each organization its own host; a self-hosted
- * installation is wherever the operator put it. Everything below derives from
- * that single address.
+ * A Radius platform is reached at one bundled base URL that serves both
+ * sign-in and the API. Desktop behavior does not depend on who hosts it.
  */
 
 const SYNC_PATH = "api/platform/v1/sync/";
@@ -50,16 +48,4 @@ export function platformUrl(baseUrl: string, path: string): string {
  */
 export function platformSyncEndpoint(baseUrl: string): string {
   return platformUrl(baseUrl, SYNC_PATH);
-}
-
-/**
- * A stored connection keeps the platform base URL. Older records and the
- * `RADIUS_SYNC_ENDPOINT` override may point straight at the sync prefix, so
- * accept either and answer with the base.
- */
-export function platformBaseFromEndpoint(endpointUrl: string): string {
-  const url = validatedPlatformUrl(endpointUrl);
-  if (!url.pathname.endsWith(`/${SYNC_PATH}`)) return url.toString();
-  url.pathname = url.pathname.slice(0, -SYNC_PATH.length);
-  return url.toString();
 }

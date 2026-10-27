@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Bell,
-  Cloud,
   Info,
   Plug,
   Search,
@@ -65,15 +64,9 @@ const settingsNavigation = [
       {
         id: SETTINGS_SECTIONS.apps.id,
         label: SETTINGS_SECTIONS.apps.label,
-        keywords: "apps connectors agents connections permissions scopes",
-        icon: Plug,
-      },
-      {
-        id: SETTINGS_SECTIONS.cloud.id,
-        label: SETTINGS_SECTIONS.cloud.label,
         keywords:
-          "cloud sync conversations server self-hosted endpoint sign in backup devices",
-        icon: Cloud,
+          "apps connectors agents connections permissions scopes",
+        icon: Plug,
       },
     ],
   },

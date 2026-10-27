@@ -5,8 +5,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DesktopDistributionSchema } from "../../../packages/platform-contracts/src/index.js";
 import { validateNativeConfiguration } from "../../platform-api/src/native-auth.js";
+import { HOSTED_AUTH_ISSUER } from "../../platform-api/src/auth-configuration.js";
 
-const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+process.chdir(fileURLToPath(new URL("../../..", import.meta.url)));
+
 const prompt = createInterface({ input: stdin, output: stdout });
 const ask = async (label: string, fallback?: string): Promise<string> =>
   (
@@ -31,6 +33,7 @@ try {
   const agentId = await ask("Bundled agent ID");
   const issuer = await ask(
     "OIDC issuer (Better Auth or your vendor's hosted provider)",
+    HOSTED_AUTH_ISSUER,
   );
   const resource = await ask("Agent API resource / audience");
   const redirectUri = await ask(
@@ -88,7 +91,6 @@ try {
   )
     throw new Error("The provider does not advertise PKCE S256.");
   const folder = path.resolve(
-    repositoryRoot,
     await ask(
       "Output folder (must not already contain these files)",
       ".radius",
