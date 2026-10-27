@@ -9,6 +9,61 @@ permissions:
   contents: read
 
 jobs:
+  sync-database-changes:
+    name: Detect sync database changes
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.changes.outputs.required }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Test database change detection
+        run: bun test scripts/ci/sync-database-changes.test.ts
+      - name: Detect affected inputs
+        id: changes
+        env:
+          CI_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_DIFF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_DIFF_EVENT: ${{ github.event_name }}
+        run: bun scripts/ci/sync-database-changes.ts
+
+  sync-database:
+    name: PostgreSQL sync verification
+    needs: sync-database-changes
+    # A skipped job reports success; detector
+    # failures or missing outputs instead run the real database verification.
+    if: ${{ !cancelled() && (needs.sync-database-changes.result != 'success' || needs.sync-database-changes.outputs.required != 'false') }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+        env:
+          POSTGRES_USER: radius
+          POSTGRES_PASSWORD: radius-ci-only
+          POSTGRES_DB: radius_sync_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U radius -d radius_sync_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install database verification dependencies
+        run: bun install --frozen-lockfile --ignore-scripts --filter @curve-ai/radius-platform-api --filter @curve-ai/platform-database
+      - name: Verify server-side sync behavior
+        env:
+          DATABASE_URL: postgresql://radius:radius-ci-only@127.0.0.1:5432/radius_sync_test
+        run: bun run --cwd apps/platform-api verify:sync
+
   verify:
     name: Verify (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
