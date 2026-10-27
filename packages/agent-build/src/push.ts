@@ -164,7 +164,7 @@ export async function runOciCommand(options: {
     child.stdin.on("error", (error: NodeJS.ErrnoException) => {
       // A command may exit before reading stdin; report its exit status after
       // both output streams close instead of crashing on the broken pipe.
-      if (error.code !== "EPIPE") reject(error);
+      if (error.code !== "EPIPE" && error.code !== "EOF") reject(error);
     });
     child.stdin.end(options.stdin ?? "");
   });
