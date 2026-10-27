@@ -95,7 +95,9 @@ function isClientDataFault(error: unknown): boolean {
   return false;
 }
 
-import { withSyncOwner, type PlatformTransaction } from "./owner.js";
+type PlatformTransaction = Parameters<
+  Parameters<PlatformDatabase["transaction"]>[0]
+>[0];
 
 async function insertArtifacts(
   transaction: PlatformTransaction,
@@ -229,7 +231,9 @@ async function insertEventProjection(
         eventId: event.eventId,
         sessionId: event.sessionId,
         providerKey: event.providerKey,
-        providerRunId: event.providerSessionId ? event.providerRunId : null,
+        providerRunId: event.providerSessionId
+          ? event.providerRunId
+          : null,
         // Optional on the wire, so a desktop that predates the split still
         // syncs; its session id arrives in providerRunId and is read from
         // there rather than being dropped.
@@ -474,7 +478,7 @@ async function applyOneChange(
   deviceId: string,
   change: SyncChangeEnvelope,
 ): Promise<ChangeResult> {
-  return withSyncOwner(database, owner, async (transaction) => {
+  return database.transaction(async (transaction) => {
     // Serialize one membership's writes against each other. Change sequences
     // are handed out at insert time but become visible at commit time, so
     // without this two concurrent pushes can commit out of order and a pull
@@ -718,24 +722,19 @@ export async function pullSyncChanges(
   limit: number,
 ): Promise<{ changes: SyncChangeEnvelope[]; nextCursor: string | null }> {
   const after = cursor ? decodeCursor(cursor) : null;
-  const rows = await withSyncOwner(database, owner, (transaction) =>
-    transaction
-      .select({
-        sequence: syncChanges.sequence,
-        envelope: syncChanges.envelope,
-      })
-      .from(syncChanges)
-      .where(
-        after === null
-          ? eq(syncChanges.membershipId, owner.membershipId)
-          : and(
-              eq(syncChanges.membershipId, owner.membershipId),
-              gt(syncChanges.sequence, after),
-            ),
-      )
-      .orderBy(syncChanges.sequence)
-      .limit(limit),
-  );
+  const rows = await database
+    .select({ sequence: syncChanges.sequence, envelope: syncChanges.envelope })
+    .from(syncChanges)
+    .where(
+      after === null
+        ? eq(syncChanges.membershipId, owner.membershipId)
+        : and(
+            eq(syncChanges.membershipId, owner.membershipId),
+            gt(syncChanges.sequence, after),
+          ),
+    )
+    .orderBy(syncChanges.sequence)
+    .limit(limit);
   const last = rows.at(-1)?.sequence;
   return {
     changes: rows.map((row) => row.envelope as unknown as SyncChangeEnvelope),

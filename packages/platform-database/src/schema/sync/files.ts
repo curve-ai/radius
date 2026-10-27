@@ -10,7 +10,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { ownedByMembership, ownedThroughEvent, radiusSync } from "../common.js";
+import { radiusSync } from "../common.js";
 import { organizations } from "../organizations.js";
 import { syncProjects } from "./core.js";
 import { syncSessionEvents, syncToolCalls } from "./events.js";
@@ -37,7 +37,6 @@ export const syncProjectFiles = radiusSync.table(
       table.membershipId,
       table.projectId,
     ),
-    ownedByMembership("project_files"),
   ],
 );
 
@@ -77,7 +76,6 @@ export const syncProjectFileVersions = radiusSync.table(
       sql`${table.contentSha256} ~ '^[0-9a-f]{64}$'`,
     ),
     check("sync_project_file_versions_size_check", sql`${table.byteSize} >= 0`),
-    ownedByMembership("project_file_versions"),
   ],
 );
 
@@ -115,6 +113,5 @@ export const syncFileChanges = radiusSync.table(
   (table) => [
     index("sync_file_changes_run_idx").on(table.agentRunId),
     index("sync_file_changes_file_idx").on(table.projectFileId),
-    ownedThroughEvent("file_changes"),
   ],
 );

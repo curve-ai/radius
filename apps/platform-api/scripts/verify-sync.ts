@@ -18,9 +18,6 @@ import { and, eq } from "drizzle-orm";
 
 import {
   createPlatformDatabase,
-  assertSyncDatabaseIsolation,
-  provisionPlatformRuntimeRole,
-  runtimeRoleCredentials,
   migratePlatformDatabase,
   platformSchema,
   provisionPlatformOrganization,
@@ -34,7 +31,6 @@ import {
 
 import { createFileSystemArtifactStore } from "../src/sync/artifact-store.js";
 import { verifyDeviceRequest } from "../src/sync/device-auth.js";
-import { withSyncOwner } from "../src/sync/owner.js";
 import {
   applySyncChange,
   pullSyncChanges,
@@ -100,20 +96,18 @@ async function provisionTenant(
 
   const deviceId = randomUUID();
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  await withSyncOwner(database, owner, (transaction) =>
-    transaction.insert(syncDevices).values({
-      id: deviceId,
-      ...owner,
-      clientInstallationId: null,
-      displayName: "Verification device",
-      platform: "darwin",
-      publicKeyJwk: publicKey.export({ format: "jwk" }) as JsonWebKey,
-      appVersion: "0.0.1",
-      createdAt: new Date(),
-      lastSeenAt: new Date(),
-      revokedAt: null,
-    }),
-  );
+  await database.insert(syncDevices).values({
+    id: deviceId,
+    ...owner,
+    clientInstallationId: null,
+    displayName: "Verification device",
+    platform: "darwin",
+    publicKeyJwk: publicKey.export({ format: "jwk" }) as JsonWebKey,
+    appVersion: "0.0.1",
+    createdAt: new Date(),
+    lastSeenAt: new Date(),
+    revokedAt: null,
+  });
   return { owner, deviceId, privateKey };
 }
 
@@ -130,25 +124,7 @@ async function main(): Promise<void> {
     path.join(tmpdir(), "radius-sync-verify-artifacts-"),
   );
   try {
-    const migrationUrl = process.env.RADIUS_DATABASE_MIGRATION_URL?.trim();
-    if (migrationUrl) {
-      const administrator = createPlatformDatabase({
-        connectionString: migrationUrl,
-        maxConnections: 1,
-      });
-      try {
-        await migratePlatformDatabase(administrator.pool);
-        await provisionPlatformRuntimeRole(
-          administrator.pool,
-          runtimeRoleCredentials(connectionString, migrationUrl),
-        );
-      } finally {
-        await administrator.pool.end();
-      }
-    } else {
-      await migratePlatformDatabase(pool);
-    }
-    await assertSyncDatabaseIsolation(pool);
+    await migratePlatformDatabase(pool);
 
     const acme = await provisionTenant(
       pool,
@@ -165,7 +141,9 @@ async function main(): Promise<void> {
     // --- device signature ------------------------------------------------
     const signedBody = "{}";
     const signedTimestamp = new Date().toISOString();
-    const signedUrl = new URL("http://localhost/api/platform/v1/sync/push");
+    const signedUrl = new URL(
+      "http://localhost/api/platform/v1/sync/push",
+    );
     const signedHash = createHash("sha256").update(signedBody).digest("hex");
     const signedInput = `POST\n${signedUrl.pathname}\n${signedTimestamp}\n${signedHash}`;
     const signature = sign(null, Buffer.from(signedInput), privateKey).toString(
@@ -181,13 +159,11 @@ async function main(): Promise<void> {
       body: signedBody,
     });
     assert.equal(
-      await withSyncOwner(database, owner, (transaction) =>
-        verifyDeviceRequest(
-          transaction,
-          signedRequest,
-          owner.membershipId,
-          signedBody,
-        ),
+      await verifyDeviceRequest(
+        database,
+        signedRequest,
+        owner.membershipId,
+        signedBody,
       ),
       deviceId,
     );
@@ -195,13 +171,11 @@ async function main(): Promise<void> {
     // A device enrolled to one membership must not authenticate another's
     // requests, even with a valid signature.
     await assert.rejects(
-      withSyncOwner(database, other.owner, (transaction) =>
-        verifyDeviceRequest(
-          transaction,
-          signedRequest,
-          other.owner.membershipId,
-          signedBody,
-        ),
+      verifyDeviceRequest(
+        database,
+        signedRequest,
+        other.owner.membershipId,
+        signedBody,
       ),
       /DEVICE_NOT_REGISTERED/,
     );
@@ -559,12 +533,10 @@ async function main(): Promise<void> {
     );
     assert.equal(takeover.status, "rejected");
     assert.equal(takeover.errorCode, "SESSION_ID_REUSED");
-    const [stillOurs] = await withSyncOwner(database, owner, (transaction) =>
-      transaction
-        .select({ membershipId: syncSessions.membershipId })
-        .from(syncSessions)
-        .where(eq(syncSessions.id, sessionId)),
-    );
+    const [stillOurs] = await database
+      .select({ membershipId: syncSessions.membershipId })
+      .from(syncSessions)
+      .where(eq(syncSessions.id, sessionId));
     assert.equal(stillOurs?.membershipId, owner.membershipId);
 
     const projectTakeover = await applySyncChange(
@@ -695,20 +667,16 @@ async function main(): Promise<void> {
     // --- a revoked device stays revoked ----------------------------------
     // Re-registering used to clear revoked_at, so a lost machine that still
     // held a session token could hand itself back its own access.
-    await withSyncOwner(database, other.owner, (transaction) =>
-      transaction
-        .update(syncDevices)
-        .set({ revokedAt: new Date() })
-        .where(eq(syncDevices.id, other.deviceId)),
-    );
+    await database
+      .update(syncDevices)
+      .set({ revokedAt: new Date() })
+      .where(eq(syncDevices.id, other.deviceId));
     await assert.rejects(
-      withSyncOwner(database, other.owner, (transaction) =>
-        verifyDeviceRequest(
-          transaction,
-          signedRequest,
-          other.owner.membershipId,
-          signedBody,
-        ),
+      verifyDeviceRequest(
+        database,
+        signedRequest,
+        other.owner.membershipId,
+        signedBody,
       ),
       /DEVICE_NOT_REGISTERED/,
     );
@@ -716,75 +684,65 @@ async function main(): Promise<void> {
     // --- rows landed where they should -----------------------------------
     assert.equal(
       (
-        await withSyncOwner(database, owner, (transaction) =>
-          transaction
-            .select({ id: syncProjects.id })
-            .from(syncProjects)
-            .where(
-              and(
-                eq(syncProjects.organizationId, owner.organizationId),
-                eq(syncProjects.membershipId, owner.membershipId),
-                eq(syncProjects.id, projectId),
-              ),
+        await database
+          .select({ id: syncProjects.id })
+          .from(syncProjects)
+          .where(
+            and(
+              eq(syncProjects.organizationId, owner.organizationId),
+              eq(syncProjects.membershipId, owner.membershipId),
+              eq(syncProjects.id, projectId),
             ),
-        )
+          )
       ).length,
       1,
     );
     assert.ok(
       (
-        await withSyncOwner(database, owner, (transaction) =>
-          transaction
-            .select({ id: syncReasoningSummaries.eventId })
-            .from(syncReasoningSummaries),
-        )
+        await database
+          .select({ id: syncReasoningSummaries.eventId })
+          .from(syncReasoningSummaries)
       ).length >= 1,
     );
     assert.equal(
       (
-        await withSyncOwner(database, owner, (transaction) =>
-          transaction
-            .select({ id: syncFileArtifacts.artifactId })
-            .from(syncFileArtifacts)
-            .where(
-              and(
-                eq(syncFileArtifacts.membershipId, owner.membershipId),
-                eq(syncFileArtifacts.artifactId, artifactId),
-              ),
+        await database
+          .select({ id: syncFileArtifacts.artifactId })
+          .from(syncFileArtifacts)
+          .where(
+            and(
+              eq(syncFileArtifacts.membershipId, owner.membershipId),
+              eq(syncFileArtifacts.artifactId, artifactId),
             ),
-        )
+          )
       ).length,
       1,
     );
     assert.equal(
       (
-        await withSyncOwner(database, owner, (transaction) =>
-          transaction
-            .select({ id: syncAgentRunPresentations.eventId })
-            .from(syncAgentRunPresentations)
-            .where(
-              and(
-                eq(syncAgentRunPresentations.agentRunId, agentRunId),
-                eq(syncAgentRunPresentations.mode, "collapsible"),
-              ),
+        await database
+          .select({ id: syncAgentRunPresentations.eventId })
+          .from(syncAgentRunPresentations)
+          .where(
+            and(
+              eq(syncAgentRunPresentations.agentRunId, agentRunId),
+              eq(syncAgentRunPresentations.mode, "collapsible"),
             ),
-        )
+          )
       ).length,
       1,
     );
     assert.equal(
       (
-        await withSyncOwner(database, owner, (transaction) =>
-          transaction
-            .select({ id: syncFileChanges.eventId })
-            .from(syncFileChanges)
-            .where(
-              and(
-                eq(syncFileChanges.agentRunId, agentRunId),
-                eq(syncFileChanges.projectFileId, projectFileId),
-              ),
+        await database
+          .select({ id: syncFileChanges.eventId })
+          .from(syncFileChanges)
+          .where(
+            and(
+              eq(syncFileChanges.agentRunId, agentRunId),
+              eq(syncFileChanges.projectFileId, projectFileId),
             ),
-        )
+          )
       ).length,
       1,
     );

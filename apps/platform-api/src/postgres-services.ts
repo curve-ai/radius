@@ -2,10 +2,6 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
   createPlatformDatabase,
-  createPlatformPool,
-  assertSyncDatabaseIsolation,
-  provisionPlatformRuntimeRole,
-  runtimeRoleCredentials,
   migratePlatformDatabase,
   withPlatformTransaction,
   type PlatformPool,
@@ -108,8 +104,6 @@ const ROLE_SCOPES: Record<
 
 export interface PostgresPlatformOptions {
   connectionString: string;
-  migrationConnectionString?: string;
-  requireSyncIsolation?: boolean;
   bootstrapDevelopmentAuthority?: boolean;
   developmentAccessToken?: string;
   migrationsDirectory?: string;
@@ -153,30 +147,7 @@ export async function createPostgresPlatformServices(
   });
 
   try {
-    if (options.migrationConnectionString) {
-      const credentials = runtimeRoleCredentials(
-        options.connectionString,
-        options.migrationConnectionString,
-      );
-      const administrator = createPlatformPool({
-        connectionString: options.migrationConnectionString,
-        applicationName: "radius-platform-migrations",
-        maxConnections: 1,
-        statementTimeoutMs: 60_000,
-      });
-      try {
-        await migratePlatformDatabase(
-          administrator,
-          options.migrationsDirectory,
-        );
-        await provisionPlatformRuntimeRole(administrator, credentials);
-      } finally {
-        await administrator.end();
-      }
-    } else {
-      await migratePlatformDatabase(pool, options.migrationsDirectory);
-    }
-    if (options.requireSyncIsolation) await assertSyncDatabaseIsolation(pool);
+    await migratePlatformDatabase(pool, options.migrationsDirectory);
     if (options.bootstrapDevelopmentAuthority) {
       const accessToken = options.developmentAccessToken?.trim() ?? "";
       if (accessToken.length < 4) {

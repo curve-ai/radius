@@ -30,9 +30,7 @@ try {
 
 async function bootstrapOwner(args: readonly string[]): Promise<void> {
   const flags = parseFlags(args);
-  const connectionString =
-    process.env.RADIUS_DATABASE_MIGRATION_URL?.trim() ||
-    process.env.DATABASE_URL?.trim();
+  const connectionString = process.env.DATABASE_URL?.trim();
   if (!connectionString) throw new Error("DATABASE_URL is required");
   const pool = createPlatformPool({
     connectionString,

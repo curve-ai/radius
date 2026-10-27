@@ -18,16 +18,12 @@ import { createPostgresPlatformServices } from "./postgres-services.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
 const databaseUrl = requiredEnvironment("DATABASE_URL");
-const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
-if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
 const bootstrapDevelopmentAuthority =
   process.env.RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY === "true";
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
 
 const runtime = await createPostgresPlatformServices({
   connectionString: databaseUrl,
-  migrationConnectionString: process.env.RADIUS_DATABASE_MIGRATION_URL?.trim(),
-  requireSyncIsolation: syncEnabled,
   bootstrapDevelopmentAuthority,
   developmentAccessToken: developmentToken,
   migrationsDirectory: process.env.RADIUS_PLATFORM_MIGRATIONS_DIR,
@@ -53,6 +49,8 @@ const provisioning = provisioningToken
   : undefined;
 // Conversation sync is opt-in: it needs a cursor secret, and a deployment
 // that does not want to store conversations should not have the routes at all.
+const syncEnabled = process.env.RADIUS_SYNC_ENABLED === "true";
+if (syncEnabled) requiredEnvironment("RADIUS_SYNC_CURSOR_SECRET");
 const nativeEntries = nativeEntriesFromEnvironment(process.env);
 const app = createPlatformApp(runtime.services, {
   nativeAuth: nativeEntries.length

@@ -89,8 +89,7 @@ services:
     tmpfs:
       - /tmp
     environment:
-      DATABASE_URL: postgresql://radius_runtime:${RADIUS_POSTGRES_RUNTIME_PASSWORD:?set RADIUS_POSTGRES_RUNTIME_PASSWORD}@postgres:5432/radius
-      RADIUS_DATABASE_MIGRATION_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD}@postgres:5432/radius
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD}@postgres:5432/radius
       RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY: "false"
       RADIUS_PLATFORM_REGISTRY: ${RADIUS_REGISTRY_DOMAIN}
       RADIUS_PLATFORM_REGISTRY_VERIFY: registry:5000

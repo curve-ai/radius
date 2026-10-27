@@ -17,11 +17,6 @@ export {
 export * as platformSchema from "./schema/index.js";
 export { migratePlatformDatabase } from "./migrations.js";
 export {
-  assertSyncDatabaseIsolation,
-  provisionPlatformRuntimeRole,
-  runtimeRoleCredentials,
-} from "./runtime-role.js";
-export {
   provisionPlatformOrganization,
   stableUuid as stablePlatformProvisioningUuid,
 } from "./provisioning.js";

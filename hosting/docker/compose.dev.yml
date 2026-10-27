@@ -59,10 +59,7 @@ services:
       dockerfile: apps/platform-api/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://radius_runtime:${RADIUS_POSTGRES_RUNTIME_PASSWORD:-radius-runtime-dev-only}@postgres:5432/radius
-      RADIUS_DATABASE_MIGRATION_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/radius
-      RADIUS_SYNC_ENABLED: ${RADIUS_SYNC_ENABLED:-false}
-      RADIUS_SYNC_CURSOR_SECRET: ${RADIUS_SYNC_CURSOR_SECRET:-}
+      DATABASE_URL: postgresql://radius:${RADIUS_POSTGRES_PASSWORD:-radius-dev-only}@postgres:5432/radius
       RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY: ${RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY:-true}
       RADIUS_PLATFORM_ALLOW_INSECURE_SESSIONS: "true"
       RADIUS_PLATFORM_DEV_TOKEN: ${RADIUS_PLATFORM_DEV_TOKEN:-radius-dev-token}

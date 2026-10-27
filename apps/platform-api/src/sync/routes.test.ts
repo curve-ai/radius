@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateKeyPairSync } from "node:crypto";
-import { drizzle } from "drizzle-orm/node-postgres";
 
-import {
-  platformSchema,
-  type PlatformDatabase,
-} from "@curve-ai/platform-database";
+import type { PlatformDatabase } from "@curve-ai/platform-database";
 
 import { createPlatformApp, type RadiusPlatformServices } from "../app.js";
 
@@ -14,7 +9,7 @@ const accountId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "12121212-1212-4212-8212-121212121212";
 
 /**
- * The early guard assertions below are about routing and scoping, which are decided before
+ * Every assertion below is about routing and scoping, which are decided before
  * a query is ever built. A database that throws proves that: if one of these
  * paths reached storage, the test would fail loudly rather than quietly pass.
  */
@@ -30,12 +25,7 @@ function unusedDatabase(): PlatformDatabase {
 }
 
 function services(
-  organizations: {
-    id: string;
-    slug: string;
-    displayName: string;
-    role: "owner";
-  }[] = [],
+  organizations: { id: string; slug: string; displayName: string; role: "owner" }[] = [],
 ): RadiusPlatformServices {
   return {
     authenticate: async (token: string) =>
@@ -139,59 +129,3 @@ test("the overview and dashboard revocation are scoped before any query runs", a
   const anonymous = await app.request("/api/platform/v1/sync/overview");
   assert.equal(anonymous.status, 401);
 });
-
-for (const code of ["23505", "42501", "08006"]) {
-  test(`device registration rolls back wrapped ${code} before responding`, async () => {
-    const queries: string[] = [];
-    const client = {
-      async query(config: { text: string }) {
-        queries.push(config.text);
-        if (config.text.includes('insert into "radius_sync"."devices"')) {
-          throw Object.assign(new Error("injected driver error"), { code });
-        }
-        return {
-          rows: config.text.includes('"organization_memberships"')
-            ? [["33333333-3333-4333-8333-333333333333"]]
-            : [],
-        };
-      },
-    };
-    const database = drizzle(client as never, { schema: platformSchema });
-    const app = createPlatformApp(
-      services([
-        {
-          id: organizationId,
-          slug: "acme",
-          displayName: "Acme",
-          role: "owner",
-        },
-      ]),
-      { syncDatabase: database },
-    );
-    const { publicKey } = generateKeyPairSync("ed25519");
-    const response = await app.request(
-      "/api/platform/v1/sync/devices/register",
-      {
-        method: "POST",
-        headers: {
-          authorization: "Bearer valid",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          clientInstanceId: "44444444-4444-4444-8444-444444444444",
-          displayName: "Test device",
-          platform: "darwin",
-          appVersion: "0.0.1",
-          publicKeyJwk: publicKey.export({ format: "jwk" }),
-        }),
-      },
-    );
-    assert.equal(response.status, code === "08006" ? 500 : 409);
-    if (code !== "08006")
-      assert.deepEqual(await response.json(), {
-        error: "DEVICE_IDENTITY_CONFLICT",
-      });
-    assert.equal(queries.at(-1), "rollback");
-    assert.ok(!queries.includes("commit"));
-  });
-}
