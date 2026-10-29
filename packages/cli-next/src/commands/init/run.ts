@@ -1,35 +1,69 @@
-import { appendFile, readFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+
+import {
+  HarnessPinSchema,
+  parseHarnessPin,
+  type HarnessToolchain,
+  type RadiusLock,
+} from "@curve-ai/agent-contracts";
+import { parse, type ParseError } from "jsonc-parser";
 
 import {
   applyConfigEdits,
   CONFIG_FILENAME,
   CONFIG_SCHEMA_URL,
+  HARNESS_PROJECT_FIELDS,
   mintAgentId,
   readRawConfig,
+  type ConfigEdit,
 } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
 import { handler } from "../../handler.js";
-import { UsageError } from "../../errors.js";
-import { canPrompt, promptChoice, promptText, requireFlag } from "../../prompt.js";
+import { OperationalError, UsageError } from "../../errors.js";
+import {
+  LOCK_FILENAME,
+  lockFromEntry,
+  lockPath,
+  parseLock,
+  readRawLock,
+  renderLock,
+} from "../../lock.js";
+import {
+  canPrompt,
+  promptChoice,
+  promptText,
+  requireFlag,
+} from "../../prompt.js";
 import { fetchRegistry, listHarnessIds, selectEntry } from "../../registry.js";
+import { detectProject, type Inferred } from "./detect.js";
 
-interface InitFlags {
+export interface InitFlags {
   readonly harness?: string;
   readonly name?: string;
   readonly list: boolean;
   readonly yes: boolean;
+  readonly force: boolean;
 }
 
-async function run(
-  this: RadiusContext,
+export interface InitDependencies {
+  /** The ACP registry document. A parameter so tests never touch the network. */
+  readonly registry: () => Promise<unknown>;
+}
+
+export async function runInit(
+  context: RadiusContext,
   flags: InitFlags,
+  dependencies: InitDependencies = { registry: fetchRegistry },
 ): Promise<void> {
-  const context = this;
-  const registry = await fetchRegistry();
+  // Fetched at most once, and only when something needs it. A project whose
+  // pin and lock already agree re-runs `init` offline.
+  let registryDocument: Promise<unknown> | undefined;
+  const registry = (): Promise<unknown> =>
+    (registryDocument ??= dependencies.registry());
 
   if (flags.list) {
-    const ids = listHarnessIds(registry);
+    const ids = listHarnessIds(await registry());
     if (context.output === "json") {
       emitJson(context, { harnesses: ids });
       return;
@@ -40,11 +74,37 @@ async function run(
   }
 
   const root = context.cwd;
+  const raw = await readRawConfig(root);
+  const existing = raw === null ? {} : parseExisting(raw);
+  const existed = raw !== null;
 
-  // Asked for rather than demanded, when there is someone to ask. The gate is
-  // ADR-008's: a TTY, no --json, no --yes — otherwise fail naming the flag,
-  // because a prompt in CI hangs instead of failing.
-  let harnessId = flags.harness;
+  // `runtime` written out inline is the form `init` produced before the lock
+  // existed. It keeps working as it is; `--force` is the explicit request to
+  // move it to the short form.
+  const inline = isRecord(existing.runtime);
+  const runtimeBlock = isRecord(existing.runtime) ? existing.runtime : {};
+  const migrate = inline && flags.force;
+  const shortForm = !inline || migrate;
+
+  const pin = readPin(existing.harness);
+  const inlineId =
+    typeof runtimeBlock.registryId === "string"
+      ? runtimeBlock.registryId
+      : undefined;
+  const pinnedId = pin?.id ?? inlineId;
+  if (flags.harness && pinnedId && flags.harness !== pinnedId && !flags.force) {
+    throw new UsageError(
+      `${CONFIG_FILENAME} already pins ${pinnedId}. Pass --force to switch it to ${flags.harness}.`,
+    );
+  }
+
+  // Detection runs before the harness is chosen so an opencode tree needs no
+  // flag and no prompt: the files say which harness it is.
+  const preliminary = await detectProject(root, flags.harness ?? pinnedId);
+  const known = flags.harness ?? pinnedId ?? preliminary.harness?.value;
+  let harnessId = known;
+  const detectedHarness =
+    !flags.harness && !pinnedId ? preliminary.harness : undefined;
   if (!harnessId) {
     if (!canPrompt(context, flags)) {
       requireFlag(
@@ -54,75 +114,329 @@ async function run(
     }
     harnessId = await promptChoice(context, {
       label: "Harness",
-      choices: listHarnessIds(registry).map((id) => ({ value: id })),
+      choices: listHarnessIds(await registry()).map((id) => ({ value: id })),
     });
   }
-
-  const entry = selectEntry(registry, harnessId);
+  const detection =
+    harnessId === known ? preliminary : await detectProject(root, harnessId);
 
   // The registry's name is the harness's, not the project's, so every
   // opencode project would be called "OpenCode" and two of them would be
   // indistinguishable in the agent list. The directory is at least the
   // developer's own word for this thing.
   let name = flags.name;
-  if (!name) {
-    const suggestion = basename(root) || entry.name;
+  if (!name && typeof existing.name !== "string") {
+    const suggestion = basename(root) || harnessId;
     name = canPrompt(context, flags)
       ? await promptText(context, { label: "Agent name", fallback: suggestion })
       : suggestion;
   }
-  const existed = (await readRawConfig(root)) !== null;
 
-  // Order matters only for readability of a freshly written file; every edit
-  // is skipped individually if that key is already present.
-  const changed = await applyConfigEdits(root, [
+  const edits: ConfigEdit[] = [
     { path: ["$schema"], value: CONFIG_SCHEMA_URL },
-    { path: ["schemaVersion"], value: 1 },
     { path: ["agent"], value: mintAgentId() },
-    { path: ["version"], value: "0.0.0" },
     { path: ["name"], value: name },
-    // One edit per leaf, not one for the whole `runtime` block. Idempotent
-    // fill-in means filling what is *missing*, and a project that already
-    // declares `runtime.include` or `runtime.toolchains` has a runtime block
-    // without a harness pin in it — writing at ["runtime"] would see the
-    // block, skip, and leave the config permanently unbuildable.
-    { path: ["runtime", "kind"], value: "harness" },
-    { path: ["runtime", "registryId"], value: entry.id },
-    { path: ["runtime", "distribution"], value: entry.distribution },
-    ...(entry.license
-      ? [{ path: ["runtime", "license"], value: entry.license }]
-      : []),
-    ...(entry.licenseUrl
-      ? [{ path: ["runtime", "licenseUrl"], value: entry.licenseUrl }]
-      : []),
-    { path: ["capabilities"], value: [] },
-    { path: ["networkAllowlist"], value: [] },
-    { path: ["resources"], value: { cpu: 2, memoryMb: 4096, diskMb: 5120 } },
+    { path: ["version"], value: "0.0.0" },
+  ];
+
+  // The pin. In the short form it is one line in radius.json and the machine
+  // data in radius.lock, and the two must name the same id@version.
+  let lock: RadiusLock | undefined;
+  let lockText: string | undefined;
+  const pinNotes: string[] = [];
+  if (shortForm) {
+    const currentLock = await readCurrentLock(root);
+    const wantedId = harnessId;
+    const lockAgrees =
+      pin !== undefined &&
+      currentLock !== undefined &&
+      currentLock.harness.registryId === pin.id &&
+      currentLock.harness.version === pin.version &&
+      pin.id === wantedId;
+    if (lockAgrees && !flags.force) {
+      lock = currentLock;
+    } else {
+      const entry = selectEntry(await registry(), wantedId);
+      // Without --force, a pin is a promise not to move. The registry only
+      // serves its latest version, so a lost lock for an older pin cannot be
+      // rebuilt from it — and quietly moving the pin would be an upgrade
+      // nobody asked for.
+      if (
+        pin &&
+        pin.id === wantedId &&
+        pin.version !== entry.version &&
+        !flags.force
+      ) {
+        throw new OperationalError(
+          `${CONFIG_FILENAME} pins ${pin.id}@${pin.version}, and ${LOCK_FILENAME} ${currentLock ? "does not match it" : "is missing"}. The ACP registry now offers ${entry.version}, so the old pin cannot be re-read from it.`,
+          `Restore ${LOCK_FILENAME} from version control, or run \`radius init --force\` to pin ${entry.id}@${entry.version}.`,
+        );
+      }
+      lock = lockFromEntry(entry);
+      // The inline form never recorded a version, so the registry's current
+      // entry is the only source for the lock. Say so when that moved the pin.
+      if (
+        migrate &&
+        runtimeBlock.distribution !== undefined &&
+        JSON.stringify(runtimeBlock.distribution) !==
+          JSON.stringify(entry.distribution)
+      ) {
+        pinNotes.push(
+          `the inline pin differed from the registry's current ${entry.id}; ${LOCK_FILENAME} now holds ${entry.version}.`,
+        );
+      }
+    }
+    lockText = renderLock(lock);
+    const pinValue = `${lock.harness.registryId}@${lock.harness.version}`;
+    edits.push({ path: ["harness"], value: pinValue, replace: flags.force });
+  } else if (runtimeBlock.distribution === undefined) {
+    // An inline runtime block without a distribution — someone wrote
+    // `runtime.include` first. Filled leaf by leaf, as before the lock, so
+    // nothing they wrote is moved.
+    const entry = selectEntry(await registry(), harnessId);
+    edits.push(
+      { path: ["runtime", "kind"], value: "harness" },
+      { path: ["runtime", "registryId"], value: entry.id },
+      { path: ["runtime", "distribution"], value: entry.distribution },
+      { path: ["runtime", "license"], value: entry.license },
+      { path: ["runtime", "licenseUrl"], value: entry.licenseUrl },
+    );
+  }
+
+  // Where the person-written harness fields live: top level beside
+  // `harness`, or inside an inline `runtime`.
+  const fieldsAt = shortForm ? [] : ["runtime"];
+  if (migrate) {
+    // Carried across as written, ahead of anything inferred, so a hand-made
+    // include survives the move.
+    for (const field of HARNESS_PROJECT_FIELDS) {
+      if (runtimeBlock[field] !== undefined) {
+        edits.push({ path: [field], value: runtimeBlock[field] });
+      }
+    }
+    edits.push({ path: ["runtime"], value: undefined, replace: true });
+  }
+
+  // Inferred fields are only ever filled, never replaced — not even by
+  // --force. A developer who edited `include` meant it; deleting the key and
+  // re-running is how to ask for detection again.
+  const declaredInclude = readStrings(
+    migrate ? runtimeBlock.include : valueIn(existing, fieldsAt, "include"),
+  );
+  const declaredToolchains = migrate
+    ? runtimeBlock.toolchains
+    : valueIn(existing, fieldsAt, "toolchains");
+  const inferredInclude =
+    declaredInclude === undefined && detection.include.length > 0
+      ? detection.include
+      : [];
+  const effectiveInclude =
+    declaredInclude ?? inferredInclude.map((entry) => entry.value);
+  const notes = [...pinNotes, ...detection.notes];
+  const inferredToolchains: Inferred<HarnessToolchain>[] = [];
+  if (declaredToolchains === undefined) {
+    for (const toolchain of detection.toolchains) {
+      // A toolchain whose lockfile is not shipped fails validation, so one
+      // that the developer's own include leaves out is reported, not written.
+      if (covers(effectiveInclude, toolchain.value.lockfile)) {
+        inferredToolchains.push(toolchain);
+      } else {
+        notes.push(
+          `${toolchain.value.lockfile} found, but include does not ship it, so no ${toolchain.value.kind} toolchain was added.`,
+        );
+      }
+    }
+  }
+  const includeKey = [...fieldsAt, "include"].join(".");
+  const toolchainsKey = [...fieldsAt, "toolchains"].join(".");
+  if (inferredInclude.length > 0) {
+    edits.push({
+      path: [...fieldsAt, "include"],
+      value: inferredInclude.map((entry) => entry.value),
+    });
+  }
+  if (inferredToolchains.length > 0) {
+    edits.push({
+      path: [...fieldsAt, "toolchains"],
+      value: inferredToolchains.map((entry) => entry.value),
+    });
+  }
+
+  const changed = await applyConfigEdits(root, edits);
+  // Inferred keys are listed with their reasons below, not as bare `+ key`.
+  const inferredKeys = new Set([
+    ...(inferredInclude.length > 0 ? [includeKey] : []),
+    ...(inferredToolchains.length > 0 ? [toolchainsKey] : []),
   ]);
 
+  let lockUpdated = false;
+  if (lockText !== undefined && (await readRawLock(root)) !== lockText) {
+    await writeFile(lockPath(root), lockText, "utf8");
+    lockUpdated = true;
+  }
+
   const ignored = await ensureGitignore(root);
+
+  const inferred = [
+    ...(inferredKeys.has(includeKey) && changed.includes(includeKey)
+      ? inferredInclude.map((entry) => ({ field: "include", ...entry }))
+      : []),
+    ...(inferredKeys.has(toolchainsKey) && changed.includes(toolchainsKey)
+      ? inferredToolchains.map((entry) => ({ field: "toolchains", ...entry }))
+      : []),
+  ];
 
   if (context.output === "json") {
     emitJson(context, {
       configPath: join(root, CONFIG_FILENAME),
       created: !existed,
       changed,
-      harness: { id: entry.id, version: entry.version },
+      harness: lock
+        ? { id: lock.harness.registryId, version: lock.harness.version }
+        : { id: harnessId },
+      ...(lock ? { lockPath: lockPath(root), lockUpdated } : {}),
+      ...(detectedHarness ? { detectedFrom: detectedHarness.reason } : {}),
+      inferred,
+      notes,
       gitignoreUpdated: ignored,
     });
     return;
   }
 
-  if (changed.length === 0 && !ignored) {
-    context.out(`${CONFIG_FILENAME} is already complete — nothing to do.`);
+  if (detectedHarness) {
+    context.out(
+      `detected ${detectedHarness.value} (${detectedHarness.reason})`,
+    );
+  }
+  if (changed.length === 0 && !lockUpdated && !ignored) {
+    context.out(
+      `${lock ? `${CONFIG_FILENAME} and ${LOCK_FILENAME} are` : `${CONFIG_FILENAME} is`} already complete — nothing to do.`,
+    );
+    for (const note of notes) context.out(`note: ${note}`);
+    if (inline) context.out(inlineHint);
     return;
   }
-  context.out(
-    `${existed ? "Updated" : "Created"} ${CONFIG_FILENAME} for ${entry.name} ${entry.version}.`,
-  );
-  for (const key of changed) context.out(`  + ${key}`);
+
+  const reported = changed.filter((key) => !inferredKeys.has(key));
+  if (reported.length > 0) {
+    context.out(`${existed ? "Updated" : "Created"} ${CONFIG_FILENAME}.`);
+    for (const key of reported) {
+      context.out(`  ${key === "runtime" && migrate ? "-" : "+"} ${key}`);
+    }
+  }
+  if (lock && lockUpdated) context.out(describePin(lock));
+  if (inferred.length > 0) {
+    context.out("inferred from the project:");
+    const width = Math.max(...inferred.map((entry) => label(entry).length));
+    let previous: string | undefined;
+    for (const entry of inferred) {
+      const field = entry.field === previous ? "" : entry.field;
+      previous = entry.field;
+      context.out(
+        `  ${field.padEnd(10)} ${label(entry).padEnd(width)}  ${entry.reason}`,
+      );
+    }
+  }
+  for (const note of notes) context.out(`note: ${note}`);
   if (ignored) context.out("  + .gitignore (.radius/)");
+  if (inline && !migrate) context.out(inlineHint);
   context.out("\nNext: `radius dev` to run it against the Radius desktop app.");
+}
+
+const inlineHint = `${CONFIG_FILENAME} pins its harness inline. \`radius init --force\` moves the pin into ${LOCK_FILENAME}.`;
+
+function label(entry: {
+  field: string;
+  value: string | HarnessToolchain;
+}): string {
+  return typeof entry.value === "string"
+    ? entry.value
+    : `${entry.value.kind} ${entry.value.version}`;
+}
+
+/** e.g. `pinned opencode 1.19.4 for 6 platforms (sha256 verified at install) → radius.lock`. */
+function describePin(lock: RadiusLock): string {
+  const { registryId, version, distribution } = lock.harness;
+  if (distribution.kind !== "binary") {
+    return `pinned ${registryId} ${version} (${distribution.kind} ${distribution.package}) → ${LOCK_FILENAME}`;
+  }
+  const platforms = Object.values(distribution.platforms);
+  const digested = platforms.filter((artifact) => artifact.sha256).length;
+  const verification =
+    digested === platforms.length
+      ? "sha256 verified at install"
+      : `sha256 verified at install for ${digested}`;
+  return `pinned ${registryId} ${version} for ${platforms.length} platform${platforms.length === 1 ? "" : "s"} (${verification}) → ${LOCK_FILENAME}`;
+}
+
+function parseExisting(raw: string): Record<string, unknown> & {
+  runtime?: unknown;
+  harness?: unknown;
+  name?: unknown;
+} {
+  const errors: ParseError[] = [];
+  const parsed: unknown = parse(raw, errors, { allowTrailingComma: true });
+  if (errors.length > 0 || !isRecord(parsed)) {
+    throw new UsageError(
+      `${CONFIG_FILENAME} is not a valid JSON object, so init cannot fill it in without risking what is there.`,
+    );
+  }
+  if ("harness" in parsed && "runtime" in parsed) {
+    throw new UsageError(
+      `${CONFIG_FILENAME} has both \`harness\` and \`runtime\`. Keep one: \`harness\` pins through ${LOCK_FILENAME}, \`runtime\` pins inline.`,
+    );
+  }
+  return parsed;
+}
+
+function readPin(value: unknown): { id: string; version: string } | undefined {
+  if (value === undefined) return undefined;
+  const result = HarnessPinSchema.safeParse(value);
+  if (!result.success) {
+    throw new UsageError(
+      `${CONFIG_FILENAME}: harness: ${result.error.issues[0]?.message ?? "invalid"}`,
+    );
+  }
+  return parseHarnessPin(result.data);
+}
+
+/** A lock `init` can trust, or nothing — a broken lock is regenerated. */
+async function readCurrentLock(root: string): Promise<RadiusLock | undefined> {
+  const raw = await readRawLock(root);
+  if (raw === null) return undefined;
+  const parsed = parseLock(raw);
+  return "lock" in parsed ? parsed.lock : undefined;
+}
+
+function valueIn(
+  source: Record<string, unknown>,
+  prefix: readonly string[],
+  key: string,
+): unknown {
+  let cursor: unknown = source;
+  for (const segment of [...prefix, key]) {
+    if (!isRecord(cursor)) return undefined;
+    cursor = cursor[segment];
+  }
+  return cursor;
+}
+
+function readStrings(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+/** The schema's own coverage rule, applied before writing rather than after. */
+function covers(include: readonly string[], path: string): boolean {
+  return include.some((entry) =>
+    entry.endsWith("/") ? path.startsWith(entry) : path === entry,
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** The one foreign file init touches directly, and only ever by appending. */
@@ -137,8 +451,15 @@ async function ensureGitignore(root: string): Promise<boolean> {
   if (current.split("\n").some((line) => line.trim() === ".radius/")) {
     return false;
   }
-  await appendFile(path, current && !current.endsWith("\n") ? "\n.radius/\n" : ".radius/\n");
+  await appendFile(
+    path,
+    current && !current.endsWith("\n") ? "\n.radius/\n" : ".radius/\n",
+  );
   return true;
+}
+
+async function run(this: RadiusContext, flags: InitFlags): Promise<void> {
+  await runInit(this, flags);
 }
 
 export default handler<InitFlags, []>(run);
