@@ -23,6 +23,6 @@ export const agentBuildCommand = buildCommand({
   docs: {
     brief: "Package this agent into an immutable image a Radius app can import",
     fullDescription:
-      "Builds a Linux OCI layout (ARM64 on macOS, AMD64 on Windows x64) from radius.json, records a receipt under .radius/builds/, and by default boots the result in a microVM to check it answers ACP (--skip-verify to stop at the layout).\n\nWorks for every runtime kind: a TypeScript or Python agent is compiled from its entrypoint, and a harness agent ships the pinned harness plus the project tree declared in runtime.include.",
+      "Builds a Linux OCI layout (ARM64 on macOS, AMD64 on Windows x64) from radius.json, records a receipt under .radius/builds/, and by default boots the result in a microVM to check it answers ACP (--skip-verify to stop at the layout).\n\nA TypeScript or Python agent is compiled from its entrypoint, and a harness agent ships the pinned harness plus the project tree declared in runtime.include. A langgraph runtime cannot be packaged yet; radius dev and radius check run it.",
   },
 });

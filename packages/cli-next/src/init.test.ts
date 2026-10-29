@@ -440,3 +440,133 @@ test("with nothing to detect and nobody to ask, init names the flag", async () =
     /--harness <id>/,
   );
 });
+
+/** A Python LangGraph project the way `langgraph new` lays one out. */
+const langgraphProject = {
+  "langgraph.json": JSON.stringify({
+    dependencies: ["."],
+    graphs: {
+      agent: "./src/agent/graph.py:graph",
+      triage: { path: "agent.triage:graph", description: "Sorts tickets" },
+    },
+  }),
+  "src/agent/graph.py": "",
+  "pyproject.toml": '[project]\nname = "agent"\nversion = "0.1.0"\n',
+  "uv.lock": "version = 1\n",
+};
+
+test("a Python langgraph.json becomes a langgraph runtime, with no registry and no lock", async () => {
+  const root = await project(langgraphProject);
+  const run = context(root);
+  const registry = fakeRegistry();
+  await runInit(run.context, flags(), registry);
+  assert.equal(registry.calls.count, 0);
+
+  const config = await readJson(join(root, "radius.json"));
+  assert.deepEqual(Object.keys(config), [
+    "$schema",
+    "agent",
+    "name",
+    "version",
+    "runtime",
+  ]);
+  assert.deepEqual(
+    config.runtime,
+    { kind: "langgraph" },
+    "defaults are left to the schema",
+  );
+  await assert.rejects(readFile(join(root, "radius.lock"), "utf8"), {
+    code: "ENOENT",
+  });
+  assert.match(
+    run.text(),
+    /^detected langgraph \(langgraph\.json: graphs agent, triage\)$/m,
+  );
+  assert.match(
+    await readFile(join(root, ".gitignore"), "utf8"),
+    /^\.radius\/$/m,
+  );
+
+  const loaded = await loadConfigFile(root);
+  assert.equal(loaded.config.runtime.kind, "langgraph");
+  if (loaded.config.runtime.kind === "langgraph") {
+    assert.equal(loaded.config.runtime.config, "langgraph.json");
+    assert.equal(loaded.config.runtime.adapter, "radius-langgraph==0.0.1");
+  }
+});
+
+test("a second langgraph init changes nothing and says so", async () => {
+  const root = await project(langgraphProject);
+  await runInit(context(root).context, flags(), fakeRegistry());
+  const before = {
+    config: await readFile(join(root, "radius.json"), "utf8"),
+    ignore: await readFile(join(root, ".gitignore"), "utf8"),
+  };
+
+  const second = context(root);
+  const registry = fakeRegistry();
+  await runInit(second.context, flags(), registry);
+  assert.equal(registry.calls.count, 0);
+  assert.match(second.text(), /radius\.json is already complete/);
+  assert.deepEqual(
+    {
+      config: await readFile(join(root, "radius.json"), "utf8"),
+      ignore: await readFile(join(root, ".gitignore"), "utf8"),
+    },
+    before,
+  );
+});
+
+test("a langgraph runtime already in radius.json is filled in, not replaced", async () => {
+  const root = await project({
+    ...langgraphProject,
+    "radius.json": JSON.stringify({
+      name: "Triage",
+      runtime: { kind: "langgraph", graph: "triage" },
+    }),
+  });
+  const run = context(root, "json");
+  const registry = fakeRegistry();
+  await runInit(run.context, flags(), registry);
+  assert.equal(registry.calls.count, 0);
+  const config = await readJson(join(root, "radius.json"));
+  assert.equal(config.name, "Triage");
+  assert.deepEqual(config.runtime, { kind: "langgraph", graph: "triage" });
+  const envelope = run.json() as {
+    data: { changed: string[]; detectedFrom?: string };
+  };
+  assert.deepEqual(envelope.data.changed, ["$schema", "agent", "version"]);
+  assert.equal(envelope.data.detectedFrom, undefined);
+});
+
+test("--harness wins over a langgraph.json", async () => {
+  const root = await project(langgraphProject);
+  await runInit(
+    context(root).context,
+    flags({ harness: "opencode" }),
+    fakeRegistry(),
+  );
+  const config = await readJson(join(root, "radius.json"));
+  assert.equal(config.harness, "opencode@1.19.4");
+  assert.equal("runtime" in config, false);
+});
+
+test("JavaScript graphs are not taken for a langgraph runtime", async () => {
+  const root = await project({
+    "langgraph.json": JSON.stringify({
+      graphs: { agent: "./src/agent.ts:graph" },
+    }),
+  });
+  const run = context(root);
+  const notes: string[] = [];
+  (run.context as { note: (message: string) => void }).note = (message) =>
+    notes.push(message);
+  const registry = fakeRegistry();
+  // The existing path takes over, and with nobody to ask it names the flag.
+  await assert.rejects(
+    () => runInit(run.context, flags(), registry),
+    /--harness <id>/,
+  );
+  assert.equal(registry.calls.count, 0);
+  assert.match(notes.join("\n"), /Python graphs only for now/);
+});
