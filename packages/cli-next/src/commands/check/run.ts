@@ -1,11 +1,9 @@
-import type { AgentConfig } from "@curve-ai/agent-contracts";
-
 import { checkAgent, type CheckResult, type Verdict } from "../../check.js";
 import { loadConfig } from "../../config.js";
 import { emitJson, emitJsonError, type RadiusContext } from "../../context.js";
-import { EXIT_OPERATIONAL, UsageError } from "../../errors.js";
+import { EXIT_OPERATIONAL } from "../../errors.js";
 import { handler } from "../../handler.js";
-import { resolveHarness } from "../../harness.js";
+import { resolveStartCommand, startEnvironment } from "../../start-command.js";
 
 interface CheckFlags {
   readonly verbose: boolean;
@@ -17,7 +15,19 @@ async function run(this: RadiusContext, flags: CheckFlags): Promise<void> {
   const context = this;
   const root = context.cwd;
   const config = await loadConfig(root);
-  const command = await startCommand(config, root, context);
+  // The same resolver `dev` uses, so a passing check is about the process
+  // `dev` would actually start.
+  const start = await resolveStartCommand(
+    config,
+    root,
+    {
+      platform: context.process.platform,
+      arch: context.process.arch,
+      env: context.env,
+    },
+    (message) => context.note(message),
+  );
+  const command = start.command;
 
   context.out(`checking ${config.name}`);
   context.out(`  command   ${command.join(" ")}`);
@@ -26,7 +36,7 @@ async function run(this: RadiusContext, flags: CheckFlags): Promise<void> {
   const result = await checkAgent({
     command,
     root,
-    env: context.env,
+    env: startEnvironment(start, context.env),
     timeoutMs: flags.timeout * 1000,
     abort: context.untilStopped(),
     onFrame: flags.verbose
@@ -66,30 +76,6 @@ async function run(this: RadiusContext, flags: CheckFlags): Promise<void> {
       ? `passed in ${seconds(result.probe.elapsedMs)}`
       : headline(result),
   );
-}
-
-/**
- * Only a harness has a start command this CLI can resolve today. The other
- * kinds are refused by name rather than guessed at: a check that probed the
- * wrong command would report on an agent nobody runs.
- */
-async function startCommand(
-  config: AgentConfig,
-  root: string,
-  context: RadiusContext,
-): Promise<readonly string[]> {
-  if (config.runtime.kind !== "harness") {
-    throw new UsageError(
-      `radius check does not support runtime.kind "${config.runtime.kind}" yet — only "harness".`,
-    );
-  }
-  const harness = await resolveHarness(
-    config,
-    root,
-    { platform: context.process.platform, arch: context.process.arch },
-    (message) => context.note(message),
-  );
-  return harness.command;
 }
 
 function render(context: RadiusContext, verdict: Verdict): void {
