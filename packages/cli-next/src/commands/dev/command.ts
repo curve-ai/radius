@@ -14,14 +14,15 @@ export const devCommand = buildCommand({
       },
       verbose: {
         kind: "boolean",
-        brief: "Log every ACP frame as it crosses the bridge",
+        brief:
+          "Also print the endpoint, descriptor and command, and log every ACP frame",
         default: false,
       },
     },
   },
   docs: {
-    brief: "Run this agent's harness and connect it to the Radius desktop app",
+    brief: "Serve this agent to the Radius desktop app, one process per thread",
     fullDescription:
-      "Starts the harness declared in radius.json, speaks ACP to it over stdio, and registers it so a running Radius picks it up.\n\nBrings the Radius desktop app up if it is installed and not already running; the agent is registered either way, so --no-open changes nothing but the convenience.\n\nThe harness is downloaded and checksum-verified on first use, then cached by digest.",
+      "Checks the agent declared in radius.json starts and speaks ACP, then registers it so a running Radius picks it up. Every thread the desktop opens gets its own process over stdio; one crashing ends only that thread. Runs harness, typescript, python and command runtimes.\n\nBrings the Radius desktop app up if it is installed and not already running; the agent is registered either way, so --no-open changes nothing but the convenience.\n\nThe harness is downloaded and checksum-verified on first use, then cached by digest.",
   },
 });
