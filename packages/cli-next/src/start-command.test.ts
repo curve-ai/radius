@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { AgentConfigSchema } from "@curve-ai/agent-contracts";
 
 import { UsageError } from "./errors.js";
-import { resolveStartCommand } from "./start-command.js";
+import { resolveStartCommand, startEnvironment } from "./start-command.js";
 
 const silent = (): void => {};
 
@@ -64,6 +64,26 @@ test("a harness keeps the runner it was published with", async () => {
   assert.deepEqual([...resolved.command], ["npx", "-y", "p@1.2.3", "--acp"]);
   assert.equal(resolved.summary, "harness example");
   assert.deepEqual(resolved.harness, { source: "npx p@1.2.3", cached: false });
+});
+
+test("a harness carries the env its config sets, over the caller's", async () => {
+  const resolved = await resolveStartCommand(
+    config({
+      kind: "harness",
+      distribution: { kind: "npx", package: "p@1.2.3" },
+      env: { OPENCODE_CONFIG: "./opencode-async.json" },
+    }),
+    process.cwd(),
+    host(await pathWith("npx")),
+    silent,
+  );
+  assert.deepEqual(resolved.env, { OPENCODE_CONFIG: "./opencode-async.json" });
+  const env = startEnvironment(resolved, {
+    PATH: "/bin",
+    OPENCODE_CONFIG: "./opencode.json",
+  });
+  assert.equal(env.OPENCODE_CONFIG, "./opencode-async.json");
+  assert.equal(env.PATH, "/bin");
 });
 
 test("a harness whose runner is missing names what to install", async () => {
