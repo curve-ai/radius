@@ -226,6 +226,15 @@ async function buildFor(
       }
       return buildHarnessOciLayout({ root, config, platform, onProgress });
     }
+    case "langgraph":
+      // The image would need the adapter and the project's graph
+      // dependencies installed from its lockfile; until that exists a build
+      // would ship a graph that cannot import. Refused up front for the same
+      // reason as the npx/uvx harnesses.
+      throw new UsageError(
+        'radius build cannot package a "langgraph" runtime yet.\n\n' +
+          "`radius dev` and `radius check` run this graph today.",
+      );
     case "command":
       throw new UsageError(
         'runtime.kind "command" is an argv with no source, so there is nothing to package. Declare a harness instead — `radius init --harness <id>`.',

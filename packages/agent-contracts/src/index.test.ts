@@ -43,6 +43,39 @@ test("accepts a Python ACP runtime without changing the manifest contract", () =
   });
 });
 
+test("a langgraph runtime needs only its kind", () => {
+  const config = AgentConfigSchema.parse({
+    name: "Graphs",
+    runtime: { kind: "langgraph" },
+  });
+  assert.deepEqual(config.runtime, {
+    kind: "langgraph",
+    config: "langgraph.json",
+    python: "3.12",
+    lockfile: "uv.lock",
+    adapter: "radius-langgraph==0.0.1",
+  });
+  const pinned = AgentConfigSchema.parse({
+    name: "Graphs",
+    runtime: { kind: "langgraph", graph: "triage", adapter: "../adapter" },
+  });
+  assert.equal(
+    pinned.runtime.kind === "langgraph" && pinned.runtime.graph,
+    "triage",
+  );
+  for (const runtime of [
+    { kind: "langgraph", config: "../langgraph.json" },
+    { kind: "langgraph", python: "3" },
+    { kind: "langgraph", graph: "" },
+  ]) {
+    assert.equal(
+      AgentConfigSchema.safeParse({ name: "Graphs", runtime }).success,
+      false,
+      JSON.stringify(runtime),
+    );
+  }
+});
+
 test("rejects entrypoints that escape the project root", () => {
   assert.equal(
     RelativeProjectPathSchema.safeParse("../agent.ts").success,

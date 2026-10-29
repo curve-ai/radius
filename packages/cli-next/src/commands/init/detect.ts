@@ -4,6 +4,8 @@ import { join } from "node:path";
 import type { HarnessToolchain } from "@curve-ai/agent-contracts";
 import { parse as parseToml } from "smol-toml";
 
+import { readLanggraphGraphs } from "../../project-agents.js";
+
 /**
  * What `init` can tell about a project by looking at it.
  *
@@ -137,6 +139,58 @@ export async function detectProject(
   }
 
   return { harness, include, toolchains, notes };
+}
+
+export interface LanggraphDetection {
+  readonly graphs: readonly string[];
+  /**
+   * `python` when every graph is Python, which is all the Radius adapter can
+   * serve; `other` as soon as one is not, so a mixed project is not half
+   * served.
+   */
+  readonly language: "python" | "other";
+}
+
+/**
+ * A `langgraph.json` at the root, and whether its graphs are Python.
+ *
+ * Read from the graph references alone, the way the LangGraph CLI tells them
+ * apart: `./file.py:attr` and a dotted `module:attr` are Python, and a
+ * `.ts`/`.js` path is JavaScript. Nothing is imported to find out.
+ */
+export async function detectLanggraph(
+  root: string,
+): Promise<LanggraphDetection | null> {
+  const graphs = await readLanggraphGraphs(join(root, "langgraph.json"));
+  if (graphs === null) return null;
+  const names = Object.keys(graphs);
+  const python =
+    names.length > 0 &&
+    Object.values(graphs).every((reference) =>
+      isPythonGraph(graphPath(reference)),
+    );
+  return { graphs: names, language: python ? "python" : "other" };
+}
+
+/** A graph is either `"path:attr"` or `{ "path": "path:attr", ... }`. */
+function graphPath(reference: unknown): string | undefined {
+  if (typeof reference === "string") return reference;
+  if (reference && typeof reference === "object") {
+    const path = (reference as { path?: unknown }).path;
+    if (typeof path === "string") return path;
+  }
+  return undefined;
+}
+
+function isPythonGraph(reference: string | undefined): boolean {
+  if (!reference) return false;
+  const colon = reference.lastIndexOf(":");
+  const target = colon === -1 ? reference : reference.slice(0, colon);
+  if (/\.py$/i.test(target)) return true;
+  // A module path has no slashes and no file extension.
+  return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(target)
+    ? !/\.(?:[cm]?[jt]sx?)$/i.test(target)
+    : false;
 }
 
 function isCanonicalOpencode(name: string): boolean {

@@ -69,6 +69,30 @@ export const PythonRuntimeConfigSchema = z.object({
   lockfile: RelativeProjectPathSchema.default("uv.lock"),
 });
 
+/**
+ * A LangGraph project served as-is: Radius brings the ACP adapter, so the
+ * project keeps its `langgraph.json` and graph code and never imports ACP.
+ * Python graphs only for now.
+ */
+export const LangGraphRuntimeConfigSchema = z.object({
+  kind: z.literal("langgraph"),
+  config: RelativeProjectPathSchema.default("langgraph.json"),
+  /** Serve one graph instead of every graph `config` lists. */
+  graph: nonempty.optional(),
+  python: z
+    .string()
+    .regex(/^3\.\d+$/)
+    .default("3.12"),
+  lockfile: RelativeProjectPathSchema.default("uv.lock"),
+  /**
+   * The uv requirement that provides `radius-langgraph`. Pinned so a
+   * project runs on the adapter it was tested against; a path (leading
+   * `.`, `/` or `~`) points at a local checkout instead, resolved against
+   * the project.
+   */
+  adapter: nonempty.default("radius-langgraph==0.0.1"),
+});
+
 export const CommandRuntimeConfigSchema = z.object({
   kind: z.literal("command"),
   command: z.array(nonempty).min(1),
@@ -266,6 +290,7 @@ export const HarnessRuntimeConfigSchema = z
 export const AgentRuntimeConfigSchema = z.discriminatedUnion("kind", [
   TypeScriptRuntimeConfigSchema,
   PythonRuntimeConfigSchema,
+  LangGraphRuntimeConfigSchema,
   CommandRuntimeConfigSchema,
   HarnessRuntimeConfigSchema,
 ]);
@@ -412,6 +437,9 @@ export type AgentConfig = z.output<typeof AgentConfigSchema>;
 export type AgentManifest = z.output<typeof AgentManifestSchema>;
 export type AgentRuntimeConfig = z.output<typeof AgentRuntimeConfigSchema>;
 export type HarnessRuntimeConfig = z.output<typeof HarnessRuntimeConfigSchema>;
+export type LangGraphRuntimeConfig = z.output<
+  typeof LangGraphRuntimeConfigSchema
+>;
 export type HarnessDistribution = z.output<typeof HarnessDistributionSchema>;
 export type HarnessPlatformArtifact = z.output<
   typeof HarnessPlatformArtifactSchema
