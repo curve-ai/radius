@@ -43,9 +43,15 @@ export async function buildAgent(
   options: BuildOptions,
 ): Promise<AgentBuildReceipt> {
   const { config } = await loadAgentConfig(options.root, options.configPath);
-  if (config.runtime.kind === "command") {
+  // An allowlist rather than refusing `command` alone: the ternary below
+  // would otherwise hand any newer kind (harness, langgraph) to the
+  // TypeScript builder.
+  if (
+    config.runtime.kind !== "typescript" &&
+    config.runtime.kind !== "python"
+  ) {
     throw new Error(
-      "radius build requires a TypeScript or Python build runtime",
+      `radius build requires a TypeScript or Python build runtime; this config declares "${config.runtime.kind}"`,
     );
   }
   const defaultBuilder =

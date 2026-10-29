@@ -119,15 +119,30 @@ async function discoverOpencode(root: string): Promise<ProjectAgents | null> {
 }
 
 async function discoverLanggraph(root: string): Promise<ProjectAgents | null> {
-  const config = await readJsonc(join(root, "langgraph.json"));
-  if (config === null) return null;
-  const graphs = (config as { graphs?: unknown }).graphs;
+  const graphs = await readLanggraphGraphs(join(root, "langgraph.json"));
+  if (graphs === null) return null;
   return {
     framework: "langgraph",
-    graphs:
-      graphs && typeof graphs === "object" ? Object.keys(graphs).sort() : [],
+    graphs: Object.keys(graphs).sort(),
     sources: ["langgraph.json"],
   };
+}
+
+/**
+ * The `graphs` map of a `langgraph.json`, or null when there is no such
+ * file. A file without a usable `graphs` object reads as empty rather than
+ * missing, so callers can tell "not a LangGraph project" from "one that
+ * defines nothing".
+ */
+export async function readLanggraphGraphs(
+  path: string,
+): Promise<Readonly<Record<string, unknown>> | null> {
+  const config = await readJsonc(path);
+  if (config === null) return null;
+  const graphs = (config as { graphs?: unknown } | undefined)?.graphs;
+  return graphs && typeof graphs === "object" && !Array.isArray(graphs)
+    ? (graphs as Record<string, unknown>)
+    : {};
 }
 
 async function markdownFiles(directory: string): Promise<string[]> {

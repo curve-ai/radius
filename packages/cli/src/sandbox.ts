@@ -30,8 +30,7 @@ export interface SandboxOptions {
 }
 
 export type AgentOciBuildResult =
-  | PythonOciBuildResult
-  | TypeScriptOciBuildResult;
+  PythonOciBuildResult | TypeScriptOciBuildResult;
 
 export interface BuiltSandboxOptions extends SandboxOptions {
   build: AgentOciBuildResult;
@@ -49,9 +48,14 @@ export async function startSandboxAgent(
       "Radius sandbox development currently requires Apple Silicon macOS",
     );
   }
-  if (options.config.runtime.kind === "command") {
+  // An allowlist for the same reason as `buildAgent`: the ternary below
+  // routes everything that is not Python to the TypeScript builder.
+  if (
+    options.config.runtime.kind !== "typescript" &&
+    options.config.runtime.kind !== "python"
+  ) {
     throw new Error(
-      "Sandbox development requires a TypeScript or Python build runtime",
+      `Sandbox development requires a TypeScript or Python build runtime; this config declares "${options.config.runtime.kind}"`,
     );
   }
 
@@ -113,10 +117,7 @@ export async function startBuiltSandboxAgent(
       translation: imagePlatform === "linux/amd64" ? "native" : "none",
     },
     process: {
-      arguments:
-        options.config.runtime.kind === "python"
-          ? ["python", "-m", options.config.runtime.module]
-          : ["node", "/opt/agent/agent.mjs"],
+      arguments: sandboxProcessArguments(options.config),
       user: "10000:10000",
       statePath: "/opt/data",
     },
@@ -299,5 +300,23 @@ async function requirePath(path: string, label: string): Promise<void> {
     await access(path);
   } catch {
     throw new Error(`Radius ${label} is missing: ${path}`);
+  }
+}
+
+/**
+ * The argv inside an image this package built. Only the two kinds it builds
+ * are known; anything else would otherwise be started as the TypeScript
+ * entrypoint, which the image does not contain.
+ */
+function sandboxProcessArguments(config: AgentConfig): string[] {
+  switch (config.runtime.kind) {
+    case "python":
+      return ["python", "-m", config.runtime.module];
+    case "typescript":
+      return ["node", "/opt/agent/agent.mjs"];
+    default:
+      throw new Error(
+        `Sandbox development requires a TypeScript or Python build runtime; this config declares "${config.runtime.kind}"`,
+      );
   }
 }
