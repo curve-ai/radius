@@ -373,11 +373,29 @@ test("an inline runtime is left alone, and --force moves it to the short form", 
   ]);
   await loadConfigFile(root);
 
+  // The registry has moved on; migrating must keep the inline pin rather
+  // than upgrade it, and needs nothing from the registry to do so.
   const forced = context(root);
-  await runInit(forced.context, flags({ force: true }), fakeRegistry());
+  const moved = fakeRegistry("2.2.0");
+  await runInit(forced.context, flags({ force: true }), moved);
+  assert.equal(moved.calls.count, 0);
   const config = await readJson(join(root, "radius.json"));
   assert.equal("runtime" in config, false);
   assert.equal(config.harness, "opencode@1.19.4");
+  // Defaults the inline form wrote out are dropped; the lock keeps the
+  // inline artifact byte for byte.
+  assert.equal("schemaVersion" in config, false);
+  const lock = await readJson(join(root, "radius.lock"));
+  assert.deepEqual(
+    (lock.harness as { distribution: { platforms: unknown } }).distribution
+      .platforms,
+    {
+      "linux/arm64": {
+        archive: entry.distribution.binary["linux-aarch64"].archive,
+        sha256: "3".repeat(64),
+      },
+    },
+  );
   assert.equal(config.agent, "agent_e8ef37424de7ded8");
   // What was in runtime moved across as it was, not re-inferred.
   assert.deepEqual(config.include, [".opencode/", "custom/"]);

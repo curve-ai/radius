@@ -79,6 +79,54 @@ export function lockFromEntry(entry: RegistryEntry): RadiusLock {
 }
 
 /**
+ * A lock rebuilt from a pin that was written inline, before the lock existed.
+ *
+ * Moving a pin into the lock must not upgrade it, and the registry serves
+ * only its latest version, so the inline block is the one source that still
+ * knows what was pinned. The inline form never recorded a version, so it is
+ * read back out of the artifacts: a release URL's `/v1.2.3/` segment, or a
+ * package's `@1.2.3`. Undefined when neither is there, and the caller falls
+ * back to the registry and says so.
+ */
+export function lockFromInline(
+  block: Record<string, unknown>,
+): RadiusLock | undefined {
+  const parsed = RadiusLockSchema.shape.harness.safeParse({
+    registryId: block.registryId,
+    version: "0",
+    ...(typeof block.license === "string" ? { license: block.license } : {}),
+    ...(typeof block.licenseUrl === "string"
+      ? { licenseUrl: block.licenseUrl }
+      : {}),
+    distribution: block.distribution,
+  });
+  if (!parsed.success) return undefined;
+  const version = versionOf(parsed.data.distribution);
+  if (!version) return undefined;
+  return {
+    "//": LOCK_NOTICE,
+    lockfileVersion: RADIUS_LOCK_VERSION,
+    harness: { ...parsed.data, version },
+  };
+}
+
+function versionOf(
+  distribution: RadiusLock["harness"]["distribution"],
+): string | undefined {
+  if (distribution.kind !== "binary") {
+    return /@(\d[^@/]*)$/.exec(distribution.package)?.[1];
+  }
+  // Every platform must agree; a mixed pin has no single version to name.
+  const versions = new Set(
+    Object.values(distribution.platforms).map(
+      (artifact) => /\/v?(\d+\.\d+\.\d+[^/]*)\//.exec(artifact.archive)?.[1],
+    ),
+  );
+  if (versions.size !== 1) return undefined;
+  return [...versions][0];
+}
+
+/**
  * Fixed key order and formatting, so the same registry entry always produces
  * the same bytes and a re-run of `init` leaves no diff to review.
  */

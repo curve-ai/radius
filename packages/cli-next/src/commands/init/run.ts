@@ -24,6 +24,7 @@ import { OperationalError, UsageError } from "../../errors.js";
 import {
   LOCK_FILENAME,
   lockFromEntry,
+  lockFromInline,
   lockPath,
   parseLock,
   readRawLock,
@@ -153,8 +154,16 @@ export async function runInit(
       currentLock.harness.registryId === pin.id &&
       currentLock.harness.version === pin.version &&
       pin.id === wantedId;
+    const inlineLock =
+      migrate && inlineId === wantedId
+        ? lockFromInline(runtimeBlock)
+        : undefined;
     if (lockAgrees && !flags.force) {
       lock = currentLock;
+    } else if (inlineLock) {
+      // Migrating moves the pin; it does not upgrade it. Re-pinning to the
+      // registry's latest is a separate `--force` once the lock exists.
+      lock = inlineLock;
     } else {
       const entry = selectEntry(await registry(), wantedId);
       // Without --force, a pin is a promise not to move. The registry only
@@ -182,7 +191,7 @@ export async function runInit(
           JSON.stringify(entry.distribution)
       ) {
         pinNotes.push(
-          `the inline pin differed from the registry's current ${entry.id}; ${LOCK_FILENAME} now holds ${entry.version}.`,
+          `the inline pin names no version Radius can read back, so ${LOCK_FILENAME} now holds the registry's current ${entry.id} ${entry.version}.`,
         );
       }
     }
@@ -215,6 +224,13 @@ export async function runInit(
       }
     }
     edits.push({ path: ["runtime"], value: undefined, replace: true });
+    // The inline form wrote every default out. Loading fills them in again,
+    // so the short form drops the ones that say nothing.
+    for (const [field, value] of Object.entries(CONFIG_DEFAULTS)) {
+      if (JSON.stringify(existing[field]) === JSON.stringify(value)) {
+        edits.push({ path: [field], value: undefined, replace: true });
+      }
+    }
   }
 
   // Inferred fields are only ever filled, never replaced — not even by
@@ -318,10 +334,16 @@ export async function runInit(
   }
 
   const reported = changed.filter((key) => !inferredKeys.has(key));
+  // Removal is an edit that replaces a top-level key with nothing.
+  const removed = new Set(
+    edits
+      .filter((edit) => edit.replace && edit.value === undefined)
+      .map((edit) => edit.path[0]),
+  );
   if (reported.length > 0) {
     context.out(`${existed ? "Updated" : "Created"} ${CONFIG_FILENAME}.`);
     for (const key of reported) {
-      context.out(`  ${key === "runtime" && migrate ? "-" : "+"} ${key}`);
+      context.out(`  ${removed.has(key) ? "-" : "+"} ${key}`);
     }
   }
   if (lock && lockUpdated) context.out(describePin(lock));
@@ -342,6 +364,14 @@ export async function runInit(
   if (inline && !migrate) context.out(inlineHint);
   context.out("\nNext: `radius dev` to run it against the Radius desktop app.");
 }
+
+/** What the schema fills in when a field is absent. */
+const CONFIG_DEFAULTS: Readonly<Record<string, unknown>> = {
+  schemaVersion: 1,
+  capabilities: [],
+  networkAllowlist: [],
+  resources: { cpu: 2, memoryMb: 4096, diskMb: 5120 },
+};
 
 const inlineHint = `${CONFIG_FILENAME} pins its harness inline. \`radius init --force\` moves the pin into ${LOCK_FILENAME}.`;
 
