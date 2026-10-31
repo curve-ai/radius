@@ -1,7 +1,7 @@
 {
   "name": "@curve-ai/radius-desktop",
   "productName": "Radius",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "The Radius desktop workspace for local AI agents.",
   "main": "./out/main/index.js",
   "private": true,
