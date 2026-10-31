@@ -394,8 +394,13 @@ jobs:
         env:
           THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
         run: |
-          $arguments = @('-OpenVmmExe', (Join-Path $env:RUNNER_TEMP 'openvmm-bin\openvmm.exe'), '-AllowUnsupportedHost')
-          if ($env:THUMBPRINT) { $arguments += @('-CertificateThumbprint', $env:THUMBPRINT) }
+          # Splat a hashtable: splatting an array passes every item as a
+          # positional value, so "-OpenVmmExe" itself became the path.
+          $arguments = @{
+            OpenVmmExe = Join-Path $env:RUNNER_TEMP 'openvmm-bin\openvmm.exe'
+            AllowUnsupportedHost = $true
+          }
+          if ($env:THUMBPRINT) { $arguments.CertificateThumbprint = $env:THUMBPRINT }
           & ./scripts/build-runtime-host-windows.ps1 @arguments
       - name: Prepare the runtime kernel
         run: ./scripts/prepare-runtime-assets-windows.ps1
