@@ -1,0 +1,38 @@
+[project]
+name = "radius-langgraph"
+version = "0.0.1"
+description = "Serve any LangGraph graph over the Agent Client Protocol on stdio."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "agent-client-protocol==0.12.1",
+  "langchain-core==1.7.1",
+  "langgraph==1.2.18",
+  "langgraph-checkpoint-sqlite==3.1.2",
+]
+
+[project.scripts]
+radius-langgraph = "radius_langgraph.cli:main"
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/radius_langgraph"]
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "pytest-asyncio==1.1.0", "ruff==0.12.12"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+cache_dir = ".pytest_cache"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+cache-dir = ".ruff_cache"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

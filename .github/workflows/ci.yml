@@ -162,6 +162,18 @@ jobs:
         working-directory: examples/python-agent
         run: uv run --locked ruff check .
 
+      - name: Test LangGraph ACP adapter
+        if: runner.os != 'Windows'
+        working-directory: packages/langgraph-acp-python
+        run: uv run --locked pytest
+
+      - name: Lint LangGraph ACP adapter
+        if: runner.os != 'Windows'
+        working-directory: packages/langgraph-acp-python
+        run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+
       - name: Verify the Windows CLI image pipeline
         if: runner.os == 'Linux'
         run: |
