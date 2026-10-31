@@ -43,8 +43,10 @@ async function project(files: Record<string, string>): Promise<string> {
   return root;
 }
 
+// The real platform, not a fixed one: PATH lookup splits on `;` on Windows,
+// and a pretend "darwin" split the runner's `D:\...` paths at the colon.
 function host(path: string) {
-  return { platform: "darwin", arch: "arm64", env: { PATH: path } };
+  return { platform: process.platform, arch: "arm64", env: { PATH: path } };
 }
 
 test("a harness keeps the runner it was published with", async () => {
