@@ -36,13 +36,12 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build the runtime host
-        run: bash scripts/build-runtime-host-macos.sh
-
-      - name: Confirm it runs
-        # A binary that cannot answer `doctor` is not worth publishing, and
-        # this is the cheapest possible check that it links.
-        run: |
-          apps/runtime-host-macos/.build/release/radius-runtime-host doctor --json
+        # build.sh ends by running `doctor`: a binary that cannot answer is not
+        # worth publishing. Hosted runners cannot nest virtualization, so it
+        # answers "unsupported" here, which is still an answer.
+        env:
+          RADIUS_RUNTIME_ALLOW_UNSUPPORTED_HOST: "1"
+        run: sh apps/runtime-host-macos/scripts/build.sh
 
       - name: Name the artifact and record its digest
         id: artifact
@@ -69,10 +68,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach it to the release
+        # --latest=false: the desktop auto-updater follows the repository's
+        # latest release, which must stay a desktop-v* release.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
-            || gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes "Runtime host for the Radius CLI."
+            || gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes "Runtime host for the Radius CLI." --latest=false
           gh release upload "${{ inputs.tag }}" "${{ steps.artifact.outputs.name }}" --clobber

@@ -47,6 +47,10 @@ import {
   mergeSessionTranscriptStreamUpdate,
   sameSessionTranscriptSnapshot,
 } from "@renderer/components/ai/session-stream";
+import {
+  onAgentLinkRequest,
+  takeLinkedAgent,
+} from "@renderer/components/shell/agent-link-request";
 import { ProjectComposerMenu } from "@renderer/components/shell/project-composer-menu";
 import {
   useProjects,
@@ -331,7 +335,7 @@ function useDesktopAgents(): {
           );
           cachedDesktopAgents = usableAgents;
           setAgents(usableAgents);
-          const agent = usableAgents[0] ?? null;
+          const agent = takeLinkedAgent(usableAgents);
           setSelectedAgentIdState(agent?.id ?? null);
           selectModelForAgent(
             agent,
@@ -351,9 +355,11 @@ function useDesktopAgents(): {
     };
     loadAgents();
     const unsubscribe = window.radius.onAgentsChanged(loadAgents);
+    const unsubscribeLinks = onAgentLinkRequest(loadAgents);
     return () => {
       disposed = true;
       unsubscribe();
+      unsubscribeLinks();
     };
   }, []);
 

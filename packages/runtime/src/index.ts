@@ -23,6 +23,7 @@ export {
 export { acpStreamFromChild, type AcpChildProcess } from "./stdio.js";
 export { acpStreamFromWebSocket } from "./websocket.js";
 export {
+  DEVELOPMENT_AGENT_SCHEMA_VERSIONS,
   DevelopmentAgentConnectionSchema,
   parseDevelopmentAgentConnection,
   type DevelopmentAgentConnection,

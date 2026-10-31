@@ -203,4 +203,9 @@ jobs:
 
       - name: Audit dependencies at all severities
         if: runner.os == 'Linux'
-        run: bun audit --audit-level low
+        # GHSA-g3hv-75wg-m249 (minimatch) is fixed only in minimatch 11, which
+        # breaks the eslint, typescript-eslint and electron-builder versions
+        # that depend on older majors. Every copy is development tooling
+        # matching this repository's own patterns, and `bun audit --production`
+        # is clean. Drop the ignore once those tools move to minimatch 11.
+        run: bun audit --audit-level low --ignore=GHSA-g3hv-75wg-m249

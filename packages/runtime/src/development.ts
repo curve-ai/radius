@@ -35,6 +35,13 @@ export const DevelopmentAgentConnectionSchema = z.object({
   registeredAt: z.string().datetime(),
 });
 
+// The descriptor versions this build reads. The desktop advertises them, and
+// its release manifest repeats them, so `radius dev` can tell before writing a
+// descriptor whether the installed app would read it.
+export const DEVELOPMENT_AGENT_SCHEMA_VERSIONS: readonly number[] = [
+  ...DevelopmentAgentConnectionSchema.shape.schemaVersion.values,
+];
+
 export type DevelopmentAgentConnection = z.infer<
   typeof DevelopmentAgentConnectionSchema
 >;

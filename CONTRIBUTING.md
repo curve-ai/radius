@@ -95,3 +95,59 @@ or credentials are required.
 
 Use `bunx turbo run <task> --dry=json` to inspect task inputs and hashes.
 Use `bunx turbo run <task> --force` when an uncached verification is needed.
+
+## Desktop releases
+
+`.github/workflows/desktop-release.yml` builds the desktop app for macOS arm64,
+Windows x64, and Linux x64 and attaches it to a draft GitHub release. There is
+no Intel macOS build: the macOS runtime host needs Apple Silicon.
+
+Nobody edits the desktop version by hand. Released versions live in
+`desktop-v*` tags, and `main` may carry an older version in `package.json`.
+
+1. Optionally, run **Desktop release** manually with `dry-run` set. It builds
+   every platform and keeps the files, `radius-desktop.json`, and `SHA256SUMS`
+   as workflow artifacts without publishing anything.
+2. Run **Desktop release cut** and choose `patch`, `minor`, or `major`, or
+   give an exact version. It bumps the newest stable `desktop-v*` tag (or
+   `package.json` before the first release), commits only
+   `apps/desktop/package.json`, pushes the `desktop-v<version>` tag, and builds
+   the draft release from it. A version that is not newer than the latest
+   release is refused.
+3. Check the draft release, then publish it and mark it as the latest
+   release. The auto-updater and the CLI only see published releases, and the
+   updater follows the repository's latest release, so other releases must not
+   take that place.
+
+Pushing a `desktop-v<version>` tag by hand still builds a release, provided the
+tagged `apps/desktop/package.json` carries that version.
+
+Every release carries `radius-desktop.json`, which the radius CLI reads to
+install the app: per-platform archive URLs, SHA-256 digests, and sizes, plus the
+development agent descriptor versions the app reads.
+`apps/desktop/scripts/release-manifest.ts` writes it and
+`apps/desktop/scripts/release-manifest.schema.json` documents it. Change both
+only in ways an already-released CLI still accepts. The dmg and the NSIS
+installer are attached for people but are not listed in the manifest.
+
+Signing turns on for a platform when its repository secrets exist. Without
+them, the same workflow produces unsigned builds.
+
+| Secret                         | Purpose                                                      |
+| ------------------------------ | ------------------------------------------------------------ |
+| `MACOS_CERTIFICATE_P12`        | Base64 Developer ID Application certificate and key (`.p12`) |
+| `MACOS_CERTIFICATE_PASSWORD`   | Password for that `.p12`                                     |
+| `APPLE_API_KEY_P8`             | App Store Connect API key (`.p8` contents) for notarization  |
+| `APPLE_API_KEY_ID`             | That key's ID                                                |
+| `APPLE_API_ISSUER`             | That key's issuer ID                                         |
+| `WINDOWS_CERTIFICATE_PFX`      | Base64 code signing certificate and key (`.pfx`)             |
+| `WINDOWS_CERTIFICATE_PASSWORD` | Password for that `.pfx`                                     |
+
+Notarization runs only for a signed macOS build.
+
+An unsigned macOS build has no Apple Team ID, so macOS ties keychain access to
+each build. After every install or update, Radius must ask for the user's login
+password before it can read the key that protects its local storage. A signed
+build with the same certificate does not ask again; a self-signed certificate
+does not help. The workflow adds this explanation to the draft release notes
+whenever the macOS build is unsigned.

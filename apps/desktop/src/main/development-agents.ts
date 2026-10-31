@@ -9,7 +9,7 @@ import path from "node:path";
 
 let developmentAgentWatcher: FSWatcher | null = null;
 
-function developmentAgentsPath(): string {
+export function developmentAgentsPath(): string {
   return path.join(app.getPath("userData"), "development", "agents");
 }
 

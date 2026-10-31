@@ -1,7 +1,10 @@
 param(
     [string] $OpenVmmExe,
     [string] $CertificateThumbprint,
-    [string] $TimestampUrl = 'http://timestamp.digicert.com'
+    [string] $TimestampUrl = 'http://timestamp.digicert.com',
+    # Release runners are Windows Server without WHP, where doctor rightly
+    # reports that agents cannot run. It still has to start and answer.
+    [switch] $AllowUnsupportedHost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,5 +51,10 @@ if ($CertificateThumbprint) {
 
 $doctor = (cmd /c "`"$helper`" doctor --json") -join ''
 Write-Host $doctor
-if (-not ($doctor | ConvertFrom-Json).supported) { throw 'doctor reports that this computer cannot run agents.' }
+if (-not ($doctor | ConvertFrom-Json).supported) {
+    if (-not $AllowUnsupportedHost) { throw 'doctor reports that this computer cannot run agents.' }
+    Write-Host 'This computer cannot run agents; continuing because -AllowUnsupportedHost was passed.'
+    # doctor's own exit code would otherwise become this script's result.
+    $global:LASTEXITCODE = 0
+}
 Write-Host "Built $helper and $openvmm"
