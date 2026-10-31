@@ -407,7 +407,7 @@ test("RADIUS_LANGGRAPH_ADAPTER runs a TypeScript adapter checkout with node", as
     config({ kind: "langgraph", language: "typescript" }),
     root,
     {
-      platform: "darwin",
+      platform: process.platform,
       arch: "arm64",
       env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: "./checkout" },
     },
@@ -429,7 +429,7 @@ test("RADIUS_LANGGRAPH_ADAPTER runs a TypeScript adapter checkout with node", as
         config({ kind: "langgraph", language: "typescript" }),
         root,
         {
-          platform: "darwin",
+          platform: process.platform,
           arch: "arm64",
           env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: "./elsewhere" },
         },
