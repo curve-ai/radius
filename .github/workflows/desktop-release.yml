@@ -214,14 +214,21 @@ jobs:
 
       - name: Package the app
         env:
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NOTARIZATION_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          NOTARIZATION_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
           args=(--mac dmg zip --arm64 --publish never)
-          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+          # electron-builder reads an empty CSC_LINK as a certificate path, so
+          # the signing variables exist only when their secrets do.
+          if [ -n "$MACOS_CERTIFICATE_P12" ]; then
+            export CSC_LINK="$MACOS_CERTIFICATE_P12"
+            export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
+            if [ -n "${APPLE_API_KEY:-}" ]; then
+              export APPLE_API_KEY_ID="$NOTARIZATION_KEY_ID"
+              export APPLE_API_ISSUER="$NOTARIZATION_ISSUER"
+            fi
+          else
             # Without a certificate electron-builder skips signing, leaving a
             # broken bundle seal. Sign ad hoc instead; the hardened runtime is
             # off because its library validation rejects ad hoc frameworks.
@@ -406,10 +413,15 @@ jobs:
         run: ./scripts/prepare-bundled-agents-windows.ps1
 
       - name: Package the app
-        env:
-          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: bun run --cwd apps/desktop make --win nsis zip --x64 --publish never
+        run: |
+          # electron-builder reads an empty WIN_CSC_LINK as a certificate path,
+          # so the signing variables exist only when their secrets do.
+          if ($env:WINDOWS_CERTIFICATE_PFX) {
+            $env:WIN_CSC_LINK = $env:WINDOWS_CERTIFICATE_PFX
+            $env:WIN_CSC_KEY_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
+          }
+          bun run --cwd apps/desktop make --win nsis zip --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # electron-builder only warns when an extraResources source is missing.
       - name: Check the packaged runtime
