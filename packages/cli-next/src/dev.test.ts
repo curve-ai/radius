@@ -112,6 +112,7 @@ test(
     const running = devHandler.call(context, {
       verbose: false,
       "no-open": true,
+      yes: false,
     });
 
     await until(
@@ -176,7 +177,11 @@ test(
       "-e",
       "console.error('no key');process.exit(2)",
     ]);
-    await devHandler.call(context, { verbose: false, "no-open": true });
+    await devHandler.call(context, {
+      verbose: false,
+      "no-open": true,
+      yes: false,
+    });
     assert.equal(
       context.failure(),
       1,
