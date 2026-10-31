@@ -82,10 +82,15 @@ jobs:
     # the host neither builds nor runs there.
     runs-on: macos-26
     timeout-minutes: 60
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
     env:
       MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
     steps:
+      - name: Record whether this build is signed
+        id: signing
+        run: echo "signed=${{ env.MACOS_CERTIFICATE_P12 != '' }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -380,13 +385,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          MACOS_SIGNED: ${{ needs.macos-arm64.outputs.signed }}
         run: |
           set -euo pipefail
+          notes="$RUNNER_TEMP/notes.md"
+          echo "Radius desktop $VERSION." > "$notes"
+          if [ "$MACOS_SIGNED" != "true" ]; then
+            # Without a Developer ID (Team ID) signature, macOS ties keychain
+            # access to each build, so every update asks again for the key
+            # that protects local storage.
+            cat >> "$notes" <<'NOTES'
+
+          **macOS:** this build is not signed with an Apple Developer ID. On first
+          launch after installing or updating, macOS asks for your login password
+          so Radius can read its storage key from the keychain. Enter it and choose
+          **Always Allow**. If you deny it, Radius cannot open its local storage.
+          NOTES
+          fi
           # A rerun replaces the files on the existing draft rather than
           # creating a second release.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --verify-tag \
               --title "Radius $VERSION" \
-              --notes "Radius desktop $VERSION."
+              --notes-file "$notes"
           fi
           gh release upload "$TAG" release/* --clobber

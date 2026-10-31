@@ -135,3 +135,10 @@ them, the same workflow produces unsigned builds.
 | `WINDOWS_CERTIFICATE_PASSWORD` | Password for that `.pfx`                                     |
 
 Notarization runs only for a signed macOS build.
+
+An unsigned macOS build has no Apple Team ID, so macOS ties keychain access to
+each build. After every install or update, Radius must ask for the user's login
+password before it can read the key that protects its local storage. A signed
+build with the same certificate does not ask again; a self-signed certificate
+does not help. The workflow adds this explanation to the draft release notes
+whenever the macOS build is unsigned.
