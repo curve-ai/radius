@@ -4,8 +4,9 @@ name: Desktop release
 # draft GitHub release, together with radius-desktop.json, which the radius CLI
 # reads to install the app on first `radius dev`.
 #
-# Push a desktop-v<version> tag whose version matches apps/desktop/package.json.
-# The release stays a draft until someone publishes it, and the auto-updater
+# The Desktop release cut workflow picks the version, tags it and calls this
+# one. Pushing a desktop-v<version> tag whose version matches
+# apps/desktop/package.json also works. The release stays a draft until someone publishes it, and the auto-updater
 # and the CLI see nothing until then. Run it manually with dry-run to build
 # every platform and keep the results as workflow artifacts only.
 #
@@ -21,12 +22,18 @@ on:
         description: Build and keep workflow artifacts, but publish nothing
         type: boolean
         default: true
+  workflow_call:
+    inputs:
+      tag:
+        description: The desktop-v* tag to build and release
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -45,6 +52,9 @@ jobs:
       publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A caller's own ref is main; the release is built from its tag.
+          ref: ${{ inputs.tag }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
@@ -55,19 +65,22 @@ jobs:
       - name: Check the tag against the app version
         id: version
         env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+          DRY_RUN: ${{ inputs.dry-run == true }}
+          CALLED_TAG: ${{ inputs.tag }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version=$(jq -er .version apps/desktop/package.json)
           tag="desktop-v$version"
+          built_from="$REF_TYPE $REF_NAME"
+          [ -n "$CALLED_TAG" ] && built_from="tag $CALLED_TAG"
           publish=true
           if [ "$DRY_RUN" = "true" ]; then
             publish=false
-          elif [ "$REF_TYPE" != "tag" ] || [ "$REF_NAME" != "$tag" ]; then
+          elif [ "$built_from" != "tag $tag" ]; then
             # The updater and the CLI trust the tag to name the version inside.
-            echo "Publishing needs the tag $tag; this run is on $REF_TYPE $REF_NAME." >&2
+            echo "Publishing needs the tag $tag; this run is on $built_from." >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -92,6 +105,9 @@ jobs:
         id: signing
         run: echo "signed=${{ env.MACOS_CERTIFICATE_P12 != '' }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A caller's own ref is main; the release is built from its tag.
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -200,6 +216,9 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A caller's own ref is main; the release is built from its tag.
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -314,6 +333,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A caller's own ref is main; the release is built from its tag.
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -341,6 +363,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A caller's own ref is main; the release is built from its tag.
+          ref: ${{ inputs.tag }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}

@@ -1,0 +1,110 @@
+name: Desktop release cut
+
+# Cuts a desktop release: picks the next version from the newest stable
+# desktop-v* tag, commits it to apps/desktop/package.json, tags that commit,
+# and builds the draft release from the tag.
+#
+# Only the tag is pushed. main keeps its own package.json version, so the
+# version on main can trail the released one; the tags are the record, and
+# the next cut reads them rather than package.json. A tag pushed with the
+# workflow token does not start other workflows, so this run builds the
+# release itself through desktop-release.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Which part of the latest release version to bump
+        type: choice
+        default: patch
+        options: [patch, minor, major]
+      version:
+        description: Exact version instead of a bump (for example 0.5.0 or 0.5.0-rc.1)
+        type: string
+        required: false
+      ref:
+        description: Branch, tag or commit to release from
+        type: string
+        default: main
+      dry-run:
+        description: Compute and commit the version, but push no tag and build nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-cut
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    name: Version and tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          # Every desktop-v* tag is needed to find the latest release.
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - name: Test the version rules
+        run: bun test apps/desktop/scripts/release-version.test.ts
+
+      - name: Commit the version and tag it
+        id: tag
+        env:
+          KIND: ${{ inputs.kind }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version=$(bun apps/desktop/scripts/release-version.ts \
+            --kind "$KIND" --version "$EXPLICIT_VERSION" --write)
+          tag="desktop-v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/package.json
+          # The release commit must carry the version and nothing else, so the
+          # tag builds exactly the reviewed source.
+          if [ "$(git diff --cached --name-only)" != "apps/desktop/package.json" ]; then
+            echo "The release commit must change only apps/desktop/package.json." >&2
+            git diff --cached --name-only >&2
+            exit 1
+          fi
+          git commit -m "chore(desktop): release $version"
+          git tag -a "$tag" -m "Radius desktop $version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Desktop release cut"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`$version\` |"
+            echo "| Tag | \`$tag\` |"
+            echo "| Source | \`$(git rev-parse --short HEAD~1)\` from \`${{ inputs.ref }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the tag
+        if: ${{ !inputs.dry-run }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: git push origin "refs/tags/$TAG"
+
+  release:
+    name: Release
+    needs: cut
+    if: ${{ !inputs.dry-run }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      tag: ${{ needs.cut.outputs.tag }}
+    secrets: inherit

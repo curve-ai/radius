@@ -102,16 +102,25 @@ Use `bunx turbo run <task> --force` when an uncached verification is needed.
 Windows x64, and Linux x64 and attaches it to a draft GitHub release. There is
 no Intel macOS build: the macOS runtime host needs Apple Silicon.
 
-1. Set `version` in `apps/desktop/package.json` and merge it to `main`.
-2. Optionally, run the workflow manually with `dry-run` set. It builds every
-   platform and keeps the files, `radius-desktop.json`, and `SHA256SUMS` as
-   workflow artifacts without publishing anything.
-3. Tag the merged commit `desktop-v<version>` and push the tag. The workflow
-   refuses a tag that does not match `package.json`.
-4. Check the draft release, then publish it and mark it as the latest
+Nobody edits the desktop version by hand. Released versions live in
+`desktop-v*` tags, and `main` may carry an older version in `package.json`.
+
+1. Optionally, run **Desktop release** manually with `dry-run` set. It builds
+   every platform and keeps the files, `radius-desktop.json`, and `SHA256SUMS`
+   as workflow artifacts without publishing anything.
+2. Run **Desktop release cut** and choose `patch`, `minor`, or `major`, or
+   give an exact version. It bumps the newest stable `desktop-v*` tag (or
+   `package.json` before the first release), commits only
+   `apps/desktop/package.json`, pushes the `desktop-v<version>` tag, and builds
+   the draft release from it. A version that is not newer than the latest
+   release is refused.
+3. Check the draft release, then publish it and mark it as the latest
    release. The auto-updater and the CLI only see published releases, and the
    updater follows the repository's latest release, so other releases must not
    take that place.
+
+Pushing a `desktop-v<version>` tag by hand still builds a release, provided the
+tagged `apps/desktop/package.json` carries that version.
 
 Every release carries `radius-desktop.json`, which the radius CLI reads to
 install the app: per-platform archive URLs, SHA-256 digests, and sizes, plus the
