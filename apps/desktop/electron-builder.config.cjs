@@ -64,6 +64,9 @@ const base = {
     artifactName: "radius-${version}-win-${arch}.${ext}",
   },
   linux: {
+    // The default comes from the scoped npm name, whose "@" and "/" cannot
+    // appear in a file name.
+    executableName: "radius",
     category: "Utility",
     target: ["AppImage", "deb"],
   },

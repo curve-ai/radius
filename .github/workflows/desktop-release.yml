@@ -114,8 +114,35 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      # CI saves this cache on main with the same key and paths, and a release
+      # run can read main's caches, so packages and the Electron and
+      # electron-builder downloads are rarely fetched again.
+      - name: Restore dependency downloads
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ runner.temp }}/bun-install-cache
+            ${{ runner.temp }}/electron-cache
+            ${{ runner.temp }}/electron-builder-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-dependencies-bun${{ env.BUN_VERSION }}-node${{ env.NODE_VERSION }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-dependencies-bun${{ env.BUN_VERSION }}-node${{ env.NODE_VERSION }}-
       - name: Install dependencies
-        run: bun ci
+        run: |
+          {
+            echo "BUN_INSTALL_CACHE_DIR=${{ runner.temp }}/bun-install-cache"
+            echo "electron_config_cache=${{ runner.temp }}/electron-cache"
+            echo "ELECTRON_BUILDER_CACHE=${{ runner.temp }}/electron-builder-cache"
+          } >> "$GITHUB_ENV"
+          export BUN_INSTALL_CACHE_DIR="${{ runner.temp }}/bun-install-cache"
+          export electron_config_cache="${{ runner.temp }}/electron-cache"
+          # One failed download should not fail a long release build.
+          for attempt in 1 2 3; do
+            bun ci && exit 0
+            echo "bun ci failed (attempt $attempt); retrying" >&2
+            sleep 20
+          done
+          exit 1
 
       - name: Import the Developer ID certificate
         if: env.MACOS_CERTIFICATE_P12 != ''
@@ -153,12 +180,35 @@ jobs:
             echo "APPLE_API_KEY=$RUNNER_TEMP/notarization.p8" >> "$GITHUB_ENV"
           fi
 
+      - name: Identify the Swift toolchain
+        id: swift
+        run: echo "version=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Compiling Containerization's 29 packages, two copies of BoringSSL
+      # among them, is most of this job. The build folder keeps them between
+      # runs, so only Radius's own sources rebuild. It also keeps the verified
+      # kernel archive. A new toolchain or dependency set starts clean.
+      - name: Restore the runtime host build
+        id: runtime-host-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: apps/runtime-host-macos/.build
+          key: runtime-host-macos-${{ steps.swift.outputs.version }}-${{ hashFiles('apps/runtime-host-macos/Package.swift', 'apps/runtime-host-macos/Package.resolved') }}-${{ hashFiles('apps/runtime-host-macos/Sources/**', 'apps/runtime-host-macos/Config/**') }}
+          restore-keys: |
+            runtime-host-macos-${{ steps.swift.outputs.version }}-${{ hashFiles('apps/runtime-host-macos/Package.swift', 'apps/runtime-host-macos/Package.resolved') }}-
       - name: Build the runtime host
         env:
           RADIUS_RUNTIME_ALLOW_UNSUPPORTED_HOST: "1"
         run: sh apps/runtime-host-macos/scripts/build.sh
       - name: Prepare the runtime kernel
         run: sh apps/runtime-host-macos/scripts/prepare-assets.sh
+      # Caches written by a tag run are visible only to that tag, so this pays
+      # off for runs on main: dry runs and release cuts.
+      - name: Save the runtime host build
+        if: steps.runtime-host-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: apps/runtime-host-macos/.build
+          key: ${{ steps.runtime-host-cache.outputs.cache-primary-key }}
       - name: Prepare bundled agents
         run: bash apps/runtime-host-macos/scripts/prepare-agents.sh
 
@@ -230,8 +280,34 @@ jobs:
           rustup toolchain install $env:RUST_VERSION --profile minimal --target x86_64-unknown-linux-musl
           if ($LASTEXITCODE -ne 0) { throw 'rustup failed' }
           rustup default $env:RUST_VERSION
+      # CI saves this cache on main with the same key and paths, and a release
+      # run can read main's caches, so packages and the Electron and
+      # electron-builder downloads are rarely fetched again.
+      - name: Restore dependency downloads
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ runner.temp }}/bun-install-cache
+            ${{ runner.temp }}/electron-cache
+            ${{ runner.temp }}/electron-builder-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-dependencies-bun${{ env.BUN_VERSION }}-node${{ env.NODE_VERSION }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-dependencies-bun${{ env.BUN_VERSION }}-node${{ env.NODE_VERSION }}-
       - name: Install dependencies
-        run: bun ci
+        run: |
+          "BUN_INSTALL_CACHE_DIR=${{ runner.temp }}/bun-install-cache" >> $env:GITHUB_ENV
+          "electron_config_cache=${{ runner.temp }}/electron-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=${{ runner.temp }}/electron-builder-cache" >> $env:GITHUB_ENV
+          $env:BUN_INSTALL_CACHE_DIR = "${{ runner.temp }}/bun-install-cache"
+          $env:electron_config_cache = "${{ runner.temp }}/electron-cache"
+          # One failed download should not fail a long release build.
+          foreach ($attempt in 1..3) {
+            bun ci
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "bun ci failed (attempt $attempt); retrying"
+            Start-Sleep -Seconds 20
+          }
+          exit 1
 
       - name: Read the pinned OpenVMM revision
         id: openvmm
@@ -258,6 +334,13 @@ jobs:
           git -C $source fetch --depth 1 https://github.com/microsoft/openvmm.git $env:OPENVMM_REVISION
           if ($LASTEXITCODE -ne 0) { throw 'fetching OpenVMM failed' }
           git -C $source checkout --detach FETCH_HEAD
+          # OpenVMM states its own minimum Rust, which moves independently of
+          # the toolchain this repository builds its runtime host with.
+          $rust = (Select-String -Path (Join-Path $source 'Cargo.toml') -Pattern '^rust-version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if (-not $rust) { throw 'OpenVMM declares no rust-version' }
+          rustup toolchain install $rust --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "installing Rust $rust failed" }
+          $env:RUSTUP_TOOLCHAIN = $rust
           Push-Location $source
           try {
             cargo xflowey restore-packages --no-compat-igvm
@@ -286,6 +369,20 @@ jobs:
           Remove-Item $pfx
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
 
+      # As on macOS: keep compiled dependencies and the verified kernel, so
+      # only Radius's own crates rebuild.
+      - name: Restore the runtime host build
+        id: runtime-host-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            apps/runtime-host-windows/.build
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: runtime-host-windows-${{ env.RUST_VERSION }}-${{ hashFiles('apps/runtime-host-windows/**/Cargo.lock') }}-${{ hashFiles('apps/runtime-host-windows/src/**', 'apps/runtime-host-windows/guest/**/src/**', 'apps/runtime-host-windows/Config/**') }}
+          restore-keys: |
+            runtime-host-windows-${{ env.RUST_VERSION }}-${{ hashFiles('apps/runtime-host-windows/**/Cargo.lock') }}-
       - name: Build the runtime host
         env:
           THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
@@ -295,6 +392,16 @@ jobs:
           & ./scripts/build-runtime-host-windows.ps1 @arguments
       - name: Prepare the runtime kernel
         run: ./scripts/prepare-runtime-assets-windows.ps1
+      - name: Save the runtime host build
+        if: steps.runtime-host-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            apps/runtime-host-windows/.build
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ steps.runtime-host-cache.outputs.cache-primary-key }}
       - name: Prepare bundled agents
         run: ./scripts/prepare-bundled-agents-windows.ps1
 
@@ -344,8 +451,35 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      # CI saves this cache on main with the same key and paths, and a release
+      # run can read main's caches, so packages and the Electron and
+      # electron-builder downloads are rarely fetched again.
+      - name: Restore dependency downloads
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ runner.temp }}/bun-install-cache
+            ${{ runner.temp }}/electron-cache
+            ${{ runner.temp }}/electron-builder-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-dependencies-bun${{ env.BUN_VERSION }}-node${{ env.NODE_VERSION }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-dependencies-bun${{ env.BUN_VERSION }}-node${{ env.NODE_VERSION }}-
       - name: Install dependencies
-        run: bun ci
+        run: |
+          {
+            echo "BUN_INSTALL_CACHE_DIR=${{ runner.temp }}/bun-install-cache"
+            echo "electron_config_cache=${{ runner.temp }}/electron-cache"
+            echo "ELECTRON_BUILDER_CACHE=${{ runner.temp }}/electron-builder-cache"
+          } >> "$GITHUB_ENV"
+          export BUN_INSTALL_CACHE_DIR="${{ runner.temp }}/bun-install-cache"
+          export electron_config_cache="${{ runner.temp }}/electron-cache"
+          # One failed download should not fail a long release build.
+          for attempt in 1 2 3; do
+            bun ci && exit 0
+            echo "bun ci failed (attempt $attempt); retrying" >&2
+            sleep 20
+          done
+          exit 1
       - name: Package the app
         run: bun run --cwd apps/desktop make --linux AppImage --x64 --publish never
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
