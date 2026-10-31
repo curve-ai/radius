@@ -310,6 +310,11 @@ function useDesktopAgents(): {
     )?.defaultThinkingEffortId ?? null,
   );
 
+  // Read by the list reload, which is subscribed once and would otherwise
+  // see only the selection from its first render.
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
+
   const selectModelForAgent = (
     agent: DesktopAgentSummary | null,
     modelId: string | null,
@@ -335,12 +340,20 @@ function useDesktopAgents(): {
           );
           cachedDesktopAgents = usableAgents;
           setAgents(usableAgents);
-          const agent = takeLinkedAgent(usableAgents);
-          setSelectedAgentIdState(agent?.id ?? null);
-          selectModelForAgent(
-            agent,
-            agent?.defaultModelId ?? agent?.models[0]?.id ?? null,
+          const agent = takeLinkedAgent(
+            usableAgents,
+            Date.now(),
+            selectedAgentIdRef.current,
           );
+          // The same agent keeps its chosen model; only a different agent
+          // resets to that agent's default.
+          if (agent?.id !== selectedAgentIdRef.current) {
+            setSelectedAgentIdState(agent?.id ?? null);
+            selectModelForAgent(
+              agent,
+              agent?.defaultModelId ?? agent?.models[0]?.id ?? null,
+            );
+          }
           setError(null);
         })
         .catch((cause) => {
