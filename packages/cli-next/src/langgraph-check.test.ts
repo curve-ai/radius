@@ -28,6 +28,9 @@ const ADAPTER = resolve(
 );
 
 async function skipReason(): Promise<string | false> {
+  // The adapter refuses to start on Windows until its stdio layer supports it.
+  if (process.platform === "win32")
+    return "the adapter does not run on Windows yet";
   if (!(await findExecutable("uv", process))) return "uv is not on PATH";
   try {
     await lookup("pypi.org");

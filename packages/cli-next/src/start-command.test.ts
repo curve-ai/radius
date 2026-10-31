@@ -311,7 +311,7 @@ test("RADIUS_LANGGRAPH_ADAPTER overrides the configured adapter", async () => {
         config({ kind: "langgraph", adapter: "radius-langgraph==0.0.1" }),
         root,
         {
-          platform: "darwin",
+          platform: process.platform,
           arch: "arm64",
           env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: override },
         },
