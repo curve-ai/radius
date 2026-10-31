@@ -176,6 +176,7 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
           installed: desktop.installed,
           version: desktop.version,
           launched: desktop.launched,
+          ready: desktop.ready,
           agentsPath: desktop.agentsPath,
           detail: desktop.detail,
         },
@@ -201,9 +202,16 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
         context.out(`  desktop     ${desktop.detail}`);
         context.out(`  agents      ${desktop.agentsPath}`);
       }
-      if (desktop.launched) {
+      if (desktop.launched && desktop.ready) {
         context.out(
           `  opened Radius${desktop.version ? ` ${desktop.version}` : ""} on ${config.name}`,
+        );
+      } else if (desktop.launched) {
+        // Launched but not reported in: usually still at its keychain
+        // prompt. The descriptor is written, so the agent shows up as soon
+        // as the app gets past it.
+        context.out(
+          `  launched Radius; ${config.name} appears once it finishes starting`,
         );
       } else if (!flags["no-open"]) {
         // Only said when it changes what the developer does next.
