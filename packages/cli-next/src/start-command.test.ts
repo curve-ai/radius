@@ -364,3 +364,90 @@ test("a langgraph runtime without uv is a usage error, not a spawn failure", asy
       error instanceof UsageError && /`uv` was not found/.test(error.message),
   );
 });
+
+const TYPESCRIPT_LANGGRAPH_JSON = JSON.stringify({
+  graphs: { agent: "./src/agent.ts:graph" },
+});
+
+test("a TypeScript langgraph runtime runs the npm adapter through npx", async () => {
+  const root = await project({ "langgraph.json": TYPESCRIPT_LANGGRAPH_JSON });
+  const resolved = await resolveStartCommand(
+    config({ kind: "langgraph", language: "typescript", graph: "agent" }),
+    root,
+    host(await pathWith("node", "npx")),
+    silent,
+  );
+  assert.equal(resolved.kind, "langgraph");
+  assert.deepEqual(
+    [...resolved.command],
+    [
+      "npx",
+      "--yes",
+      "@curve-ai/radius-langgraph@0.0.1",
+      "--config",
+      "langgraph.json",
+      "--graph",
+      "agent",
+    ],
+  );
+  assert.equal(resolved.summary, "langgraph agent");
+});
+
+test("RADIUS_LANGGRAPH_ADAPTER runs a TypeScript adapter checkout with node", async () => {
+  const root = await project({
+    "langgraph.json": TYPESCRIPT_LANGGRAPH_JSON,
+    "checkout/bin/radius-langgraph.mjs": "",
+  });
+  const path = await pathWith("node");
+  const resolved = await resolveStartCommand(
+    config({ kind: "langgraph", language: "typescript" }),
+    root,
+    {
+      platform: "darwin",
+      arch: "arm64",
+      env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: "./checkout" },
+    },
+    silent,
+  );
+  assert.deepEqual(
+    [...resolved.command],
+    [
+      join(path, "node"),
+      join(root, "checkout", "bin", "radius-langgraph.mjs"),
+      "--config",
+      "langgraph.json",
+    ],
+  );
+
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph", language: "typescript" }),
+        root,
+        {
+          platform: "darwin",
+          arch: "arm64",
+          env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: "./elsewhere" },
+        },
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      /RADIUS_LANGGRAPH_ADAPTER is \.\/elsewhere/.test(error.message),
+  );
+});
+
+test("a TypeScript langgraph runtime needs node, not uv", async () => {
+  const root = await project({ "langgraph.json": TYPESCRIPT_LANGGRAPH_JSON });
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph", language: "typescript" }),
+        root,
+        host(await pathWith("uv", "npx")),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /`node` was not found/.test(error.message),
+  );
+});

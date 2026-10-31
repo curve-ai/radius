@@ -230,10 +230,10 @@ async function buildFor(
       // The image would need the adapter and the project's graph
       // dependencies installed from its lockfile; until that exists a build
       // would ship a graph that cannot import. Refused up front for the same
-      // reason as the npx/uvx harnesses.
+      // reason as the npx/uvx harnesses, and for either language.
       throw new UsageError(
-        'radius build cannot package a "langgraph" runtime yet.\n\n' +
-          "`radius dev` and `radius check` run this graph today.",
+        `radius build cannot package a "langgraph" runtime yet (Python or TypeScript graphs).\n\n` +
+          "`radius dev` and `radius check` run these graphs today.",
       );
     case "command":
       throw new UsageError(
