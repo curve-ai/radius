@@ -118,7 +118,7 @@ jobs:
       # run can read main's caches, so packages and the Electron and
       # electron-builder downloads are rarely fetched again.
       - name: Restore dependency downloads
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/bun-install-cache
@@ -189,7 +189,7 @@ jobs:
       # kernel archive. A new toolchain or dependency set starts clean.
       - name: Restore the runtime host build
         id: runtime-host-cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/runtime-host-macos/.build
           key: runtime-host-macos-${{ steps.swift.outputs.version }}-${{ hashFiles('apps/runtime-host-macos/Package.swift', 'apps/runtime-host-macos/Package.resolved') }}-${{ hashFiles('apps/runtime-host-macos/Sources/**', 'apps/runtime-host-macos/Config/**') }}
@@ -291,7 +291,7 @@ jobs:
       # run can read main's caches, so packages and the Electron and
       # electron-builder downloads are rarely fetched again.
       - name: Restore dependency downloads
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/bun-install-cache
@@ -325,7 +325,7 @@ jobs:
       # pinned revision does.
       - name: Restore openvmm.exe
         id: openvmm-cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/openvmm-bin
           key: openvmm-${{ steps.openvmm.outputs.revision }}-windows-x64
@@ -380,7 +380,7 @@ jobs:
       # only Radius's own crates rebuild.
       - name: Restore the runtime host build
         id: runtime-host-cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             apps/runtime-host-windows/.build
@@ -472,7 +472,7 @@ jobs:
       # run can read main's caches, so packages and the Electron and
       # electron-builder downloads are rarely fetched again.
       - name: Restore dependency downloads
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/bun-install-cache
