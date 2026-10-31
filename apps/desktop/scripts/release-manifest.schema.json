@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/curve-ai/radius/blob/main/apps/desktop/scripts/release-manifest.schema.json",
+  "title": "radius-desktop.json",
+  "description": "Attached to every desktop-v* GitHub release. The radius CLI reads it to download, verify and install the desktop app. A platform that is absent has no build in that release.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "agentNoteVersions", "platforms"],
+  "properties": {
+    "version": {
+      "description": "The app version, equal to the release tag without its desktop-v prefix.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+    },
+    "agentNoteVersions": {
+      "description": "The development agent descriptor schemaVersion values this build reads.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "platforms": {
+      "description": "Keyed by OCI-style os/arch, as the CLI's hostPlatformKey produces.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "propertyNames": {
+        "pattern": "^(darwin|windows|linux)/(arm64|amd64)$"
+      },
+      "patternProperties": {
+        "^(darwin|windows|linux)/(arm64|amd64)$": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "description": "An archive that unpacks without an installer: a zip holding Radius.app on macOS, a zip of the unpacked app on Windows, an AppImage on Linux.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "size"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[^/]+/[^/]+/releases/download/desktop-v[^/]+/[^/]+$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": {
+          "description": "Size in bytes.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

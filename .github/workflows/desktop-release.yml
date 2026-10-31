@@ -1,0 +1,392 @@
+name: Desktop release
+
+# Builds the desktop app on every supported platform and attaches it to a
+# draft GitHub release, together with radius-desktop.json, which the radius CLI
+# reads to install the app on first `radius dev`.
+#
+# Push a desktop-v<version> tag whose version matches apps/desktop/package.json.
+# The release stays a draft until someone publishes it, and the auto-updater
+# and the CLI see nothing until then. Run it manually with dry-run to build
+# every platform and keep the results as workflow artifacts only.
+#
+# Signing switches on per platform when its secrets exist; without them the
+# same jobs produce unsigned builds. See CONTRIBUTING.md for the secret names.
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Build and keep workflow artifacts, but publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: "1.4.4"
+  NODE_VERSION: "22.23.4"
+  RUST_VERSION: "1.94.0"
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install manifest dependencies
+        run: bun install --frozen-lockfile --ignore-scripts --filter @curve-ai/radius-runtime
+      - name: Test the manifest generator
+        run: bun test apps/desktop/scripts/release-manifest.test.ts
+      - name: Check the tag against the app version
+        id: version
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(jq -er .version apps/desktop/package.json)
+          tag="desktop-v$version"
+          publish=true
+          if [ "$DRY_RUN" = "true" ]; then
+            publish=false
+          elif [ "$REF_TYPE" != "tag" ] || [ "$REF_NAME" != "$tag" ]; then
+            # The updater and the CLI trust the tag to name the version inside.
+            echo "Publishing needs the tag $tag; this run is on $REF_TYPE $REF_NAME." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  macos-arm64:
+    name: Build (macOS arm64)
+    needs: prepare
+    # The runtime host links Apple Containerization, which needs Apple Silicon
+    # and the macOS 26 SDK. There is no Intel macOS build for the same reason:
+    # the host neither builds nor runs there.
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Import the Developer ID certificate
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/radius-signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$identity" ]; then
+            echo "The certificate holds no Developer ID Application identity." >&2
+            exit 1
+          fi
+          echo "RADIUS_RUNTIME_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Write the notarization key
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          # Notarizing an unsigned app fails, so the key is only written for a
+          # signed build. electron-builder notarizes when APPLE_API_KEY names it.
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notarization.p8"
+            echo "APPLE_API_KEY=$RUNNER_TEMP/notarization.p8" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the runtime host
+        env:
+          RADIUS_RUNTIME_ALLOW_UNSUPPORTED_HOST: "1"
+        run: sh apps/runtime-host-macos/scripts/build.sh
+      - name: Prepare the runtime kernel
+        run: sh apps/runtime-host-macos/scripts/prepare-assets.sh
+      - name: Prepare bundled agents
+        run: bash apps/runtime-host-macos/scripts/prepare-agents.sh
+
+      - name: Package the app
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          args=(--mac dmg zip --arm64 --publish never)
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            # Without a certificate electron-builder skips signing, leaving a
+            # broken bundle seal. Sign ad hoc instead; the hardened runtime is
+            # off because its library validation rejects ad hoc frameworks.
+            args+=(-c.mac.identity=- -c.mac.hardenedRuntime=false)
+          fi
+          bun run --cwd apps/desktop make "${args[@]}"
+
+      # electron-builder only warns when an extraResources source is missing.
+      - name: Check the packaged runtime
+        run: |
+          set -euo pipefail
+          resources=apps/desktop/dist/mac-arm64/Radius.app/Contents/Resources
+          for file in runtime/macos-arm64/radius-runtime-host runtime/vmlinux-arm64 \
+            runtime/runtime-assets.json agents/index.json; do
+            test -s "$resources/$file" || { echo "Missing $file" >&2; exit 1; }
+          done
+          codesign -d --entitlements - --xml \
+            "$resources/runtime/macos-arm64/radius-runtime-host" \
+            | grep -q com.apple.security.virtualization
+          codesign --verify --deep --strict apps/desktop/dist/mac-arm64/Radius.app
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-macos-arm64
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest-mac.yml
+
+  windows-x64:
+    name: Build (Windows x64)
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Set up Rust
+        run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal --target x86_64-unknown-linux-musl
+          if ($LASTEXITCODE -ne 0) { throw 'rustup failed' }
+          rustup default $env:RUST_VERSION
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Read the pinned OpenVMM revision
+        id: openvmm
+        run: |
+          $manifest = Get-Content apps/runtime-host-windows/Config/runtime-assets.json -Raw | ConvertFrom-Json
+          "revision=$($manifest.openvmmRevision)" >> $env:GITHUB_OUTPUT
+      # openvmm.exe takes most of an hour to build and changes only when the
+      # pinned revision does.
+      - name: Restore openvmm.exe
+        id: openvmm-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/openvmm-bin
+          key: openvmm-${{ steps.openvmm.outputs.revision }}-windows-x64
+      - name: Build openvmm.exe at the pinned revision
+        if: steps.openvmm-cache.outputs.cache-hit != 'true'
+        env:
+          OPENVMM_REVISION: ${{ steps.openvmm.outputs.revision }}
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'openvmm'
+          git init $source
+          # Keep the .git directory: openvmm --version reports the revision
+          # from it, and the runtime host build checks that.
+          git -C $source fetch --depth 1 https://github.com/microsoft/openvmm.git $env:OPENVMM_REVISION
+          if ($LASTEXITCODE -ne 0) { throw 'fetching OpenVMM failed' }
+          git -C $source checkout --detach FETCH_HEAD
+          Push-Location $source
+          try {
+            cargo xflowey restore-packages --no-compat-igvm
+            if ($LASTEXITCODE -ne 0) { throw 'restoring OpenVMM packages failed' }
+            cargo build --release -p openvmm
+            if ($LASTEXITCODE -ne 0) { throw 'building openvmm failed' }
+          } finally { Pop-Location }
+          $bin = Join-Path $env:RUNNER_TEMP 'openvmm-bin'
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          Copy-Item (Join-Path $source 'target\release\openvmm.exe') $bin
+      - name: Save openvmm.exe
+        if: steps.openvmm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/openvmm-bin
+          key: ${{ steps.openvmm-cache.outputs.cache-primary-key }}
+
+      - name: Import the code signing certificate
+        id: certificate
+        if: env.WINDOWS_CERTIFICATE_PFX != ''
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'certificate.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+
+      - name: Build the runtime host
+        env:
+          THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
+        run: |
+          $arguments = @('-OpenVmmExe', (Join-Path $env:RUNNER_TEMP 'openvmm-bin\openvmm.exe'), '-AllowUnsupportedHost')
+          if ($env:THUMBPRINT) { $arguments += @('-CertificateThumbprint', $env:THUMBPRINT) }
+          & ./scripts/build-runtime-host-windows.ps1 @arguments
+      - name: Prepare the runtime kernel
+        run: ./scripts/prepare-runtime-assets-windows.ps1
+      - name: Prepare bundled agents
+        run: ./scripts/prepare-bundled-agents-windows.ps1
+
+      - name: Package the app
+        env:
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: bun run --cwd apps/desktop make --win nsis zip --x64 --publish never
+
+      # electron-builder only warns when an extraResources source is missing.
+      - name: Check the packaged runtime
+        run: |
+          $resources = 'apps/desktop/dist/win-unpacked/resources'
+          foreach ($file in 'runtime/windows-x64/radius-runtime-host.exe', 'runtime/windows-x64/openvmm.exe',
+                            'runtime/vmlinux-x64', 'runtime/runtime-assets.json', 'agents/index.json') {
+            $path = Join-Path $resources $file
+            if (-not (Test-Path $path) -or (Get-Item $path).Length -eq 0) { throw "Missing $file" }
+          }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-windows-x64
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest.yml
+
+  linux-x64:
+    name: Build (Linux x64)
+    needs: prepare
+    # Linux has no runtime host yet, so the app ships without bundled
+    # agents there; development agents from `radius dev` still work.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        run: bun ci
+      - name: Package the app
+        run: bun run --cwd apps/desktop make --linux AppImage deb --x64 --publish never
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-linux-x64
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/latest-linux.yml
+
+  release:
+    name: Manifest and release
+    needs: [prepare, macos-arm64, windows-x64, linux-x64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install manifest dependencies
+        run: bun install --frozen-lockfile --ignore-scripts --filter @curve-ai/radius-runtime
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*
+          path: release
+          merge-multiple: true
+
+      - name: Write radius-desktop.json
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          bun apps/desktop/scripts/release-manifest.ts \
+            --artifacts release \
+            --output release/radius-desktop.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$TAG"
+          ( cd release && sha256sum -- * > SHA256SUMS )
+          {
+            echo "### radius-desktop.json"
+            echo
+            echo '```json'
+            cat release/radius-desktop.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-manifest
+          if-no-files-found: error
+          path: |
+            release/radius-desktop.json
+            release/SHA256SUMS
+
+      - name: Attach everything to a draft release
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A rerun replaces the files on the existing draft rather than
+          # creating a second release.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag \
+              --title "Radius $VERSION" \
+              --notes "Radius desktop $VERSION."
+          fi
+          gh release upload "$TAG" release/* --clobber

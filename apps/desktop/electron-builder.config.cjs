@@ -8,7 +8,13 @@ const base = {
   mac: {
     category: "public.app-category.productivity",
     target: ["dmg", "zip"],
+    // The zip is what the radius CLI installs; release-manifest.ts relies on
+    // these names.
+    artifactName: "radius-${version}-mac-${arch}.${ext}",
     minimumSystemVersion: "26.0.0",
+    // build.sh signs the runtime host with its virtualization entitlement.
+    // Re-signing it with the app's entitlements would drop that.
+    signIgnore: ["/runtime/macos-arm64/radius-runtime-host$"],
     extraResources: [
       {
         from: "../runtime-host-macos/.build/release/radius-runtime-host",
@@ -52,7 +58,10 @@ const base = {
         to: "agents",
       },
     ],
-    target: ["nsis"],
+    // nsis is the installer for people; the zip is the unpacked app the
+    // radius CLI installs without an installer UI.
+    target: ["nsis", "zip"],
+    artifactName: "radius-${version}-win-${arch}.${ext}",
   },
   linux: {
     category: "Utility",
@@ -67,7 +76,7 @@ const base = {
     artifactName: "radius-${version}.${ext}",
   },
   appImage: {
-    artifactName: "radius-${version}.${ext}",
+    artifactName: "radius-${version}-linux-${arch}.${ext}",
   },
   npmRebuild: false,
   publish: [
@@ -102,5 +111,7 @@ module.exports = {
   ...base,
   ...(distribution
     ? { appId: distribution.id, productName: distribution.displayName }
-    : {}),
+    : // `radius dev` opens radius://dev-agent/<id>. Distribution builds keep
+      // their own profile, which it does not register agents into.
+      { protocols: [{ name: "Radius", schemes: ["radius"] }] }),
 };
