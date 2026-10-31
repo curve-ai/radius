@@ -96,12 +96,11 @@ async function main(): Promise<void> {
       output: { type: "string" },
       repository: { type: "string", default: "curve-ai/radius" },
       platform: { type: "string", multiple: true },
-      tag: { type: "string" },
     },
   });
   if (!values.artifacts || !values.output)
     throw new Error(
-      "Usage: release-manifest.ts --artifacts DIR --output FILE [--platform darwin/arm64 ...] [--tag desktop-vX.Y.Z]",
+      "Usage: release-manifest.ts --artifacts DIR --output FILE [--platform darwin/arm64 ...]",
     );
 
   const desktopPackage = JSON.parse(
@@ -110,12 +109,8 @@ async function main(): Promise<void> {
       "utf8",
     ),
   ) as { version: string };
+  // desktop-release.yml checks that the release tag names this version.
   const version = desktopPackage.version;
-  // The updater and the CLI both trust the tag to name the version inside it.
-  if (values.tag && values.tag !== releaseTag(version))
-    throw new Error(
-      `Tag ${values.tag} does not match apps/desktop/package.json version ${version}`,
-    );
 
   const knownPlatforms = Object.keys(PLATFORM_ARCHIVES) as PlatformKey[];
   const platforms = (values.platform ?? knownPlatforms).map((platform) => {

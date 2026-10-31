@@ -54,5 +54,7 @@ Write-Host $doctor
 if (-not ($doctor | ConvertFrom-Json).supported) {
     if (-not $AllowUnsupportedHost) { throw 'doctor reports that this computer cannot run agents.' }
     Write-Host 'This computer cannot run agents; continuing because -AllowUnsupportedHost was passed.'
+    # doctor's own exit code would otherwise become this script's result.
+    $global:LASTEXITCODE = 0
 }
 Write-Host "Built $helper and $openvmm"
