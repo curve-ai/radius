@@ -1,13 +1,18 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
+import { harnessEnvironment, splitLines } from "./bridge.js";
+
 /**
  * Runs an ACP agent just long enough to see what it is: `initialize`, then
  * `session/new`, then kill.
  *
- * Kept self-contained rather than built on the bridge, because a probe has the
- * opposite job. The bridge forgives a harness — it drops a stray stdout line so
- * a session survives it — while the probe exists to notice exactly that, and to
- * report every way the process misbehaved as data instead of as a throw.
+ * The one place the CLI speaks ACP to a process it is checking. `check`
+ * judges the result as it is; `dev`'s preflight goes through
+ * `handshakeOverStdio`, which turns the same result into an error or a pass.
+ * Separate from the bridge, which has the opposite job: the bridge forgives a
+ * harness — it drops a stray stdout line so a session survives it — while the
+ * probe exists to notice exactly that, and to report every way the process
+ * misbehaved as data instead of as a throw.
  *
  * Stops before `session/prompt` for the same reason `verifyBuild` does: a
  * prompt needs a provider credential, and checking a project must not.
@@ -29,6 +34,10 @@ export interface ProbeOptions {
   ) => void;
   /** Resolves when the caller wants the probe abandoned, e.g. on Ctrl-C. */
   readonly abort?: Promise<void>;
+  /** Each stderr line as it arrives, for a caller that streams it. */
+  readonly onStderrLine?: (line: string) => void;
+  /** Each stdout line that was not a JSON-RPC message. */
+  readonly onStdoutNoise?: (line: string) => void;
 }
 
 export type ProbeFailure =
@@ -68,16 +77,6 @@ const STDERR_TAIL_BYTES = 4096;
 const NOISE_LINES_KEPT = 20;
 const KILL_GRACE_MS = 2000;
 
-/** Mirrors the bridge's filter: a probed harness is third-party code too. */
-function probeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const carried: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (key.startsWith("RADIUS_")) continue;
-    carried[key] = value;
-  }
-  return carried;
-}
-
 export async function probeAcp(options: ProbeOptions): Promise<ProbeResult> {
   const started = Date.now();
   const [executable, ...args] = options.command;
@@ -95,7 +94,8 @@ export async function probeAcp(options: ProbeOptions): Promise<ProbeResult> {
     child = spawn(executable as string, args, {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: probeEnvironment(options.env),
+      // The bridge's filter: a probed harness is third-party code too.
+      env: harnessEnvironment(options.env),
       // Its own process group on POSIX, so the kill reaches what `npx` or a
       // shell wrapper forked as well as the wrapper itself.
       detached: posix,
@@ -144,15 +144,17 @@ export async function probeAcp(options: ProbeOptions): Promise<ProbeResult> {
     // An agent that exits mid-write makes the next write EPIPE; the exit
     // already explains it, so the write error must not escape as a crash.
     child.stdin.on("error", () => {});
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderrTail = (stderrTail + chunk.toString("utf8")).slice(
-        -STDERR_TAIL_BYTES,
-      );
-    });
+    child.stderr.on(
+      "data",
+      splitLines((line) => {
+        stderrTail = `${stderrTail}${line}\n`.slice(-STDERR_TAIL_BYTES);
+        options.onStderrLine?.(line);
+      }),
+    );
 
     child.stdout.on(
       "data",
-      lines((line) => {
+      splitLines((line) => {
         let message: unknown;
         try {
           message = JSON.parse(line);
@@ -169,6 +171,7 @@ export async function probeAcp(options: ProbeOptions): Promise<ProbeResult> {
         ) {
           noiseCount += 1;
           if (stdoutNoise.length < NOISE_LINES_KEPT) stdoutNoise.push(line);
+          options.onStdoutNoise?.(line);
           return;
         }
         const frame = message as Record<string, unknown>;
@@ -288,18 +291,4 @@ async function terminate(
 
 function delay(ms: number): Promise<void> {
   return new Promise((done) => setTimeout(done, ms).unref());
-}
-
-function lines(onLine: (line: string) => void): (chunk: Buffer) => void {
-  let buffer = "";
-  return (chunk) => {
-    buffer += chunk.toString("utf8");
-    let newline = buffer.indexOf("\n");
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline).replace(/\r$/, "");
-      buffer = buffer.slice(newline + 1);
-      if (line.trim()) onLine(line);
-      newline = buffer.indexOf("\n");
-    }
-  };
 }

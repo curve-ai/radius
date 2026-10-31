@@ -1,5 +1,3 @@
-import type { SessionConfigOption } from "@curve-ai/radius-runtime";
-
 import {
   PROBE_PROTOCOL_VERSION,
   probeAcp,
@@ -8,7 +6,7 @@ import {
   type ProbeResult,
 } from "./acp-probe.js";
 import { discoverProjectAgents, type ProjectAgents } from "./project-agents.js";
-import { advertisedAgents } from "./handshake.js";
+import { advertisedFromSession } from "./handshake.js";
 
 /**
  * What `radius check` concludes, kept apart from how it is printed so the
@@ -91,7 +89,7 @@ export function evaluate(
       ? probe.initialize.protocolVersion
       : null;
   const agentInfo = readAgentInfo(probe.initialize);
-  const advertised = probe.session ? advertisedFrom(probe.session) : [];
+  const advertised = probe.session ? advertisedFromSession(probe.session) : [];
 
   const verdicts: Verdict[] = [
     judgeHandshake(probe, protocolVersion, agentInfo),
@@ -336,45 +334,6 @@ function readAgentInfo(
     ...(typeof name === "string" ? { name } : {}),
     ...(typeof version === "string" ? { version } : {}),
   };
-}
-
-/**
- * The same extraction `build` uses, so `check` and a verified image can never
- * disagree about what an agent advertised. The probe's input is an untrusted
- * wire response rather than a parsed session, so it is narrowed first:
- * extraction assumes the shapes the SDK has already validated.
- */
-function advertisedFrom(session: Record<string, unknown>): string[] {
-  const modes = isRecord(session.modes) ? session.modes : null;
-  const availableModes = Array.isArray(modes?.availableModes)
-    ? modes.availableModes.filter(isRecord)
-    : [];
-  const configOptions = Array.isArray(session.configOptions)
-    ? session.configOptions.filter(isWellFormedOption)
-    : [];
-  return advertisedAgents({
-    sessionModes: { availableModes },
-    sessionConfigOptions: configOptions as SessionConfigOption[],
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isWellFormedOption(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  if (value.type !== "select") return true;
-  if (!Array.isArray(value.options)) return false;
-  return value.options.every(
-    (entry) =>
-      isRecord(entry) &&
-      (Array.isArray(entry.options)
-        ? entry.options.every(
-            (leaf) => isRecord(leaf) && typeof leaf.value === "string",
-          )
-        : typeof entry.value === "string"),
-  );
 }
 
 function stderrLines(tail: string): string[] {
