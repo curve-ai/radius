@@ -290,8 +290,12 @@ test("a langgraph adapter given as a path is resolved against the project", asyn
     await withAdapter("./vendor/adapter"),
     join(root, "vendor/adapter"),
   );
-  // resolve(), so Windows' drive-qualified form is what is expected there.
-  assert.equal(await withAdapter("/opt/adapter"), resolve("/opt/adapter"));
+  // Resolved against the project, as the implementation does, so Windows
+  // expects the project's drive rather than the test runner's.
+  assert.equal(
+    await withAdapter("/opt/adapter"),
+    resolve(root, "/opt/adapter"),
+  );
   assert.equal(
     await withAdapter("~/src/adapter"),
     join(homedir(), "src/adapter"),
