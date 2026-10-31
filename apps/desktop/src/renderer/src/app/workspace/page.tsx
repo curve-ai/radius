@@ -313,7 +313,9 @@ function useDesktopAgents(): {
   // Read by the list reload, which is subscribed once and would otherwise
   // see only the selection from its first render.
   const selectedAgentIdRef = useRef(selectedAgentId);
-  selectedAgentIdRef.current = selectedAgentId;
+  useEffect(() => {
+    selectedAgentIdRef.current = selectedAgentId;
+  }, [selectedAgentId]);
 
   const selectModelForAgent = (
     agent: DesktopAgentSummary | null,
