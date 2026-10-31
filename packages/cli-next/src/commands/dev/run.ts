@@ -10,7 +10,7 @@ import {
   radiusUserDataPath,
   registerDevelopmentAgent,
 } from "../../registration.js";
-import { resolveStartCommand } from "../../start-command.js";
+import { resolveStartCommand, startEnvironment } from "../../start-command.js";
 import { OperationalError } from "../../errors.js";
 
 interface DevFlags {
@@ -41,6 +41,7 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
     },
     (message) => context.note(message),
   );
+  const env = startEnvironment(start, context.env);
 
   // Once the bridge is up, a harness that will not start is just a thread
   // that fails, and `dev` keeps serving. So the one check that should stop
@@ -50,14 +51,14 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
   const preflight = await handshakeOverStdio({
     command: start.command,
     cwd: context.cwd,
-    env: context.env,
+    env,
     onStderr: (line) => verbose(`[preflight] ${line}`),
     onStdout: (line) => verbose(`[preflight] ${line}`),
   });
   verbose(`[acp] protocolVersion ${String(preflight.protocolVersion)}`);
   verbose(`[acp] authMethods ${JSON.stringify(preflight.authMethods)}`);
 
-  const bridge = await startBridge(start.command, context.cwd, context.env, {
+  const bridge = await startBridge(start.command, context.cwd, env, {
     // Harness stderr stays visible by default: it is where a harness says
     // why a thread failed. Prefixed so two threads' output can be told apart.
     onStdout: (id, line) => context.note(`  [${id}] ${line}`),

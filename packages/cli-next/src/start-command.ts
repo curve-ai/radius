@@ -23,6 +23,12 @@ export interface StartCommand {
   readonly summary: string;
   /** Harness only: where the bytes came from and whether they were cached. */
   readonly harness?: { readonly source: string; readonly cached: boolean };
+  /**
+   * Variables the config sets for the process, laid over the caller's own
+   * environment. Carried here rather than read by each caller, so the
+   * preflight, the bridge and `check` cannot start different processes.
+   */
+  readonly env: Readonly<Record<string, string>>;
 }
 
 export interface StartHost {
@@ -51,6 +57,7 @@ export async function resolveStartCommand(
         command: resolved.command,
         summary: `harness ${runtime.registryId ?? resolved.source}`,
         harness: { source: resolved.source, cached: resolved.cached },
+        env: runtime.env ?? {},
       };
     }
     case "python": {
@@ -73,6 +80,7 @@ export async function resolveStartCommand(
           runtime.module,
         ],
         summary: `python -m ${runtime.module}`,
+        env: {},
       };
     }
     case "typescript": {
@@ -97,6 +105,7 @@ export async function resolveStartCommand(
         kind: "typescript",
         command,
         summary: `typescript ${runtime.entrypoint}`,
+        env: {},
       };
     }
     case "command": {
@@ -113,9 +122,18 @@ export async function resolveStartCommand(
         // The executable only: the full argv is --verbose detail, and an inline
         // script would swamp the ready line.
         summary: `command ${basename(executable as string)}`,
+        env: {},
       };
     }
   }
+}
+
+/** The environment a started process sees: the caller's, then the config's. */
+export function startEnvironment(
+  start: Pick<StartCommand, "env">,
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return { ...env, ...start.env };
 }
 
 function runnerHint(runner: string): string {
