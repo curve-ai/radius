@@ -5,6 +5,7 @@ import {
   type DesktopUpdateStatus,
 } from "../update-types";
 import {
+  AGENT_LINK_CHANNEL,
   AGENTS_CHANGED_CHANNEL,
   SESSION_TRANSCRIPT_STREAM_CHANNEL,
   SESSION_WORKING_STATE_CHANNEL,
@@ -109,6 +110,12 @@ const radiusApi = {
     const handler = (): void => listener();
     ipcRenderer.on(AGENTS_CHANGED_CHANNEL, handler);
     return () => ipcRenderer.removeListener(AGENTS_CHANGED_CHANNEL, handler);
+  },
+  takeAgentLink: () => ipcRenderer.invoke("radius:take-agent-link"),
+  onAgentLink: (listener: () => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on(AGENT_LINK_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(AGENT_LINK_CHANNEL, handler);
   },
   connectAgentAuthentication: (agentId: string) =>
     ipcRenderer.invoke("radius:connect-agent-authentication", agentId),

@@ -6,6 +6,7 @@ import { WorkspacePage } from "@renderer/app/workspace/page";
 import { SettingsShell } from "@renderer/components/shell/settings-shell";
 import { WorkspaceShell } from "@renderer/components/shell/workspace-shell";
 import { useWorkspaceNavigation } from "@renderer/components/shell/navigation-context";
+import { useAgentLinks } from "@renderer/components/shell/use-agent-links";
 import { useIsPresent } from "@renderer/components/shell/route-presence";
 import { WorkspaceNavigationProvider } from "@renderer/components/shell/workspace-navigation-provider";
 import { ProjectProvider } from "@renderer/components/shell/project-context";
@@ -82,6 +83,7 @@ function RouteSurface({
 
 function AppContent(): ReactNode {
   const { activeView, canGoBack, goBack, navigate } = useWorkspaceNavigation();
+  useAgentLinks();
   const reduceMotion = useReducedMotion();
   const routeKind = activeView === "settings" ? "settings" : "workspace";
 

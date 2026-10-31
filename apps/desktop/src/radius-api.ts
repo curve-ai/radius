@@ -121,6 +121,7 @@ export const SESSION_RUN_ACTIVITY_DETAIL = {
   startingLocalAgent: "Preparing the local agent runtime",
 } as const;
 export const AGENTS_CHANGED_CHANNEL = "radius:agents-changed";
+export const AGENT_LINK_CHANNEL = "radius:agent-link";
 export type DesktopConnector = ConnectorSummary;
 export type DesktopConnectorCatalogEntry = ConnectorCatalogEntry;
 export type DesktopConnectorCatalogCategoryPreview =
@@ -506,6 +507,9 @@ export interface RadiusApi {
   deleteConnector(installationId: string): Promise<void>;
   listAgents(): Promise<DesktopAgentSummary[]>;
   onAgentsChanged(listener: () => void): () => void;
+  /** Claims the development agent a `radius://` link asked for, once. */
+  takeAgentLink(): Promise<string | null>;
+  onAgentLink(listener: () => void): () => void;
   connectAgentAuthentication(agentId: string): Promise<DesktopAgentSummary>;
   disconnectAgentAuthentication(agentId: string): Promise<DesktopAgentSummary>;
   runtimeStatus(): Promise<DesktopRuntimeStatus>;

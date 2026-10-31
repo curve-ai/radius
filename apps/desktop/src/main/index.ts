@@ -21,10 +21,21 @@ import {
 import path from "node:path";
 
 import { DESKTOP_UPDATE_CHANNELS } from "../update-types";
-import { AGENTS_CHANGED_CHANNEL } from "../radius-api";
+import { AGENT_LINK_CHANNEL, AGENTS_CHANGED_CHANNEL } from "../radius-api";
+import { DEVELOPMENT_AGENT_SCHEMA_VERSIONS } from "@curve-ai/radius-runtime";
+import {
+  AGENT_LINK_PROTOCOL,
+  developmentAgentIdFromArgv,
+  developmentAgentIdFromLink,
+} from "./agent-links";
+import {
+  removeDesktopPresence,
+  writeDesktopPresence,
+} from "./desktop-presence";
 import { initializeBundledAgents } from "./bundled-agents";
 import { removeOrphanedFxProfiles } from "./fx-auth";
 import {
+  developmentAgentsPath,
   initializeDevelopmentAgentConnections,
   stopDevelopmentAgentConnections,
 } from "./development-agents";
@@ -123,12 +134,52 @@ if (distribution) {
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 
-app.on("second-instance", () => {
+// Only the installed standard app claims the scheme. A development run would
+// take links away from the installed app on the same machine, and a
+// distribution build keeps its own profile, which `radius dev` does not
+// register agents into.
+if (primaryInstance && app.isPackaged && !distribution) {
+  app.setAsDefaultProtocolClient(AGENT_LINK_PROTOCOL);
+}
+
+// Held until the renderer asks for it: a link that launches the app arrives
+// long before the workspace is mounted to act on it.
+let pendingAgentLink: string | null = primaryInstance
+  ? developmentAgentIdFromArgv(process.argv)
+  : null;
+// Set once startup has opened the first window; before that a link only
+// waits, so it cannot open a second window during startup.
+let windowsReady = false;
+
+const focusMainWindow = (): void => {
   const mainWindow = BrowserWindow.getAllWindows()[0];
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+};
+
+const openDevelopmentAgentLink = (agentId: string | null): void => {
+  if (!agentId) return;
+  pendingAgentLink = agentId;
+  if (!windowsReady) return;
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  focusMainWindow();
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(AGENT_LINK_CHANNEL);
+  }
+};
+
+app.on("second-instance", (_event, argv) => {
+  focusMainWindow();
+  openDevelopmentAgentLink(developmentAgentIdFromArgv(argv));
+});
+
+// macOS delivers links as an event, including the one that launched the app,
+// which fires before `ready`.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  openDevelopmentAgentLink(developmentAgentIdFromLink(url));
 });
 
 const isSafeExternalUrl = (value: string): boolean => {
@@ -416,12 +467,30 @@ app.whenReady().then(async () => {
     handleRadiusIpc("radius:auth-sign-in", signInToDistribution);
     handleRadiusIpc("radius:auth-sign-out", signOutOfDistribution);
     handleRadiusIpc("radius:auth-cancel", cancelDistributionSignIn);
+    handleRadiusIpc("radius:take-agent-link", () => {
+      const agentId = pendingAgentLink;
+      pendingAgentLink = null;
+      return agentId;
+    });
     createWindow();
+    windowsReady = true;
     void initializeDesktopAuthentication(stopAgentRuntime);
     await initializeDevelopmentAgentConnections(() => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send(AGENTS_CHANGED_CHANNEL);
       }
+    });
+    await writeDesktopPresence(app.getPath("userData"), {
+      pid: process.pid,
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      agentNoteVersions: DEVELOPMENT_AGENT_SCHEMA_VERSIONS,
+      agentsPath: developmentAgentsPath(),
+    }).catch((error) => {
+      console.error(
+        "[agents] Radius could not announce itself to radius dev",
+        error,
+      );
     });
     await initializeConnectorRegistry();
     initializeDesktopUpdater();
@@ -455,7 +524,11 @@ app.on("before-quit", (event) => {
   stopDesktopUpdater();
   stopAgentRuntime();
   stopDevelopmentAgentConnections();
-  void Promise.allSettled([stopScheduler(), stopSync()]).finally(() => {
+  void Promise.allSettled([
+    stopScheduler(),
+    stopSync(),
+    removeDesktopPresence(app.getPath("userData"), process.pid),
+  ]).finally(() => {
     closeStorage();
     app.quit();
   });
