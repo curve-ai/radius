@@ -72,6 +72,7 @@ export interface DesktopSessionInput {
   readonly isTranslated?: () => Promise<boolean>;
   readonly isAlive?: (pid: number) => boolean;
   readonly presenceTimeoutMs?: number;
+  readonly slowStartNoticeMs?: number;
 }
 
 export interface DesktopStatus {
@@ -79,6 +80,12 @@ export interface DesktopStatus {
   readonly installed: boolean;
   readonly version: string | null;
   readonly launched: boolean;
+  /**
+   * Whether the app reported in, and so is showing the agent. A launched app
+   * that has not can still be at its keychain prompt; the agent appears once
+   * it gets past it.
+   */
+  readonly ready: boolean;
   readonly agentsPath: string;
   /** Why it was not launched, or the bundle that was. */
   readonly detail: string;
@@ -144,6 +151,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
           installed: true,
           version: presence.version,
           launched: false,
+          ready: true,
           agentsPath: presence.agentsPath,
           detail: "--no-open",
         },
@@ -170,6 +178,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
         installed: true,
         version: presence.version,
         launched: launch.launched,
+        ready: true,
         agentsPath: presence.agentsPath,
         detail: launch.detail,
       },
@@ -185,6 +194,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
         installed: false,
         version: null,
         launched: false,
+        ready: false,
         agentsPath: firstPath,
         detail: "--no-open",
       },
@@ -256,6 +266,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
         installed: false,
         version: null,
         launched: false,
+        ready: false,
         agentsPath: firstPath,
         detail: notInstalledDetail ?? "Radius isn't installed.",
       },
@@ -271,13 +282,26 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
     spawner: input.spawner,
   });
   let agentsPath = firstPath;
+  let ready = false;
   if (launch.launched) {
     const started = Date.now();
+    // An unsigned build stops at a keychain password prompt on its first
+    // launch after an install, and reports in only once storage opens. A
+    // silent wait there looked like a hung CLI, so say what is likely
+    // holding it up once the wait stops being quick.
+    const slow = setTimeout(
+      () =>
+        input.note(
+          "  waiting for Radius to start — if macOS asks for your login password, enter it and choose Always Allow",
+        ),
+      input.slowStartNoticeMs ?? 5_000,
+    );
     const arrived = await waitForDesktopPresence(
       input.userDataPath,
       input.presenceTimeoutMs ?? 30_000,
       { isAlive: input.isAlive },
-    );
+    ).finally(() => clearTimeout(slow));
+    ready = arrived !== null && arrived !== undefined;
     if (arrived) {
       input.verbose(
         `[desktop] Radius reported in after ${Date.now() - started}ms`,
@@ -311,6 +335,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
       installed: true,
       version,
       launched: launch.launched,
+      ready,
       agentsPath,
       detail: launch.detail,
     },

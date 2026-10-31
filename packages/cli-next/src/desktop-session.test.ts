@@ -218,6 +218,7 @@ test(
     const moved = join(h.userData, "moved", "agents");
     assert.equal(h.installs.length, 1);
     assert.equal(session.desktop.launched, true);
+    assert.equal(session.desktop.ready, true, "it reported in");
     assert.equal(session.desktop.version, "0.1.0");
     assert.deepEqual(
       h.registered,
@@ -279,8 +280,12 @@ test(
   macOnly,
   async () => {
     const h = await harness({ app: { version: "0.1.0" } });
-    const session = await connectDesktop(h.input);
+    const session = await connectDesktop({ ...h.input, slowStartNoticeMs: 50 });
     assert.equal(session.desktop.launched, true);
+    // Launched is not ready: an app at its keychain prompt has not opened
+    // the agent yet, and the wait says what is probably holding it up.
+    assert.equal(session.desktop.ready, false);
+    assert.ok(h.notes.some((line) => /login password/.test(line)));
     assert.deepEqual(h.registered, [join(h.userData, "development", "agents")]);
     assert.deepEqual(h.removed, []);
   },
