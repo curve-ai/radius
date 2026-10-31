@@ -23,10 +23,7 @@ export interface PromptGate {
   readonly yes: boolean;
 }
 
-export function canPrompt(
-  context: RadiusContext,
-  flags: PromptGate,
-): boolean {
+export function canPrompt(context: RadiusContext, flags: PromptGate): boolean {
   return context.isTTY && context.output !== "json" && !flags.yes;
 }
 
@@ -47,13 +44,13 @@ export function requireFlag(name: string, detail?: string): never {
   );
 }
 
-async function ask(
-  context: RadiusContext,
-  question: string,
-): Promise<string> {
+async function ask(context: RadiusContext, question: string): Promise<string> {
   // Created per question and closed immediately: a lingering readline
   // interface keeps stdin open and the process never exits.
-  const rl = createInterface({ input: process.stdin, output: context.process.stderr });
+  const rl = createInterface({
+    input: process.stdin,
+    output: context.process.stderr,
+  });
   try {
     return (await rl.question(question)).trim();
   } finally {
@@ -106,7 +103,9 @@ export async function promptChoice(
 
     if (answer === "?") {
       for (const choice of input.choices) {
-        context.note(`  ${choice.value}${choice.hint ? `  ${choice.hint}` : ""}`);
+        context.note(
+          `  ${choice.value}${choice.hint ? `  ${choice.hint}` : ""}`,
+        );
       }
       continue;
     }
@@ -121,5 +120,22 @@ export async function promptChoice(
     } else {
       context.note(`No match for "${answer}". Type "?" to list them.`);
     }
+  }
+}
+
+/** A yes/no question whose default is the answer to an empty reply. */
+export async function promptConfirm(
+  context: RadiusContext,
+  question: string,
+  fallback = true,
+): Promise<boolean> {
+  for (;;) {
+    const answer = (
+      await ask(context, `${question} ${fallback ? "[Y/n]" : "[y/N]"} `)
+    ).toLowerCase();
+    if (answer === "") return fallback;
+    if (answer === "y" || answer === "yes") return true;
+    if (answer === "n" || answer === "no") return false;
+    context.note('Answer "y" or "n".');
   }
 }
