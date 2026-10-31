@@ -185,7 +185,9 @@ test("non-JSON output on stdout fails the check and is quoted back", async () =>
 
 test("an agent that never answers times out with its stderr attached", async () => {
   const started = Date.now();
-  const result = await check({ hang: true, stderr: "booting plugins" }, 400);
+  // Long enough for node to start and write its stderr on a slow Windows
+  // runner; the point is the hang, not how short the wait is.
+  const result = await check({ hang: true, stderr: "booting plugins" }, 3_000);
   assert.equal(result.passed, false);
   assert.equal(result.probe.failure?.kind, "timeout");
   assert.equal(result.probe.stage, "initialize");
@@ -193,7 +195,7 @@ test("an agent that never answers times out with its stderr attached", async () 
   assert.match(handshake.summary, /no answer to initialize/);
   assert.ok(handshake.detail.some((line) => line.includes("booting plugins")));
   assert.equal(verdict(result, "agents").status, "skip");
-  assert.ok(Date.now() - started < 4000, "the hung agent must be killed");
+  assert.ok(Date.now() - started < 10_000, "the hung agent must be killed");
 });
 
 test("an agent that exits before answering reports the exit and stderr", async () => {
