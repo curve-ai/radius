@@ -27,6 +27,7 @@
   },
   "trustedDependencies": [
     "@curve-ai/radius-desktop",
+    "better-sqlite3",
     "electron",
     "electron-winstaller",
     "esbuild"
