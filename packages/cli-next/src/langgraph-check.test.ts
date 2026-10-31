@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { lookup } from "node:dns/promises";
-import { cp, mkdtemp, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -22,10 +22,9 @@ import {
  * has to fetch langgraph for the adapter's environment.
  */
 
-const ADAPTER = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../langgraph-acp-python",
-);
+const here = dirname(fileURLToPath(import.meta.url));
+const ADAPTER = resolve(here, "../../langgraph-acp-python");
+const TYPESCRIPT_ADAPTER = resolve(here, "../../langgraph-acp-typescript");
 
 async function skipReason(): Promise<string | false> {
   // The adapter refuses to start on Windows until its stdio layer supports it.
@@ -71,6 +70,65 @@ test(
       env: startEnvironment(start, env),
       // A cold uv cache resolves and installs langgraph first.
       timeoutMs: 240_000,
+    });
+    assert.equal(
+      result.passed,
+      true,
+      JSON.stringify(result.verdicts, null, 2) + result.probe.stderrTail,
+    );
+    assert.equal(result.agentInfo?.name, "radius-langgraph");
+    assert.deepEqual(result.advertisedAgents, ["weather"]);
+  },
+);
+
+/**
+ * The same for TypeScript graphs. Nothing to fetch: the adapter and the
+ * fixture's LangGraph both come from this workspace's `node_modules`, linked
+ * into the copy the way a project has its own installed.
+ */
+test(
+  "a TypeScript langgraph runtime passes check with its graph advertised",
+  { timeout: 120_000 },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "radius-langgraph-ts-"));
+    await cp(join(TYPESCRIPT_ADAPTER, "test/fixtures/weather"), root, {
+      recursive: true,
+    });
+    await symlink(
+      resolve(here, "../../../node_modules"),
+      join(root, "node_modules"),
+      "junction",
+    );
+    await writeFile(
+      join(root, "radius.json"),
+      JSON.stringify({
+        name: "Weather",
+        runtime: { kind: "langgraph", language: "typescript" },
+      }),
+    );
+
+    const env = {
+      ...process.env,
+      RADIUS_LANGGRAPH_ADAPTER: TYPESCRIPT_ADAPTER,
+    };
+    const config = await loadConfig(root);
+    const start = await resolveStartCommand(
+      config,
+      root,
+      { platform: process.platform, arch: process.arch, env },
+      () => {},
+    );
+    assert.equal(start.summary, "langgraph weather");
+    assert.equal(
+      start.command[1],
+      join(TYPESCRIPT_ADAPTER, "bin", "radius-langgraph.mjs"),
+    );
+
+    const result = await checkAgent({
+      command: start.command,
+      root,
+      env: startEnvironment(start, env),
+      timeoutMs: 60_000,
     });
     assert.equal(
       result.passed,

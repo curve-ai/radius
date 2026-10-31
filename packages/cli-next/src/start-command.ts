@@ -93,12 +93,26 @@ export async function resolveStartCommand(
           `runtime.config ${runtime.config} does not exist in ${cwd}. A langgraph runtime serves the graphs that file lists.`,
         );
       }
+      const names = runtime.graph ? [runtime.graph] : Object.keys(graphs);
+      const adapterArgs = [
+        "--config",
+        runtime.config,
+        ...(runtime.graph ? ["--graph", runtime.graph] : []),
+      ];
+      const summary = `langgraph ${names.length > 0 ? names.join(", ") : runtime.config}`;
+      if (runtime.language === "typescript") {
+        return {
+          kind: "langgraph",
+          command: [...(await typescriptAdapter(cwd, host)), ...adapterArgs],
+          summary,
+          env: {},
+        };
+      }
       await requireOnPath(
         "uv",
         host,
         "LangGraph agents run through uv, which installs the Radius adapter next to the project's own dependencies. Install it from https://docs.astral.sh/uv/ and try again.",
       );
-      const names = runtime.graph ? [runtime.graph] : Object.keys(graphs);
       return {
         kind: "langgraph",
         // `--with` layers the adapter over the project's environment rather
@@ -115,11 +129,9 @@ export async function resolveStartCommand(
             cwd,
           ),
           "radius-langgraph",
-          "--config",
-          runtime.config,
-          ...(runtime.graph ? ["--graph", runtime.graph] : []),
+          ...adapterArgs,
         ],
-        summary: `langgraph ${names.length > 0 ? names.join(", ") : runtime.config}`,
+        summary,
         env: {},
       };
     }
@@ -177,12 +189,14 @@ export function startEnvironment(
 }
 
 /**
- * The `--with` value for the LangGraph adapter.
+ * The `--with` value for the Python LangGraph adapter, and the checkout the
+ * TypeScript one runs from.
  *
  * `RADIUS_LANGGRAPH_ADAPTER`, read from the CLI's own environment, overrides
  * `runtime.adapter`. It exists because `radius-langgraph` is not on PyPI
- * yet, so the pinned default cannot install; pointing it at a checkout of
- * `packages/langgraph-acp-python` lets `dev` and `check` run against the
+ * yet, and the TypeScript adapter not on npm, so neither pinned default can
+ * install; pointing it at a checkout of `packages/langgraph-acp-python` or
+ * `packages/langgraph-acp-typescript` lets `dev` and `check` run against the
  * adapter as it is in this repository. It is read here, before the child
  * starts, because the child never sees `RADIUS_*` variables.
  *
@@ -195,6 +209,54 @@ export function resolveAdapter(adapter: string, cwd: string): string {
   if (adapter.startsWith(".") || adapter.startsWith("/"))
     return resolve(cwd, adapter);
   return adapter;
+}
+
+/**
+ * The npm package that serves JavaScript and TypeScript graphs. Pinned here
+ * rather than in `radius.json`, because the project never chooses it: like
+ * the Python adapter it is layered over the project, which keeps its own
+ * `@langchain/langgraph`. Not on npm yet, so the default cannot install;
+ * `RADIUS_LANGGRAPH_ADAPTER` points at a checkout until it is published.
+ */
+export const LANGGRAPH_TYPESCRIPT_ADAPTER = "@curve-ai/radius-langgraph@0.0.1";
+
+/**
+ * How to start the TypeScript adapter. `RADIUS_LANGGRAPH_ADAPTER` names a
+ * checkout of `packages/langgraph-acp-typescript`, run with `node` directly
+ * so a change to it shows up in the next `dev` or `check`; otherwise npx
+ * fetches the pinned package. Both need Node, which the graphs run on too.
+ */
+async function typescriptAdapter(
+  cwd: string,
+  host: StartHost,
+): Promise<string[]> {
+  const node = await requireOnPath(
+    "node",
+    host,
+    "TypeScript LangGraph agents run on Node. Install it and make sure `node` is on PATH.",
+  );
+  const override = host.env.RADIUS_LANGGRAPH_ADAPTER;
+  if (override) {
+    // Always a directory here, never a requirement, so a bare name is
+    // a path relative to the project too.
+    const bin = join(
+      resolve(cwd, resolveAdapter(override, cwd)),
+      "bin",
+      "radius-langgraph.mjs",
+    );
+    if (!(await exists(bin))) {
+      throw new UsageError(
+        `RADIUS_LANGGRAPH_ADAPTER is ${override}, but ${bin} does not exist. Point it at a checkout of packages/langgraph-acp-typescript.`,
+      );
+    }
+    return [node, bin];
+  }
+  await requireOnPath(
+    "npx",
+    host,
+    "TypeScript LangGraph agents fetch the Radius adapter with npx, which ships with Node. Install Node and try again.",
+  );
+  return ["npx", "--yes", LANGGRAPH_TYPESCRIPT_ADAPTER];
 }
 
 function runnerHint(runner: string): string {
