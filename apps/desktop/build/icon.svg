@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Source for icon.png. The tile follows the macOS icon grid: an 824px
+       rounded square inset 100px, which Windows and Linux also accept. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a5b88"/>
+      <stop offset="1" stop-color="#2f4d77"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <circle cx="512" cy="512" r="236" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="32"/>
+  <line x1="512" y1="512" x2="748" y2="512" stroke="#ffffff" stroke-width="32" stroke-linecap="round"/>
+  <circle cx="512" cy="512" r="40" fill="#ffffff"/>
+  <circle cx="748" cy="512" r="40" fill="#ffffff"/>
+</svg>
