@@ -37,7 +37,12 @@ import {
   requireFlag,
 } from "../../prompt.js";
 import { fetchRegistry, listHarnessIds, selectEntry } from "../../registry.js";
-import { detectProject, type Inferred } from "./detect.js";
+import {
+  detectLanggraph,
+  detectProject,
+  type Inferred,
+  type LanggraphDetection,
+} from "./detect.js";
 
 export interface InitFlags {
   readonly harness?: string;
@@ -78,6 +83,12 @@ export async function runInit(
   const raw = await readRawConfig(root);
   const existing = raw === null ? {} : parseExisting(raw);
   const existed = raw !== null;
+
+  const langgraph = await chooseLanggraph(context, root, existing, flags);
+  if (langgraph) {
+    await initLanggraph(context, flags, root, existing, existed, langgraph);
+    return;
+  }
 
   // `runtime` written out inline is the form `init` produced before the lock
   // existed. It keeps working as it is; `--force` is the explicit request to
@@ -363,6 +374,114 @@ export async function runInit(
   if (ignored) context.out("  + .gitignore (.radius/)");
   if (inline && !migrate) context.out(inlineHint);
   context.out("\nNext: `radius dev` to run it against the Radius desktop app.");
+}
+
+/**
+ * Whether this run sets up a LangGraph runtime instead of a harness, and if
+ * it was detected just now, from which graphs.
+ *
+ * Only an untouched project is detected: a `--harness` flag or a pin already
+ * in `radius.json` is the developer's choice, and a `langgraph.json` beside
+ * it does not overrule that. opencode files win over `langgraph.json` for the
+ * same reason `radius check` reads them first.
+ */
+async function chooseLanggraph(
+  context: RadiusContext,
+  root: string,
+  existing: Record<string, unknown>,
+  flags: InitFlags,
+): Promise<{ detected?: LanggraphDetection } | undefined> {
+  if (isRecord(existing.runtime) && existing.runtime.kind === "langgraph") {
+    if (flags.harness) {
+      throw new UsageError(
+        `${CONFIG_FILENAME} declares a langgraph runtime. Remove \`runtime\` from it to switch to the ${flags.harness} harness.`,
+      );
+    }
+    return {};
+  }
+  if (
+    flags.harness ||
+    existing.runtime !== undefined ||
+    existing.harness !== undefined
+  ) {
+    return undefined;
+  }
+  const detected = await detectLanggraph(root);
+  if (!detected || (await detectProject(root, undefined)).harness) {
+    return undefined;
+  }
+  if (detected.language !== "python") {
+    // Said before falling through, because the harness path that follows
+    // may stop to ask for --harness, and the developer should know why
+    // their langgraph.json was not enough.
+    context.note(
+      "langgraph.json found, but not every graph in it is Python. Radius serves Python graphs only for now, so it was not set up as a langgraph runtime.",
+    );
+    return undefined;
+  }
+  return { detected };
+}
+
+async function initLanggraph(
+  context: RadiusContext,
+  flags: InitFlags,
+  root: string,
+  existing: Record<string, unknown>,
+  existed: boolean,
+  { detected }: { detected?: LanggraphDetection },
+): Promise<void> {
+  let name = flags.name;
+  if (!name && typeof existing.name !== "string") {
+    const suggestion = basename(root) || "langgraph";
+    name = canPrompt(context, flags)
+      ? await promptText(context, { label: "Agent name", fallback: suggestion })
+      : suggestion;
+  }
+
+  // No registry and no lock: the adapter is pinned by the CLI's own default
+  // for `runtime.adapter`, so there is nothing to fetch and nothing to
+  // record. Only the kind is written. Every other field defaults to the
+  // layout `langgraph.json` already describes, and a default written out is
+  // one more line that goes stale when the default moves.
+  const changed = await applyConfigEdits(root, [
+    { path: ["$schema"], value: CONFIG_SCHEMA_URL },
+    { path: ["agent"], value: mintAgentId() },
+    { path: ["name"], value: name },
+    { path: ["version"], value: "0.0.0" },
+    { path: ["runtime"], value: { kind: "langgraph" } },
+  ]);
+  const ignored = await ensureGitignore(root);
+  const reason = detected
+    ? `langgraph.json: graph${detected.graphs.length === 1 ? "" : "s"} ${detected.graphs.join(", ")}`
+    : undefined;
+
+  if (context.output === "json") {
+    emitJson(context, {
+      configPath: join(root, CONFIG_FILENAME),
+      created: !existed,
+      changed,
+      runtime: { kind: "langgraph" },
+      ...(reason ? { detectedFrom: reason } : {}),
+      inferred: [],
+      notes: [],
+      gitignoreUpdated: ignored,
+    });
+    return;
+  }
+
+  if (reason) context.out(`detected langgraph (${reason})`);
+  if (changed.length === 0 && !ignored) {
+    context.out(`${CONFIG_FILENAME} is already complete — nothing to do.`);
+    return;
+  }
+  if (changed.length > 0) {
+    context.out(`${existed ? "Updated" : "Created"} ${CONFIG_FILENAME}.`);
+    for (const key of changed) context.out(`  + ${key}`);
+  }
+  if (ignored) context.out("  + .gitignore (.radius/)");
+  context.out(
+    "\nNext: `radius check` to confirm the graphs load, then `radius dev` to run them against the Radius desktop app.",
+  );
 }
 
 /** What the schema fills in when a field is absent. */

@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -8,6 +9,7 @@ import type { AgentConfig } from "@curve-ai/agent-contracts";
 
 import { UsageError } from "./errors.js";
 import { resolveHarness } from "./harness.js";
+import { readLanggraphGraphs } from "./project-agents.js";
 
 /**
  * How `dev` starts one copy of the agent on this machine.
@@ -83,6 +85,44 @@ export async function resolveStartCommand(
         env: {},
       };
     }
+    case "langgraph": {
+      const configPath = resolve(cwd, runtime.config);
+      const graphs = await readLanggraphGraphs(configPath);
+      if (graphs === null) {
+        throw new UsageError(
+          `runtime.config ${runtime.config} does not exist in ${cwd}. A langgraph runtime serves the graphs that file lists.`,
+        );
+      }
+      await requireOnPath(
+        "uv",
+        host,
+        "LangGraph agents run through uv, which installs the Radius adapter next to the project's own dependencies. Install it from https://docs.astral.sh/uv/ and try again.",
+      );
+      const names = runtime.graph ? [runtime.graph] : Object.keys(graphs);
+      return {
+        kind: "langgraph",
+        // `--with` layers the adapter over the project's environment rather
+        // than asking the project to depend on it: the project stays a plain
+        // LangGraph project, and Radius chooses the adapter version.
+        command: [
+          "uv",
+          "run",
+          "--python",
+          runtime.python,
+          "--with",
+          resolveAdapter(
+            host.env.RADIUS_LANGGRAPH_ADAPTER || runtime.adapter,
+            cwd,
+          ),
+          "radius-langgraph",
+          "--config",
+          runtime.config,
+          ...(runtime.graph ? ["--graph", runtime.graph] : []),
+        ],
+        summary: `langgraph ${names.length > 0 ? names.join(", ") : runtime.config}`,
+        env: {},
+      };
+    }
     case "typescript": {
       const entrypoint = resolve(cwd, runtime.entrypoint);
       if (!(await exists(entrypoint))) {
@@ -134,6 +174,27 @@ export function startEnvironment(
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   return { ...env, ...start.env };
+}
+
+/**
+ * The `--with` value for the LangGraph adapter.
+ *
+ * `RADIUS_LANGGRAPH_ADAPTER`, read from the CLI's own environment, overrides
+ * `runtime.adapter`. It exists because `radius-langgraph` is not on PyPI
+ * yet, so the pinned default cannot install; pointing it at a checkout of
+ * `packages/langgraph-acp-python` lets `dev` and `check` run against the
+ * adapter as it is in this repository. It is read here, before the child
+ * starts, because the child never sees `RADIUS_*` variables.
+ *
+ * A path is made absolute because uv resolves `--with` against its own cwd,
+ * and `~` is expanded because no shell sits between spawn and uv to do it.
+ */
+export function resolveAdapter(adapter: string, cwd: string): string {
+  if (adapter === "~" || adapter.startsWith("~/"))
+    return join(homedir(), adapter.slice(1));
+  if (adapter.startsWith(".") || adapter.startsWith("/"))
+    return resolve(cwd, adapter);
+  return adapter;
 }
 
 function runnerHint(runner: string): string {

@@ -34,6 +34,23 @@ taking no arguments or a `RunnableConfig`, optionally returning a context
 manager). Factories are called once at startup. `env` may be an object or a path
 to a `.env` file; existing environment variables win.
 
+## Use with Radius
+
+`radius init` in a directory with a Python `langgraph.json` writes a
+`radius.json` with `"runtime": { "kind": "langgraph" }`. `radius dev` and
+`radius check` then start this adapter for you with
+`uv run --with radius-langgraph==0.0.1 radius-langgraph`; the project does not
+depend on it.
+
+The package is not on PyPI yet, so point Radius at a checkout instead:
+
+```sh
+RADIUS_LANGGRAPH_ADAPTER=/path/to/radius/packages/langgraph-acp-python radius check
+```
+
+The variable overrides `runtime.adapter`, and takes a path or any uv
+requirement. `radius build` cannot package a langgraph runtime yet.
+
 ## Protocol mapping
 
 | ACP                   | LangGraph                                                                    |
