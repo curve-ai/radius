@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 import { AgentConfigSchema } from "@curve-ai/agent-contracts";
@@ -290,7 +290,8 @@ test("a langgraph adapter given as a path is resolved against the project", asyn
     await withAdapter("./vendor/adapter"),
     join(root, "vendor/adapter"),
   );
-  assert.equal(await withAdapter("/opt/adapter"), "/opt/adapter");
+  // resolve(), so Windows' drive-qualified form is what is expected there.
+  assert.equal(await withAdapter("/opt/adapter"), resolve("/opt/adapter"));
   assert.equal(
     await withAdapter("~/src/adapter"),
     join(homedir(), "src/adapter"),
