@@ -1,0 +1,6 @@
+{
+  "node_version": "22",
+  "graphs": {
+    "weather": "./graph.ts:graph"
+  }
+}

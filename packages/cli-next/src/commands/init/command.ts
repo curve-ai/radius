@@ -46,6 +46,6 @@ export const initCommand = buildCommand({
     brief:
       "Create or fill in radius.json and radius.lock for an agent in this directory",
     fullDescription:
-      "Writes radius.json with an agent id and a harness pin (e.g. opencode@1.19.4), and radius.lock with the concrete archive URLs and digests copied out of the ACP registry. Commit both. An opencode project is recognised from opencode.json or .opencode/ without --harness, and its include and toolchains are inferred from the files present. A langgraph.json whose graphs are Python is set up as a langgraph runtime instead: no harness, no registry and no radius.lock.\n\nRe-running is safe: present values are never overwritten, only missing ones are added. --force re-pins to what the registry offers now, and moves a radius.json that pins its harness inline to the short form.",
+      "Writes radius.json with an agent id and a harness pin (e.g. opencode@1.19.4), and radius.lock with the concrete archive URLs and digests copied out of the ACP registry. Commit both. An opencode project is recognised from opencode.json or .opencode/ without --harness, and its include and toolchains are inferred from the files present. A langgraph.json whose graphs are all Python, or all JavaScript/TypeScript, is set up as a langgraph runtime instead: no harness, no registry and no radius.lock.\n\nRe-running is safe: present values are never overwritten, only missing ones are added. --force re-pins to what the registry offers now, and moves a radius.json that pins its harness inline to the short form.",
   },
 });

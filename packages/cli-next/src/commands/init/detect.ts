@@ -144,15 +144,15 @@ export async function detectProject(
 export interface LanggraphDetection {
   readonly graphs: readonly string[];
   /**
-   * `python` when every graph is Python, which is all the Radius adapter can
-   * serve; `other` as soon as one is not, so a mixed project is not half
-   * served.
+   * The language every graph is written in, which picks the Radius adapter;
+   * `other` as soon as one graph differs or cannot be told, so a mixed
+   * project is not half served.
    */
-  readonly language: "python" | "other";
+  readonly language: "python" | "typescript" | "other";
 }
 
 /**
- * A `langgraph.json` at the root, and whether its graphs are Python.
+ * A `langgraph.json` at the root, and the language of its graphs.
  *
  * Read from the graph references alone, the way the LangGraph CLI tells them
  * apart: `./file.py:attr` and a dotted `module:attr` are Python, and a
@@ -164,12 +164,17 @@ export async function detectLanggraph(
   const graphs = await readLanggraphGraphs(join(root, "langgraph.json"));
   if (graphs === null) return null;
   const names = Object.keys(graphs);
-  const python =
-    names.length > 0 &&
-    Object.values(graphs).every((reference) =>
-      isPythonGraph(graphPath(reference)),
-    );
-  return { graphs: names, language: python ? "python" : "other" };
+  const languages = new Set(
+    Object.values(graphs).map((reference) =>
+      graphLanguage(graphPath(reference)),
+    ),
+  );
+  const [only] = languages;
+  const language =
+    languages.size === 1 && only !== undefined && only !== "other"
+      ? only
+      : "other";
+  return { graphs: names, language };
 }
 
 /** A graph is either `"path:attr"` or `{ "path": "path:attr", ... }`. */
@@ -182,15 +187,21 @@ function graphPath(reference: unknown): string | undefined {
   return undefined;
 }
 
-function isPythonGraph(reference: string | undefined): boolean {
-  if (!reference) return false;
+function graphLanguage(
+  reference: string | undefined,
+): LanggraphDetection["language"] {
+  if (!reference) return "other";
+  // The JavaScript CLI splits at the first colon, and its export defaults to
+  // `default`, so a bare file path is a whole reference.
+  const jsFile = reference.split(":", 1)[0]!;
+  if (/\.(?:[cm]?[jt]s|[jt]sx)$/i.test(jsFile)) return "typescript";
   const colon = reference.lastIndexOf(":");
   const target = colon === -1 ? reference : reference.slice(0, colon);
-  if (/\.py$/i.test(target)) return true;
+  if (/\.py$/i.test(target)) return "python";
   // A module path has no slashes and no file extension.
   return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(target)
-    ? !/\.(?:[cm]?[jt]sx?)$/i.test(target)
-    : false;
+    ? "python"
+    : "other";
 }
 
 function isCanonicalOpencode(name: string): boolean {

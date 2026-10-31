@@ -410,12 +410,12 @@ async function chooseLanggraph(
   if (!detected || (await detectProject(root, undefined)).harness) {
     return undefined;
   }
-  if (detected.language !== "python") {
+  if (detected.language === "other") {
     // Said before falling through, because the harness path that follows
     // may stop to ask for --harness, and the developer should know why
     // their langgraph.json was not enough.
     context.note(
-      "langgraph.json found, but not every graph in it is Python. Radius serves Python graphs only for now, so it was not set up as a langgraph runtime.",
+      "langgraph.json found, but its graphs are not all Python or all JavaScript/TypeScript. Radius serves one language per project, so it was not set up as a langgraph runtime.",
     );
     return undefined;
   }
@@ -438,21 +438,26 @@ async function initLanggraph(
       : suggestion;
   }
 
-  // No registry and no lock: the adapter is pinned by the CLI's own default
-  // for `runtime.adapter`, so there is nothing to fetch and nothing to
-  // record. Only the kind is written. Every other field defaults to the
-  // layout `langgraph.json` already describes, and a default written out is
-  // one more line that goes stale when the default moves.
+  // No registry and no lock: the adapter is pinned by the CLI's own
+  // defaults, so there is nothing to fetch and nothing to record. Only the
+  // kind is written, and the language when it is not the default. Every
+  // other field defaults to the layout `langgraph.json` already describes,
+  // and a default written out is one more line that goes stale when the
+  // default moves.
+  const runtime =
+    detected?.language === "typescript"
+      ? { kind: "langgraph", language: "typescript" }
+      : { kind: "langgraph" };
   const changed = await applyConfigEdits(root, [
     { path: ["$schema"], value: CONFIG_SCHEMA_URL },
     { path: ["agent"], value: mintAgentId() },
     { path: ["name"], value: name },
     { path: ["version"], value: "0.0.0" },
-    { path: ["runtime"], value: { kind: "langgraph" } },
+    { path: ["runtime"], value: runtime },
   ]);
   const ignored = await ensureGitignore(root);
   const reason = detected
-    ? `langgraph.json: graph${detected.graphs.length === 1 ? "" : "s"} ${detected.graphs.join(", ")}`
+    ? `langgraph.json: ${detected.language} graph${detected.graphs.length === 1 ? "" : "s"} ${detected.graphs.join(", ")}`
     : undefined;
 
   if (context.output === "json") {
@@ -460,7 +465,7 @@ async function initLanggraph(
       configPath: join(root, CONFIG_FILENAME),
       created: !existed,
       changed,
-      runtime: { kind: "langgraph" },
+      runtime,
       ...(reason ? { detectedFrom: reason } : {}),
       inferred: [],
       notes: [],
