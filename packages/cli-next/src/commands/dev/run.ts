@@ -3,9 +3,10 @@ import { randomBytes } from "node:crypto";
 import { startBridge } from "../../bridge.js";
 import { loadConfig } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
-import { launchDesktopApp } from "../../desktop.js";
+import { connectDesktop } from "../../desktop-session.js";
 import { handler } from "../../handler.js";
 import { handshakeOverStdio } from "../../handshake.js";
+import { canPrompt, promptConfirm } from "../../prompt.js";
 import {
   radiusUserDataPath,
   registerDevelopmentAgent,
@@ -16,6 +17,7 @@ import { OperationalError } from "../../errors.js";
 interface DevFlags {
   readonly verbose: boolean;
   readonly "no-open": boolean;
+  readonly yes: boolean;
 }
 
 async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
@@ -109,35 +111,46 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
   });
 
   const instanceId = randomBytes(4).toString("hex");
+  const agentId = config.agent;
   // From here on the bridge owns a listening socket and, once a thread opens,
   // child processes, so every later step runs where a throw can still close
   // them. Without this a failed registration left the CLI hanging.
   try {
-    const registration = await registerDevelopmentAgent({
-      userDataPath: radiusUserDataPath(context.process.platform, context.env),
-      agentId: config.agent,
-      instanceId,
-      displayName: config.name,
-      endpoint: bridge.endpoint,
-      token: bridge.token,
-      cwd: context.cwd,
-      ownerPid: context.process.pid,
-      capabilities: config.capabilities.flatMap((capability) =>
-        capability.operations.map(
-          (operation) => `${capability.key}.${operation}`,
+    const register = (agentsPath: string) =>
+      registerDevelopmentAgent({
+        agentsPath,
+        agentId,
+        instanceId,
+        displayName: config.name,
+        endpoint: bridge.endpoint,
+        token: bridge.token,
+        cwd: context.cwd,
+        ownerPid: context.process.pid,
+        capabilities: config.capabilities.flatMap((capability) =>
+          capability.operations.map(
+            (operation) => `${capability.key}.${operation}`,
+          ),
         ),
-      ),
-    });
+      });
 
-    // Launched after registration, never before: the descriptor is what the
-    // app reads, so an app that opens first would briefly show nothing.
-    const desktop = flags["no-open"]
-      ? { launched: false, detail: "--no-open" }
-      : await launchDesktopApp({
-          platform: context.process.platform,
-          env: context.env,
-          projectRoot: context.cwd,
-        });
+    const yes = flags.yes;
+    const session = await connectDesktop({
+      platform: context.process.platform,
+      arch: context.process.arch,
+      env: context.env,
+      projectRoot: context.cwd,
+      userDataPath: radiusUserDataPath(context.process.platform, context.env),
+      agentId,
+      noOpen: flags["no-open"],
+      yes,
+      confirm: canPrompt(context, { yes })
+        ? (question) => promptConfirm(context, question)
+        : null,
+      register,
+      note: (message) => context.note(message),
+      verbose,
+    });
+    const { registration, desktop } = session;
 
     if (context.output === "json") {
       emitJson(context, {
@@ -159,7 +172,13 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
               },
             }
           : {}),
-        desktop: { launched: desktop.launched, detail: desktop.detail },
+        desktop: {
+          installed: desktop.installed,
+          version: desktop.version,
+          launched: desktop.launched,
+          agentsPath: desktop.agentsPath,
+          detail: desktop.detail,
+        },
       });
     } else {
       const details = [start.summary];
@@ -180,10 +199,19 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
         context.out(`  endpoint    ${bridge.endpoint}`);
         context.out(`  descriptor  ${registration.path}`);
         context.out(`  desktop     ${desktop.detail}`);
+        context.out(`  agents      ${desktop.agentsPath}`);
       }
-      // Only said when it changes what the developer does next.
-      if (!desktop.launched && !flags["no-open"]) {
-        context.out(`  Open Radius and pick this agent (${desktop.detail}).`);
+      if (desktop.launched) {
+        context.out(
+          `  opened Radius${desktop.version ? ` ${desktop.version}` : ""} on ${config.name}`,
+        );
+      } else if (!flags["no-open"]) {
+        // Only said when it changes what the developer does next.
+        context.out(
+          desktop.installed
+            ? `  Open Radius and pick this agent (${desktop.detail}).`
+            : `  ${desktop.detail}`,
+        );
       }
       context.out("Ctrl-C to stop.");
     }

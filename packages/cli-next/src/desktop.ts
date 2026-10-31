@@ -28,24 +28,36 @@ function repoCandidates(projectRoot: string): string[] {
   return [projectRoot, join(projectRoot, ".."), join(projectRoot, "..", "..")];
 }
 
-function appBundleCandidates(
-  env: NodeJS.ProcessEnv,
-  projectRoot?: string,
-): string[] {
+/** Where an installed app lives: the bundles `radius app` installs and updates. */
+export function installedAppCandidates(env: NodeJS.ProcessEnv): string[] {
   const explicit = env.RADIUS_APP_PATH?.trim();
   return [
     ...(explicit ? [explicit] : []),
     "/Applications/Radius.app",
     join(homedir(), "Applications", "Radius.app"),
-    // Someone working on Radius who has run `package` has a real bundle in
-    // the checkout, and would expect `dev` to open that one rather than be
-    // told nothing is installed.
-    ...(projectRoot
-      ? repoCandidates(projectRoot).flatMap((root) => [
-          join(root, "apps", "desktop", "dist", "mac-arm64", "Radius.app"),
-          join(root, "apps", "desktop", "dist", "mac", "Radius.app"),
-        ])
-      : []),
+  ];
+}
+
+/**
+ * Someone working on Radius who has run `package` has a real bundle in the
+ * checkout, and would expect `dev` to open that one rather than be told
+ * nothing is installed. Never installed over or updated: it is a build
+ * output, and its version says nothing about what is released.
+ */
+function repoBundleCandidates(projectRoot: string): string[] {
+  return repoCandidates(projectRoot).flatMap((root) => [
+    join(root, "apps", "desktop", "dist", "mac-arm64", "Radius.app"),
+    join(root, "apps", "desktop", "dist", "mac", "Radius.app"),
+  ]);
+}
+
+function appBundleCandidates(
+  env: NodeJS.ProcessEnv,
+  projectRoot?: string,
+): string[] {
+  return [
+    ...installedAppCandidates(env),
+    ...(projectRoot ? repoBundleCandidates(projectRoot) : []),
   ];
 }
 
@@ -221,23 +233,97 @@ async function bothExist(host: string, kernel: string): Promise<boolean> {
   }
 }
 
-export interface LaunchResult {
-  readonly launched: boolean;
-  readonly detail: string;
+export interface FoundApp {
+  readonly path: string;
+  /** False for a repo build output, which is opened but never updated. */
+  readonly installed: boolean;
 }
 
 /**
- * Brings the desktop app up so the developer does not have to.
+ * In order of how much the caller meant it: RADIUS_APP_PATH, then
+ * /Applications, then ~/Applications, then a bundle in a Radius checkout.
+ */
+export async function findDesktopApp(input: {
+  readonly env: NodeJS.ProcessEnv;
+  readonly projectRoot?: string;
+}): Promise<FoundApp | null> {
+  for (const path of installedAppCandidates(input.env)) {
+    if (await exists(path)) return { path, installed: true };
+  }
+  for (const path of input.projectRoot
+    ? repoBundleCandidates(input.projectRoot)
+    : []) {
+    if (await exists(path)) return { path, installed: false };
+  }
+  return null;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The pattern the app accepts; a link with any other id is ignored. */
+const AGENT_ID = /^agent_[A-Za-z0-9_-]{6,64}$/;
+
+export function devAgentLink(agentId: string): string {
+  if (!AGENT_ID.test(agentId)) {
+    throw new OperationalError(
+      `${agentId} is not an agent id Radius can open.`,
+      "Agent ids look like agent_ followed by 6 to 64 letters, digits, - or _. Run `radius init` to assign one.",
+    );
+  }
+  return `radius://dev-agent/${agentId}`;
+}
+
+/** Runs a command to completion; true when it exits 0. Injected by tests. */
+export type Spawner = (
+  command: string,
+  args: readonly string[],
+) => Promise<boolean>;
+
+export const spawnDetached: Spawner = (command, args) =>
+  new Promise((settle) => {
+    const child = spawn(command, [...args], {
+      stdio: "ignore",
+      detached: true,
+    });
+    child.once("error", () => settle(false));
+    child.once("exit", (code) => settle(code === 0));
+    child.unref();
+  });
+
+export interface LaunchResult {
+  readonly launched: boolean;
+  readonly detail: string;
+  /** The bundle opened, when one was. */
+  readonly path?: string;
+}
+
+/**
+ * Brings the desktop app up, on the agent when one is named.
  *
- * `dev` registers the agent by writing a descriptor the app watches, which
- * works whether the app starts before or after — so launching it is a
- * convenience, never a requirement. Failure is reported and ignored: a dev
- * session that already works must not die because an app could not be opened.
+ * The link is passed with `open -a` rather than opened on its own, so it
+ * reaches this bundle whether or not macOS has registered the scheme, and
+ * the app handles it the same way on a cold start as when it is already
+ * running.
+ *
+ * Failure is reported, not thrown: the agent is registered before this runs,
+ * and a dev session that already works must not die because an app could not
+ * be opened.
  */
 export async function launchDesktopApp(input: {
   readonly platform: string;
   readonly env: NodeJS.ProcessEnv;
   readonly projectRoot: string;
+  readonly agentId?: string;
+  /** Skips the lookup when the caller already knows the bundle. */
+  readonly bundle?: string;
+  readonly spawner?: Spawner;
 }): Promise<LaunchResult> {
   if (input.platform !== "darwin") {
     return {
@@ -245,16 +331,22 @@ export async function launchDesktopApp(input: {
       detail: "Opening Radius automatically is macOS-only for now.",
     };
   }
+  // Validated before anything is spawned, so a bad id is an error rather
+  // than an app that opens and silently shows nothing.
+  const link = input.agentId ? devAgentLink(input.agentId) : null;
 
-  for (const bundle of appBundleCandidates(input.env, input.projectRoot)) {
-    try {
-      await access(bundle);
-    } catch {
-      continue;
-    }
-    const opened = await open(bundle);
+  const bundle =
+    input.bundle ??
+    (await findDesktopApp({ env: input.env, projectRoot: input.projectRoot }))
+      ?.path;
+  if (bundle) {
+    const opened = await (input.spawner ?? spawnDetached)("open", [
+      "-a",
+      bundle,
+      ...(link ? [link] : []),
+    ]);
     return opened
-      ? { launched: true, detail: bundle }
+      ? { launched: true, detail: bundle, path: bundle }
       : {
           launched: false,
           detail: `Found ${bundle} but could not open it. Open Radius yourself.`,
@@ -280,23 +372,6 @@ export async function launchDesktopApp(input: {
   return {
     launched: false,
     detail:
-      "Radius does not appear to be installed. The agent is registered — open Radius and it will show up.",
+      "Radius does not appear to be installed. The agent is registered — run `radius app install`, or open Radius and it will show up.",
   };
-}
-
-/**
- * `-g` keeps the app in the background: a developer running `dev` is looking
- * at a terminal, and stealing focus mid-command is rude. `-j` leaves an
- * already-running app alone rather than raising it.
- */
-function open(bundle: string): Promise<boolean> {
-  return new Promise((settle) => {
-    const child = spawn("open", ["-g", "-j", bundle], {
-      stdio: "ignore",
-      detached: true,
-    });
-    child.once("error", () => settle(false));
-    child.once("exit", (code) => settle(code === 0));
-    child.unref();
-  });
 }
