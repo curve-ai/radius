@@ -1,15 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { PassThrough } from "node:stream";
+import type { SessionConfigOption } from "@curve-ai/radius-runtime";
 
-import {
-  AcpAuthenticationRequiredError,
-  AcpProtocolVersionMismatchError,
-  AcpRuntimeSession,
-  acpStreamFromChild,
-  type SessionConfigOption,
-} from "@curve-ai/radius-runtime";
-
-import { harnessEnvironment, splitLines, stopChild } from "./bridge.js";
+import { probeAcp, type ProbeResult } from "./acp-probe.js";
 import { OperationalError } from "./errors.js";
 
 /**
@@ -18,6 +9,9 @@ import { OperationalError } from "./errors.js";
  * then is not going to.
  */
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 120_000;
+
+/** ACP's `auth_required`, which an agent returns from `session/new`. */
+const ACP_AUTH_REQUIRED_CODE = -32000;
 
 export interface HandshakeResult {
   readonly protocolVersion: number;
@@ -48,151 +42,133 @@ export interface HandshakeOptions {
  * Stops at `session/new` for the same reason `verifyBuild` does: a prompt
  * needs a provider credential, and starting `dev` must not. What this proves
  * is narrower and is what `dev` needs before it registers anything — that the
- * command exists, stays up and speaks the protocol.
+ * command exists, stays up and speaks the protocol. The probe is `check`'s
+ * too, so the two can never disagree about whether a harness starts.
  */
 export async function handshakeOverStdio(
   options: HandshakeOptions,
 ): Promise<HandshakeResult> {
-  const { command } = options;
-  const [executable, ...args] = command;
-  const child = spawn(executable as string, args, {
+  const probe = await probeAcp({
+    command: options.command,
     cwd: options.cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: harnessEnvironment(options.env),
-    windowsHide: true,
-  }) as ChildProcessWithoutNullStreams;
-
-  // Kept for the failure message: "exited with code 1" says nothing a
-  // developer can act on, and the harness's last words usually do.
-  let stderrTail = "";
-  child.stderr.on(
-    "data",
-    splitLines((line) => {
-      stderrTail = `${stderrTail}${line}\n`.slice(-4_096);
-      options.onStderr?.(line);
-    }),
-  );
-  child.stdin.on("error", () => {
-    /* EPIPE after an early exit; the exit itself is what gets reported */
+    env: options.env,
+    timeoutMs: options.timeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS,
+    onStderrLine: options.onStderr,
+    onStdoutNoise: options.onStdout,
   });
-
-  // The SDK answers a non-JSON line with a parse error written back to the
-  // harness. Filtering here keeps the preflight's view of stdout identical to
-  // the bridge's, so a harness that logs to stdout passes both or neither.
-  const frames = new PassThrough();
-  child.stdout.on(
-    "data",
-    splitLines((line) => {
-      try {
-        JSON.parse(line);
-      } catch {
-        options.onStdout?.(line);
-        return;
-      }
-      frames.write(`${line}\n`);
-    }),
-  );
-  child.stdout.once("end", () => frames.end());
-
-  const described = command.join(" ");
-  const failed = new Promise<never>((_settle, reject) => {
-    child.once("error", (error) =>
-      reject(
-        new OperationalError(
-          `Could not start the harness: ${error.message}`,
-          `Command: ${described}`,
-        ),
-      ),
-    );
-    child.once("exit", (code, signal) =>
-      reject(
-        new OperationalError(
-          `The harness exited before completing the ACP handshake (code ${String(code)}, signal ${String(signal)}).`,
-          stderrTail.trim()
-            ? `Command: ${described}\n\n${stderrTail.trim()}`
-            : `Command: ${described}`,
-        ),
-      ),
-    );
-  });
-  const timeoutMs = options.timeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
-  let timer: NodeJS.Timeout | undefined;
-  const timedOut = new Promise<never>((_settle, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new OperationalError(
-            `The harness did not answer the ACP handshake within ${Math.round(timeoutMs / 1000)}s.`,
-            `Command: ${described}\n\nAn ACP agent reads JSON-RPC on stdin and writes it on stdout; check it is not waiting on a flag or a TTY.`,
-          ),
-        ),
-      timeoutMs,
-    );
-  });
-
-  let session: AcpRuntimeSession | null = null;
-  try {
-    const connecting = AcpRuntimeSession.connect(
-      acpStreamFromChild({
-        stdin: child.stdin,
-        stdout: frames as unknown as ChildProcessWithoutNullStreams["stdout"],
-        stderr: child.stderr,
-        kill: child.kill.bind(child),
-        once: child.once.bind(child),
-      }),
-      {
-        cwd: options.cwd,
-        clientName: "radius-cli",
-        // No prompt is sent, so nothing should ask; refuse if anything does.
-        handlers: {
-          onPermissionRequest: async () => ({ outcome: "cancelled" }),
-        },
-      },
-    );
-    // The losing promises reject later, when the child is killed below.
-    // Swallowed so that rejection is not reported as unhandled.
-    failed.catch(() => {});
-    timedOut.catch(() => {});
-    session = await Promise.race([connecting, failed, timedOut]);
+  const described = options.command.join(" ");
+  const authMethods = readAuthMethods(probe.initialize);
+  const failure = probe.failure;
+  if (!failure) {
+    const protocolVersion = probe.initialize?.protocolVersion;
+    if (protocolVersion !== 1) {
+      throw new OperationalError(
+        `The harness answered with ACP protocol version ${String(protocolVersion)}; Radius speaks version 1.`,
+        `Command: ${described}`,
+      );
+    }
     return {
-      protocolVersion: session.protocolVersion,
-      authMethods: session.authMethods.map((method) => method.id),
-      advertisedAgents: advertisedAgents(session),
+      protocolVersion,
+      authMethods,
+      advertisedAgents: probe.session
+        ? advertisedFromSession(probe.session)
+        : [],
       authRequired: false,
     };
-  } catch (error) {
-    if (error instanceof AcpAuthenticationRequiredError) {
-      return {
-        protocolVersion: 1,
-        authMethods: error.authMethods.map((method) => method.id),
-        advertisedAgents: [],
-        authRequired: true,
-      };
-    }
-    if (error instanceof OperationalError) throw error;
-    if (error instanceof AcpProtocolVersionMismatchError) {
-      throw new OperationalError(error.message, `Command: ${described}`);
-    }
-    // A harness that dies closes stdout before its `exit` event fires, so the
-    // SDK's "connection closed" usually wins the race. The exit carries the
-    // code and the stderr that explain it, so it is given a moment to land.
-    const exited = await Promise.race([
-      failed.then(
-        () => null,
-        (reason: unknown) => reason,
-      ),
-      new Promise<null>((settle) => setTimeout(() => settle(null), 1_000)),
-    ]);
-    if (exited instanceof OperationalError) throw exited;
-    throw new OperationalError(
-      `The harness did not complete the ACP handshake: ${error instanceof Error ? error.message : String(error)}`,
-      `Command: ${described}`,
-    );
-  } finally {
-    clearTimeout(timer);
-    session?.close();
-    await stopChild(child);
   }
+  switch (failure.kind) {
+    case "rpc":
+      // Still a pass: the harness started and speaks ACP, and the desktop
+      // runs the sign-in itself on a real thread.
+      if (
+        probe.stage === "session/new" &&
+        failure.code === ACP_AUTH_REQUIRED_CODE
+      ) {
+        return {
+          protocolVersion: 1,
+          authMethods,
+          advertisedAgents: [],
+          authRequired: true,
+        };
+      }
+      throw new OperationalError(
+        `The harness did not complete the ACP handshake: ${failure.message}`,
+        `Command: ${described}`,
+      );
+    case "spawn":
+      throw new OperationalError(
+        `Could not start the harness: ${failure.message}`,
+        `Command: ${described}`,
+      );
+    case "exit":
+      // "exited with code 1" says nothing a developer can act on, and the
+      // harness's last words usually do.
+      throw new OperationalError(
+        `The harness exited before completing the ACP handshake (code ${String(failure.code)}, signal ${String(failure.signal)}).`,
+        withStderr(described, probe),
+      );
+    case "timeout":
+      throw new OperationalError(
+        `The harness did not answer the ACP handshake within ${Math.round(failure.afterMs / 1000)}s.`,
+        `Command: ${described}\n\nAn ACP agent reads JSON-RPC on stdin and writes it on stdout; check it is not waiting on a flag or a TTY.`,
+      );
+    case "aborted":
+      throw new OperationalError("The ACP handshake was interrupted.");
+  }
+}
+
+function withStderr(described: string, probe: ProbeResult): string {
+  const tail = probe.stderrTail.trim();
+  return tail ? `Command: ${described}\n\n${tail}` : `Command: ${described}`;
+}
+
+function readAuthMethods(initialize: Record<string, unknown> | null): string[] {
+  const methods = initialize?.authMethods;
+  return Array.isArray(methods)
+    ? methods
+        .map((method) => (isRecord(method) ? method.id : undefined))
+        .filter((id): id is string => typeof id === "string")
+    : [];
+}
+
+/**
+ * The agents a raw `session/new` result advertises. The result is untrusted
+ * input from a third-party process, so it is narrowed before
+ * {@link advertisedAgents} reads it.
+ */
+export function advertisedFromSession(
+  session: Record<string, unknown>,
+): string[] {
+  const modes = isRecord(session.modes) ? session.modes : null;
+  const availableModes = Array.isArray(modes?.availableModes)
+    ? modes.availableModes.filter(isRecord)
+    : [];
+  const configOptions = Array.isArray(session.configOptions)
+    ? session.configOptions.filter(isWellFormedOption)
+    : [];
+  return advertisedAgents({
+    sessionModes: { availableModes },
+    sessionConfigOptions: configOptions as SessionConfigOption[],
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isWellFormedOption(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.type !== "select") return true;
+  if (!Array.isArray(value.options)) return false;
+  return value.options.every(
+    (entry) =>
+      isRecord(entry) &&
+      (Array.isArray(entry.options)
+        ? entry.options.every(
+            (leaf) => isRecord(leaf) && typeof leaf.value === "string",
+          )
+        : typeof entry.value === "string"),
+  );
 }
 
 /**
