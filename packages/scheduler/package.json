@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@curve-ai/radius-storage": "0.0.1",
-    "cron-parser": "5.10.0"
+    "cron-parser": "5.10.2"
   },
   "devDependencies": {
     "@types/node": "22.19.1",
