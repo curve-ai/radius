@@ -9,6 +9,7 @@ import {
   normalizeUpdatePercent,
   type DesktopUpdateStatus,
 } from "../update-types";
+import { installedByNsis } from "./update-install";
 
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
@@ -137,6 +138,11 @@ async function initializePackagedUpdater(): Promise<void> {
   } catch {
     return;
   }
+  if (
+    process.platform === "win32" &&
+    !(await installedByNsis(process.execPath))
+  )
+    return;
 
   const { default: electronUpdater } = await import("electron-updater");
   if (stopping) return;

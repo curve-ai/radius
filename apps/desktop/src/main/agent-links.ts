@@ -27,7 +27,9 @@ export function developmentAgentIdFromLink(value: string): string | null {
 
 /**
  * Windows and Linux deliver a link as a command-line argument, to the first
- * launch or through `second-instance`. Only the first link counts.
+ * launch or through `second-instance`. Only the first link counts. A bare
+ * AppImage has no installed desktop entry, so the scheme is never registered
+ * there; `radius dev` passes the link to the executable as an argument instead.
  */
 export function developmentAgentIdFromArgv(
   argv: readonly string[],

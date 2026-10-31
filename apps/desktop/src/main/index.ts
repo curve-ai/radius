@@ -171,8 +171,9 @@ const openDevelopmentAgentLink = (agentId: string | null): void => {
 };
 
 app.on("second-instance", (_event, argv) => {
-  focusMainWindow();
-  openDevelopmentAgentLink(developmentAgentIdFromArgv(argv));
+  const agentId = developmentAgentIdFromArgv(argv);
+  if (agentId) openDevelopmentAgentLink(agentId);
+  else focusMainWindow();
 });
 
 // macOS delivers links as an event, including the one that launched the app,
@@ -480,18 +481,20 @@ app.whenReady().then(async () => {
         window.webContents.send(AGENTS_CHANGED_CHANNEL);
       }
     });
-    await writeDesktopPresence(app.getPath("userData"), {
-      pid: process.pid,
-      version: app.getVersion(),
-      packaged: app.isPackaged,
-      agentNoteVersions: DEVELOPMENT_AGENT_SCHEMA_VERSIONS,
-      agentsPath: developmentAgentsPath(),
-    }).catch((error) => {
-      console.error(
-        "[agents] Radius could not announce itself to radius dev",
-        error,
-      );
-    });
+    if (!shutdownStarted)
+      presenceWrite = writeDesktopPresence(app.getPath("userData"), {
+        pid: process.pid,
+        version: app.getVersion(),
+        packaged: app.isPackaged,
+        agentNoteVersions: DEVELOPMENT_AGENT_SCHEMA_VERSIONS,
+        agentsPath: developmentAgentsPath(),
+      }).catch((error) => {
+        console.error(
+          "[agents] Radius could not announce itself to radius dev",
+          error,
+        );
+      });
+    await presenceWrite;
     await initializeConnectorRegistry();
     initializeDesktopUpdater();
     void initializeScheduler(storageContext).catch((error) => {
@@ -517,6 +520,9 @@ app.whenReady().then(async () => {
 });
 
 let shutdownStarted = false;
+// Removal waits for a write still in flight; otherwise quitting during
+// startup could leave the file naming a process that has exited.
+let presenceWrite: Promise<void> = Promise.resolve();
 app.on("before-quit", (event) => {
   if (shutdownStarted) return;
   event.preventDefault();
@@ -527,7 +533,9 @@ app.on("before-quit", (event) => {
   void Promise.allSettled([
     stopScheduler(),
     stopSync(),
-    removeDesktopPresence(app.getPath("userData"), process.pid),
+    presenceWrite.then(() =>
+      removeDesktopPresence(app.getPath("userData"), process.pid),
+    ),
   ]).finally(() => {
     closeStorage();
     app.quit();

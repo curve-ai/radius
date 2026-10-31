@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AGENT_LINK_REQUEST_TTL_MS,
   onAgentLinkRequest,
   requestAgentFromLink,
   takeLinkedAgent,
@@ -36,4 +37,18 @@ test("notifies listeners of a new link until they unsubscribe", () => {
 
   assert.equal(notified, 1);
   takeLinkedAgent([development]);
+});
+
+test("forgets a link whose agent never became usable", () => {
+  requestAgentFromLink(development.id, 1_000);
+
+  assert.equal(takeLinkedAgent([bundled], 2_000), bundled);
+  // Much later the agent appears, but nobody is waiting for it any more.
+  assert.equal(
+    takeLinkedAgent(
+      [bundled, development],
+      1_000 + AGENT_LINK_REQUEST_TTL_MS + 1,
+    ),
+    bundled,
+  );
 });
