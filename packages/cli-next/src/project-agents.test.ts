@@ -99,6 +99,7 @@ test("a langgraph runtime is judged on its own config, not a stray opencode.json
   const runtime = {
     kind: "langgraph",
     config: "agents/langgraph.json",
+    language: "python",
     python: "3.12",
     lockfile: "uv.lock",
     adapter: "radius-langgraph==0.0.1",
