@@ -5,6 +5,10 @@ import {
   AgentBuildReceiptSchema,
   AgentConfigSchema,
   AgentManifestSchema,
+  HarnessPinSchema,
+  HarnessRuntimeConfigSchema,
+  parseHarnessPin,
+  RadiusLockSchema,
   RelativeProjectPathSchema,
 } from "./index.js";
 
@@ -110,4 +114,113 @@ test("validates immutable build receipts", () => {
     verification: { kind: "microvm-acp", platform: "linux/arm64" },
   });
   assert.equal(receipt.verification.kind, "microvm-acp");
+});
+
+const binaryDistribution = {
+  kind: "binary",
+  cmd: "./opencode",
+  args: ["acp"],
+  platforms: {
+    "linux/arm64": {
+      archive: "https://example.invalid/opencode.tar.gz",
+      sha256: "a".repeat(64),
+    },
+  },
+};
+
+test("a harness runtime carries env only when it declares one", () => {
+  const bare = HarnessRuntimeConfigSchema.parse({
+    kind: "harness",
+    distribution: binaryDistribution,
+  });
+  // Absent rather than `{}`: a default would change the manifest, and with it
+  // the build digest, of every harness config written before env existed.
+  assert.equal("env" in bare, false);
+
+  const withEnv = HarnessRuntimeConfigSchema.parse({
+    kind: "harness",
+    distribution: binaryDistribution,
+    env: { OPENCODE_CONFIG: "opencode-async.json" },
+  });
+  assert.deepEqual(withEnv.env, { OPENCODE_CONFIG: "opencode-async.json" });
+
+  assert.equal(
+    HarnessRuntimeConfigSchema.safeParse({
+      kind: "harness",
+      distribution: binaryDistribution,
+      env: { "NOT-A-NAME": "x" },
+    }).success,
+    false,
+  );
+});
+
+test("a harness pin is an id and a version", () => {
+  assert.deepEqual(parseHarnessPin("opencode@1.19.4"), {
+    id: "opencode",
+    version: "1.19.4",
+  });
+  assert.deepEqual(parseHarnessPin("claude-code-acp@0.10.0-beta.1"), {
+    id: "claude-code-acp",
+    version: "0.10.0-beta.1",
+  });
+  for (const pin of [
+    "opencode",
+    "opencode@",
+    "@1.0.0",
+    "a@b@c",
+    "open code@1",
+  ]) {
+    assert.equal(HarnessPinSchema.safeParse(pin).success, false, pin);
+  }
+});
+
+test("a lock holds a registry pin and nothing a person would edit", () => {
+  const lock = RadiusLockSchema.parse({
+    "//": "generated",
+    lockfileVersion: 1,
+    harness: {
+      registryId: "opencode",
+      version: "1.19.4",
+      license: "MIT",
+      distribution: binaryDistribution,
+    },
+  });
+  assert.equal(lock.harness.distribution.kind, "binary");
+
+  // The lock is held to the same pinning rule as an inline distribution: a
+  // URL archive without a digest is not a pin.
+  assert.equal(
+    RadiusLockSchema.safeParse({
+      lockfileVersion: 1,
+      harness: {
+        registryId: "opencode",
+        version: "1.19.4",
+        distribution: {
+          ...binaryDistribution,
+          platforms: {
+            "linux/arm64": { archive: "https://example.invalid/o.tar.gz" },
+          },
+        },
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    RadiusLockSchema.safeParse({ lockfileVersion: 2, harness: lock.harness })
+      .success,
+    false,
+  );
+});
+
+test("config defaults fill everything a short radius.json leaves out", () => {
+  const config = AgentConfigSchema.parse({
+    agent: "agent_abcdef12",
+    name: "shopfloor-agent",
+    runtime: { kind: "harness", distribution: binaryDistribution },
+  });
+  assert.equal(config.schemaVersion, 1);
+  assert.equal(config.version, "0.0.0");
+  assert.deepEqual(config.capabilities, []);
+  assert.deepEqual(config.networkAllowlist, []);
+  assert.deepEqual(config.resources, { cpu: 2, memoryMb: 4096, diskMb: 5120 });
 });

@@ -747,11 +747,25 @@ export function renderHarnessContainerfile(input: {
     "USER 10000:10000",
     `ENV HOME=${configRoot}`,
     'ENV PATH="/opt/agent/venv/bin:/usr/local/bin:/usr/bin:/bin"',
+    // After Radius's own, so the config's variables lay over them the way
+    // `dev` and `check` lay them over the developer's shell.
+    ...Object.entries(runtime.env ?? {}).map(
+      ([name, value]) => `ENV ${name}=${containerfileString(value)}`,
+    ),
     `WORKDIR ${configRoot}`,
     `ENTRYPOINT [${launch.entrypoint.map((part) => JSON.stringify(part)).join(", ")}]`,
     "",
   );
   return lines.join("\n");
+}
+
+/**
+ * A double-quoted Containerfile string. JSON escapes the quotes and
+ * backslashes; `$` is escaped on top, or the builder would expand it as a
+ * variable and ship a different value from the one the config names.
+ */
+function containerfileString(value: string): string {
+  return JSON.stringify(value).replaceAll("$", "\\$");
 }
 
 function safeImageName(name: string): string {

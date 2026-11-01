@@ -224,6 +224,16 @@ export const HarnessRuntimeConfigSchema = z
       )
       .default("/opt/data"),
     toolchains: z.array(HarnessToolchainSchema).default([]),
+    /**
+     * Environment the harness process starts with.
+     *
+     * Some harnesses pick their configuration by variable rather than by
+     * flag — opencode reads `OPENCODE_CONFIG` — so a project shipping two
+     * configs has no other way to say which one runs. Optional with no
+     * default, so a config without it parses to the same object, and builds
+     * to the same manifest bytes, as it did before the field existed.
+     */
+    env: z.record(z.string().regex(environmentVariable), z.string()).optional(),
   })
   .superRefine((value, context) => {
     const kinds = value.toolchains.map((toolchain) => toolchain.kind);
@@ -350,6 +360,52 @@ export const AgentManifestSchema = z.object({
   resources: AgentResourceConfigSchema,
   minimumDesktopVersion: semanticVersion,
 });
+
+/**
+ * `<registry id>@<version>`, the short form `radius.json` names a harness by.
+ *
+ * Only the name and the version are for people to read and change. The URLs
+ * and digests that make the pin reproducible are machine data, and live in
+ * `radius.lock`, which is checked against this on every load.
+ */
+export const HarnessPinSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]*@[0-9A-Za-z][0-9A-Za-z.+-]*$/,
+    "harness must be <registry id>@<version>, e.g. opencode@1.19.4",
+  );
+
+export function parseHarnessPin(pin: string): {
+  readonly id: string;
+  readonly version: string;
+} {
+  const parsed = HarnessPinSchema.parse(pin);
+  const at = parsed.lastIndexOf("@");
+  return { id: parsed.slice(0, at), version: parsed.slice(at + 1) };
+}
+
+export const RADIUS_LOCK_VERSION = 1;
+
+/**
+ * `radius.lock`: what `init` copied out of the ACP registry for the pinned
+ * harness. Generated, committed, never edited by hand — a package manager's
+ * lockfile contract, for the same reason: the registry moves, and a build
+ * has to come out the same next month.
+ */
+export const RadiusLockSchema = z.object({
+  /** The "do not edit" notice. JSON has no comments. */
+  "//": z.string().optional(),
+  lockfileVersion: z.literal(RADIUS_LOCK_VERSION),
+  harness: z.object({
+    registryId: nonempty,
+    version: nonempty,
+    license: nonempty.optional(),
+    licenseUrl: nonempty.optional(),
+    distribution: HarnessDistributionSchema,
+  }),
+});
+
+export type RadiusLock = z.output<typeof RadiusLockSchema>;
 
 export type AgentConfigInput = z.input<typeof AgentConfigSchema>;
 export type AgentConfig = z.output<typeof AgentConfigSchema>;
