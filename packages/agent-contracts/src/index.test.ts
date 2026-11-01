@@ -51,6 +51,7 @@ test("a langgraph runtime needs only its kind", () => {
   assert.deepEqual(config.runtime, {
     kind: "langgraph",
     config: "langgraph.json",
+    language: "python",
     python: "3.12",
     lockfile: "uv.lock",
     adapter: "radius-langgraph==0.0.1",
@@ -67,11 +68,37 @@ test("a langgraph runtime needs only its kind", () => {
     { kind: "langgraph", config: "../langgraph.json" },
     { kind: "langgraph", python: "3" },
     { kind: "langgraph", graph: "" },
+    { kind: "langgraph", language: "rust" },
   ]) {
     assert.equal(
       AgentConfigSchema.safeParse({ name: "Graphs", runtime }).success,
       false,
       JSON.stringify(runtime),
+    );
+  }
+});
+
+test("a TypeScript langgraph runtime takes no uv settings", () => {
+  const config = AgentConfigSchema.parse({
+    name: "Graphs",
+    runtime: { kind: "langgraph", language: "typescript", graph: "agent" },
+  });
+  assert.deepEqual(config.runtime, {
+    kind: "langgraph",
+    config: "langgraph.json",
+    graph: "agent",
+    language: "typescript",
+  });
+  for (const field of ["python", "lockfile", "adapter"]) {
+    const result = AgentConfigSchema.safeParse({
+      name: "Graphs",
+      runtime: { kind: "langgraph", language: "typescript", [field]: "3.12" },
+    });
+    assert.equal(result.success, false, field);
+    assert.match(
+      JSON.stringify(result.error?.issues),
+      /applies only to \\"language\\": \\"python\\"/,
+      field,
     );
   }
 });
