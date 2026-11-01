@@ -20,6 +20,23 @@ import { harnessEnvironment, splitLines } from "./bridge.js";
 
 export const PROBE_PROTOCOL_VERSION = 1;
 
+/** ACP's `auth_required`, which an agent returns from `session/new`. */
+const ACP_AUTH_REQUIRED_CODE = -32000;
+
+/**
+ * The agent answered `initialize` but wants credentials before `session/new`.
+ * That still proves it starts and speaks ACP, which is all the probe is for;
+ * the desktop runs the sign-in itself on a real thread. `dev` and `check`
+ * both read the probe through this, so they agree on it.
+ */
+export function needsSignIn(probe: ProbeResult): boolean {
+  return (
+    probe.stage === "session/new" &&
+    probe.failure?.kind === "rpc" &&
+    probe.failure.code === ACP_AUTH_REQUIRED_CODE
+  );
+}
+
 export type ProbeStage = "spawn" | "initialize" | "session/new" | "done";
 
 export interface ProbeOptions {

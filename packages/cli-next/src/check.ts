@@ -1,4 +1,5 @@
 import {
+  needsSignIn,
   PROBE_PROTOCOL_VERSION,
   probeAcp,
   type ProbeFailure,
@@ -90,15 +91,18 @@ export function evaluate(
       : null;
   const agentInfo = readAgentInfo(probe.initialize);
   const advertised = probe.session ? advertisedFromSession(probe.session) : [];
+  const signIn = needsSignIn(probe);
 
   const verdicts: Verdict[] = [
-    judgeHandshake(probe, protocolVersion, agentInfo),
+    judgeHandshake(probe, protocolVersion, agentInfo, signIn),
     probe.session
       ? judgeAgents(project, advertised, agentInfo)
       : {
           id: "agents",
           status: "skip",
-          summary: "agents not checked — no session was opened",
+          summary: signIn
+            ? "agents not checked — the agent wants sign-in before it opens a session"
+            : "agents not checked — no session was opened",
           detail: [],
         },
     judgeStdout(probe),
@@ -126,8 +130,11 @@ function judgeHandshake(
   probe: ProbeResult,
   protocolVersion: number | null,
   agentInfo: CheckResult["agentInfo"],
+  signIn: boolean,
 ): Verdict {
-  if (probe.failure) {
+  // Not a failure: `dev` accepts the same answer, and the desktop runs the
+  // sign-in on a real thread.
+  if (probe.failure && !signIn) {
     return {
       id: "handshake",
       status: "fail",
@@ -159,7 +166,7 @@ function judgeHandshake(
   return {
     id: "handshake",
     status: "pass",
-    summary: `speaks ACP v${protocolVersion}${identity}`,
+    summary: `speaks ACP v${protocolVersion}${identity}${signIn ? " (sign-in required)" : ""}`,
     detail: [],
   };
 }
