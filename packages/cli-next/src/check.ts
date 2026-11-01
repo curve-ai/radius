@@ -1,3 +1,5 @@
+import type { AgentConfig } from "@curve-ai/agent-contracts";
+
 import {
   needsSignIn,
   PROBE_PROTOCOL_VERSION,
@@ -71,10 +73,14 @@ const GENERIC_AGENT_IDENTITIES: ReadonlyMap<string, string> = new Map([
 const STDERR_LINES_SHOWN = 12;
 
 export async function checkAgent(
-  options: Omit<ProbeOptions, "cwd"> & { readonly root: string },
+  options: Omit<ProbeOptions, "cwd"> & {
+    readonly root: string;
+    /** Decides where the expected agents are read from; see `discoverProjectAgents`. */
+    readonly runtime?: AgentConfig["runtime"];
+  },
 ): Promise<CheckResult> {
   const [project, probe] = await Promise.all([
-    discoverProjectAgents(options.root),
+    discoverProjectAgents(options.root, options.runtime),
     probeAcp({ ...options, cwd: options.root }),
   ]);
   return evaluate(options.command, project, probe);
@@ -275,7 +281,7 @@ export function judgeAgents(
     }
     case "langgraph": {
       const detail = [
-        `expected    ${project.graphs.join(", ") || "none"}  (langgraph.json)`,
+        `expected    ${project.graphs.join(", ") || "none"}  (${project.sources.join(", ")})`,
         `advertised  ${shown}`,
       ];
       if (project.graphs.some((name) => advertised.includes(name))) {

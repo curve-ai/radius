@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 import { AgentConfigSchema } from "@curve-ai/agent-contracts";
@@ -217,5 +217,154 @@ test("a command runtime whose executable is missing is a usage error", async () 
       ),
     (error: unknown) =>
       error instanceof UsageError && /nope-not-here/.test(error.message),
+  );
+});
+
+const LANGGRAPH_JSON = JSON.stringify({
+  graphs: { weather: "./graph.py:graph", triage: "agents.triage:graph" },
+});
+
+test("a langgraph runtime runs the Radius adapter over the project through uv", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  const resolved = await resolveStartCommand(
+    config({ kind: "langgraph" }),
+    root,
+    host(await pathWith("uv")),
+    silent,
+  );
+  assert.equal(resolved.kind, "langgraph");
+  assert.deepEqual(
+    [...resolved.command],
+    [
+      "uv",
+      "run",
+      "--python",
+      "3.12",
+      "--with",
+      "radius-langgraph==0.0.1",
+      "radius-langgraph",
+      "--config",
+      "langgraph.json",
+    ],
+  );
+  assert.equal(resolved.summary, "langgraph weather, triage");
+  assert.deepEqual(resolved.env, {});
+});
+
+test("a langgraph runtime pinned to one graph passes it to the adapter", async () => {
+  const root = await project({ "agents/langgraph.json": LANGGRAPH_JSON });
+  const resolved = await resolveStartCommand(
+    config({
+      kind: "langgraph",
+      config: "agents/langgraph.json",
+      graph: "triage",
+      python: "3.13",
+    }),
+    root,
+    host(await pathWith("uv")),
+    silent,
+  );
+  assert.deepEqual(resolved.command.slice(2, 4), ["--python", "3.13"]);
+  assert.deepEqual(resolved.command.slice(-4), [
+    "--config",
+    "agents/langgraph.json",
+    "--graph",
+    "triage",
+  ]);
+  assert.equal(resolved.summary, "langgraph triage");
+});
+
+test("a langgraph adapter given as a path is resolved against the project", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  const path = await pathWith("uv");
+  const withAdapter = async (adapter: string) =>
+    (
+      await resolveStartCommand(
+        config({ kind: "langgraph", adapter }),
+        root,
+        host(path),
+        silent,
+      )
+    ).command[5];
+  assert.equal(
+    await withAdapter("./vendor/adapter"),
+    join(root, "vendor/adapter"),
+  );
+  // Resolved against the project, as the implementation does, so Windows
+  // expects the project's drive rather than the test runner's.
+  assert.equal(
+    await withAdapter("/opt/adapter"),
+    resolve(root, "/opt/adapter"),
+  );
+  assert.equal(
+    await withAdapter("~/src/adapter"),
+    join(homedir(), "src/adapter"),
+  );
+  assert.equal(
+    await withAdapter("radius-langgraph==0.0.2"),
+    "radius-langgraph==0.0.2",
+    "a requirement is passed to uv untouched",
+  );
+});
+
+test("RADIUS_LANGGRAPH_ADAPTER overrides the configured adapter", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  const path = await pathWith("uv");
+  const withOverride = async (override: string) =>
+    (
+      await resolveStartCommand(
+        config({ kind: "langgraph", adapter: "radius-langgraph==0.0.1" }),
+        root,
+        {
+          platform: process.platform,
+          arch: "arm64",
+          env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: override },
+        },
+        silent,
+      )
+    ).command[5];
+  assert.equal(
+    await withOverride("../checkout/langgraph-acp-python"),
+    join(root, "../checkout/langgraph-acp-python"),
+  );
+  assert.equal(
+    await withOverride("radius-langgraph==0.0.1rc1"),
+    "radius-langgraph==0.0.1rc1",
+  );
+  assert.equal(
+    await withOverride(""),
+    "radius-langgraph==0.0.1",
+    "an empty override is no override",
+  );
+});
+
+test("a langgraph runtime without its config file is a usage error", async () => {
+  const root = await project({});
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph" }),
+        root,
+        host(await pathWith("uv")),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      /langgraph\.json does not exist/.test(error.message),
+  );
+});
+
+test("a langgraph runtime without uv is a usage error, not a spawn failure", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph" }),
+        root,
+        host(await pathWith()),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /`uv` was not found/.test(error.message),
   );
 });

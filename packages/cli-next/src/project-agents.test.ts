@@ -89,6 +89,35 @@ test("langgraph.json contributes its graph names", async () => {
   });
 });
 
+test("a langgraph runtime is judged on its own config, not a stray opencode.json", async () => {
+  const root = await project({
+    "opencode.json": JSON.stringify({ agent: { helper: {} } }),
+    "agents/langgraph.json": JSON.stringify({
+      graphs: { auditor: "./a.py:graph", triage: "./t.py:graph" },
+    }),
+  });
+  const runtime = {
+    kind: "langgraph",
+    config: "agents/langgraph.json",
+    python: "3.12",
+    lockfile: "uv.lock",
+    adapter: "radius-langgraph==0.0.1",
+  } as const;
+  assert.deepEqual(await discoverProjectAgents(root, runtime), {
+    framework: "langgraph",
+    graphs: ["auditor", "triage"],
+    sources: ["agents/langgraph.json"],
+  });
+  assert.deepEqual(
+    await discoverProjectAgents(root, { ...runtime, graph: "triage" }),
+    {
+      framework: "langgraph",
+      graphs: ["triage"],
+      sources: ["agents/langgraph.json"],
+    },
+  );
+});
+
 test("a project with no agent definitions is unknown, not empty", async () => {
   const root = await project({ "package.json": "{}" });
   assert.deepEqual(await discoverProjectAgents(root), { framework: "unknown" });

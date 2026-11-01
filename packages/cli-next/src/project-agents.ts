@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import type { AgentConfig } from "@curve-ai/agent-contracts";
 import { parse } from "jsonc-parser";
 
 /**
@@ -52,12 +53,28 @@ interface OpencodeAgentEntry {
   mode?: string;
 }
 
+/**
+ * A langgraph runtime names the file its graphs come from, so that file is
+ * the expectation whatever else sits in the tree: an `opencode.json` kept for
+ * the developer's own tooling says nothing about what this agent serves. For
+ * every other kind the files present are all there is to go on.
+ */
 export async function discoverProjectAgents(
   root: string,
+  runtime?: AgentConfig["runtime"],
 ): Promise<ProjectAgents> {
+  if (runtime?.kind === "langgraph") {
+    // `runtime.graph` serves that one graph, so only it can be advertised.
+    const langgraph = await discoverLanggraph(
+      root,
+      runtime.config,
+      runtime.graph,
+    );
+    return langgraph ?? { framework: "unknown" };
+  }
   const opencode = await discoverOpencode(root);
   if (opencode) return opencode;
-  const langgraph = await discoverLanggraph(root);
+  const langgraph = await discoverLanggraph(root, "langgraph.json");
   if (langgraph) return langgraph;
   return { framework: "unknown" };
 }
@@ -118,16 +135,35 @@ async function discoverOpencode(root: string): Promise<ProjectAgents | null> {
   return { framework: "opencode", primary, subagents, disabled, sources };
 }
 
-async function discoverLanggraph(root: string): Promise<ProjectAgents | null> {
-  const config = await readJsonc(join(root, "langgraph.json"));
-  if (config === null) return null;
-  const graphs = (config as { graphs?: unknown }).graphs;
+async function discoverLanggraph(
+  root: string,
+  configPath: string,
+  only?: string,
+): Promise<ProjectAgents | null> {
+  const graphs = await readLanggraphGraphs(join(root, configPath));
+  if (graphs === null) return null;
   return {
     framework: "langgraph",
-    graphs:
-      graphs && typeof graphs === "object" ? Object.keys(graphs).sort() : [],
-    sources: ["langgraph.json"],
+    graphs: only ? [only] : Object.keys(graphs).sort(),
+    sources: [configPath],
   };
+}
+
+/**
+ * The `graphs` map of a `langgraph.json`, or null when there is no such
+ * file. A file without a usable `graphs` object reads as empty rather than
+ * missing, so callers can tell "not a LangGraph project" from "one that
+ * defines nothing".
+ */
+export async function readLanggraphGraphs(
+  path: string,
+): Promise<Readonly<Record<string, unknown>> | null> {
+  const config = await readJsonc(path);
+  if (config === null) return null;
+  const graphs = (config as { graphs?: unknown } | undefined)?.graphs;
+  return graphs && typeof graphs === "object" && !Array.isArray(graphs)
+    ? (graphs as Record<string, unknown>)
+    : {};
 }
 
 async function markdownFiles(directory: string): Promise<string[]> {
