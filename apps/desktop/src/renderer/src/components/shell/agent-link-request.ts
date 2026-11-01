@@ -21,16 +21,26 @@ export function onAgentLinkRequest(listener: () => void): () => void {
 
 /**
  * Picks the agent a pending link asked for when it is available, consuming
- * the request, and otherwise the default first agent.
+ * the request; otherwise keeps the current selection while it is still
+ * listed, and only then falls back to the first agent.
+ *
+ * The list reloads whenever any development agent registers or leaves, so
+ * with several `radius dev` sessions running it reloads often. Falling back
+ * to the first agent on every reload switched the composer away from the
+ * agent the person had picked between two messages.
  */
 export function takeLinkedAgent<T extends { id: string }>(
   agents: readonly T[],
   now = Date.now(),
+  currentId: string | null = null,
 ): T | null {
   if (request && now - request.at > AGENT_LINK_REQUEST_TTL_MS) request = null;
   const linked = request
     ? agents.find((agent) => agent.id === request?.agentId)
     : undefined;
   if (linked) request = null;
-  return linked ?? agents[0] ?? null;
+  const current = currentId
+    ? agents.find((agent) => agent.id === currentId)
+    : undefined;
+  return linked ?? current ?? agents[0] ?? null;
 }
