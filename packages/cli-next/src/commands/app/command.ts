@@ -5,16 +5,10 @@ import { commonFlags } from "../../flags.js";
 
 /**
  * Flags and docs only; the handlers sit behind `loader:` like every other
- * command, so `--help` never imports the installer.
+ * command, so `--help` never imports the installer. No `--yes`: install and
+ * update never prompt.
  */
-const installFlags = {
-  ...commonFlags,
-  yes: {
-    kind: "boolean",
-    brief: "Never prompt",
-    default: false,
-  },
-} as const;
+const installFlags = { ...commonFlags } as const;
 
 export const appInstallCommand = buildCommand({
   loader: async () => (await import("./run.js")).install,
@@ -22,7 +16,7 @@ export const appInstallCommand = buildCommand({
   docs: {
     brief: "Install the Radius desktop app, if it is missing or older",
     fullDescription:
-      "Downloads the desktop release this CLI pins, checks its size and SHA-256 before unpacking, and installs it to ~/Applications/Radius.app (or updates an existing /Applications copy it can write to). Never downgrades, and refuses while Radius is running. macOS on Apple Silicon only for now; RADIUS_APP_PATH sets where it installs.",
+      "Downloads the desktop release this CLI pins, checks its size and SHA-256 before unpacking, and installs it to ~/Applications/Radius.app, or updates an existing copy where it is (refusing one this user can't replace). Never downgrades, and refuses while Radius is running. macOS on Apple Silicon only for now; RADIUS_APP_PATH sets where it installs.",
   },
 });
 

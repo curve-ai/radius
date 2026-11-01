@@ -1,20 +1,16 @@
 import { emitJson, type RadiusContext } from "../../context.js";
 import {
-  defaultInstallPath,
-  findInstalledApp,
   installDesktopApp,
+  installPathFor,
   keychainNotice,
+  readBundleVersion,
   type InstallOutcome,
 } from "../../desktop-install.js";
 import { desktopTarget, loadDesktopRelease } from "../../desktop-release.js";
-import { launchDesktopApp } from "../../desktop.js";
+import { findDesktopApp, launchDesktopApp } from "../../desktop.js";
 import { OperationalError } from "../../errors.js";
 import { handler } from "../../handler.js";
 import { radiusUserDataPath } from "../../registration.js";
-
-interface InstallFlags {
-  readonly yes: boolean;
-}
 
 /**
  * `install` and `update` do the same thing and differ in what they say when
@@ -32,12 +28,18 @@ async function installOrUpdate(
   );
   if (!target.supported) throw new OperationalError(target.reason);
 
+  // The same lookup `dev`, `path` and `open` use, so the copy updated here
+  // is the one they all find afterwards.
+  const found = await findDesktopApp({ env: context.env });
+  const stopping = new AbortController();
+  void context.untilStopped().then(() => stopping.abort());
   const outcome: InstallOutcome = await installDesktopApp({
     release,
     artifact: target.artifact,
-    installPath: await defaultInstallPath(context.env),
+    installPath: installPathFor(found, context.env),
     userDataPath: radiusUserDataPath(context.process.platform, context.env),
     onProgress: (message) => context.note(message),
+    signal: stopping.signal,
   });
 
   if (context.output === "json") {
@@ -67,16 +69,16 @@ async function installOrUpdate(
   for (const line of keychainNotice()) context.out(line);
 }
 
-export const install = handler<InstallFlags, []>(async function (this) {
+export const install = handler<object, []>(async function (this) {
   await installOrUpdate(this, "install");
 });
 
-export const update = handler<InstallFlags, []>(async function (this) {
+export const update = handler<object, []>(async function (this) {
   await installOrUpdate(this, "update");
 });
 
 export const path = handler<object, []>(async function (this) {
-  const app = await findInstalledApp(this.env);
+  const app = await findDesktopApp({ env: this.env });
   if (!app) {
     throw new OperationalError(
       "Radius isn't installed.",
@@ -84,7 +86,10 @@ export const path = handler<object, []>(async function (this) {
     );
   }
   if (this.output === "json") {
-    emitJson(this, { path: app.path, version: app.version });
+    emitJson(this, {
+      path: app.path,
+      version: await readBundleVersion(app.path),
+    });
     return;
   }
   this.out(app.path);
