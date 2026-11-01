@@ -7,12 +7,12 @@ import { hostImagePlatform, type HostImagePlatform } from "@curve-ai/build";
 import {
   MicrovmAcpRuntime,
   parseAgentReleaseDescriptor,
-  type SessionConfigOption,
 } from "@curve-ai/radius-runtime";
 
 import type { RadiusContext } from "./context.js";
 import { resolveRuntimeAssets } from "./desktop.js";
 import { OperationalError, UsageError } from "./errors.js";
+import { advertisedAgents } from "./handshake.js";
 
 /**
  * Boots the built image in a microVM and checks it speaks ACP.
@@ -283,40 +283,4 @@ function run(command: string, args: readonly string[]): Promise<string> {
         );
     });
   });
-}
-
-/**
- * The agents a session says it can run.
- *
- * ACP has no agent list of its own, so a harness projects one through the
- * extension points it does have: `sessionModes` where the harness models an
- * agent as a mode, and a `mode`-category config option otherwise. Both are
- * read because harnesses differ, and an empty result is reported rather than
- * treated as a failure — a single-agent harness advertises neither.
- */
-function advertisedAgents(session: {
-  sessionModes:
-    | {
-        availableModes?: ReadonlyArray<{ id?: string; name?: string }>;
-      }
-    | null
-    | undefined;
-  sessionConfigOptions: readonly SessionConfigOption[];
-}): string[] {
-  const fromModes = (session.sessionModes?.availableModes ?? [])
-    .map((mode) => mode.id ?? mode.name)
-    .filter((name): name is string => Boolean(name));
-  if (fromModes.length > 0) return fromModes;
-
-  const option = session.sessionConfigOptions.find(
-    (candidate) => candidate.category === "mode" || candidate.id === "mode",
-  );
-  if (!option || option.type !== "select") return [];
-  // A select's options are either a flat list or grouped; both shapes carry
-  // the same leaf, so flatten rather than branch on which arrived.
-  return option.options.flatMap((entry) =>
-    "options" in entry
-      ? entry.options.map((leaf) => leaf.value)
-      : [entry.value],
-  );
 }
