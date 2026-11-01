@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
+import { StringDecoder } from "node:string_decoder";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -75,6 +76,13 @@ export function harnessEnvironment(
   return carried;
 }
 
+/**
+ * On POSIX each harness gets its own process group, so stopping it reaches
+ * whatever `npx` or a shell wrapper forked, not just the wrapper. Windows has
+ * no process groups to signal.
+ */
+const POSIX = process.platform !== "win32";
+
 interface Connection {
   readonly socket: WebSocket;
   readonly child: ChildProcessWithoutNullStreams;
@@ -114,7 +122,7 @@ export async function startBridge(
       socket.once("close", () => {
         live.delete(id);
         connection.ending = true;
-        void stopChild(connection.child);
+        void stopChild(connection.child, { group: POSIX });
         events.onDisconnect(id);
       });
     });
@@ -142,7 +150,9 @@ export async function startBridge(
       // Awaited rather than fired: a harness still running after `dev`
       // returns is an orphan holding the provider keys from the developer's
       // shell.
-      await Promise.all(ending.map(({ child }) => stopChild(child)));
+      await Promise.all(
+        ending.map(({ child }) => stopChild(child, { group: POSIX })),
+      );
       await new Promise<void>((done) => httpServer.close(() => done()));
     },
   };
@@ -162,6 +172,7 @@ function attach(
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: harnessEnvironment(env),
+    detached: POSIX,
     windowsHide: true,
   }) as ChildProcessWithoutNullStreams;
   const connection: Connection = { socket, child, ending: false };
@@ -245,19 +256,40 @@ function mintConnectionId(live: ReadonlyMap<string, unknown>): string {
 /**
  * SIGTERM, then SIGKILL after a grace period. A harness that ignores SIGTERM
  * would otherwise outlive the CLI that started it.
+ *
+ * With `group`, the signals go to the child's whole process group, which
+ * requires it to have been spawned `detached`. A wrapper like `npx` can exit
+ * on SIGTERM while the agent it forked keeps running, and that agent holds
+ * the provider keys from the developer's shell.
  */
 export async function stopChild(
   child: ChildProcessWithoutNullStreams,
-  graceMs = 2_000,
+  {
+    group = false,
+    graceMs = 2_000,
+  }: { group?: boolean; graceMs?: number } = {},
 ): Promise<void> {
   // A child that never spawned has no pid and will never emit `exit`.
-  if (child.pid === undefined) return;
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  const pid = child.pid;
+  if (pid === undefined) return;
+  const signal = (name: NodeJS.Signals): void => {
+    try {
+      if (group) process.kill(-pid, name);
+      else child.kill(name);
+    } catch {
+      /* already gone */
+    }
+  };
+  if (child.exitCode !== null || child.signalCode !== null) {
+    // The wrapper is gone, but what it forked may not be.
+    if (group) signal("SIGTERM");
+    return;
+  }
   const exited = new Promise<void>((settle) =>
     child.once("exit", () => settle()),
   );
-  child.kill();
-  const timer = setTimeout(() => child.kill("SIGKILL"), graceMs);
+  signal("SIGTERM");
+  const timer = setTimeout(() => signal("SIGKILL"), graceMs);
   try {
     await exited;
   } finally {
@@ -287,13 +319,18 @@ function tee(
   }
 }
 
-/** Calls `onLine` once per non-blank line, across chunk boundaries. */
+/**
+ * Calls `onLine` once per non-blank line, across chunk boundaries. Decoded
+ * through a `StringDecoder`, so a multibyte character split between two pipe
+ * reads arrives whole rather than as two replacement characters.
+ */
 export function splitLines(
   onLine: (line: string) => void,
 ): (chunk: Buffer) => void {
+  const decoder = new StringDecoder("utf8");
   let buffer = "";
   return (chunk) => {
-    buffer += chunk.toString("utf8");
+    buffer += decoder.write(chunk);
     let newline = buffer.indexOf("\n");
     while (newline !== -1) {
       const line = buffer.slice(0, newline).replace(/\r$/, "");
