@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
+  chmod,
   mkdir,
   mkdtemp,
   readdir,
@@ -16,7 +17,11 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 
-import { installDesktopApp, readBundleVersion } from "./desktop-install.js";
+import {
+  installDesktopApp,
+  installPathFor,
+  readBundleVersion,
+} from "./desktop-install.js";
 import type { DesktopArtifact, DesktopRelease } from "./desktop-release.js";
 import { writeFakeBundle } from "./test-desktop.js";
 
@@ -160,6 +165,71 @@ test("updates an older copy in place", macOnly, async () => {
   } finally {
     fixture.close();
   }
+});
+
+test(
+  "a copy this user can't replace is refused before anything is downloaded",
+  macOnly,
+  async () => {
+    const fixture = await setup();
+    const parent = dirname(fixture.installPath);
+    try {
+      await writeFakeBundle(fixture.installPath, "0.1.0");
+      // An /Applications copy an administrator installed, in miniature.
+      await chmod(parent, 0o555);
+      await assert.rejects(
+        installDesktopApp({
+          release: fixture.release,
+          artifact: fixture.artifact,
+          installPath: fixture.installPath,
+          userDataPath: fixture.userData,
+        }),
+        /can't be replaced by this user/,
+      );
+      assert.equal(await readBundleVersion(fixture.installPath), "0.1.0");
+      assert.deepEqual(await leftovers(fixture.installPath), ["Radius.app"]);
+    } finally {
+      await chmod(parent, 0o755);
+      fixture.close();
+    }
+  },
+);
+
+test(
+  "an aborted download installs nothing and says it was stopped",
+  macOnly,
+  async () => {
+    const fixture = await setup();
+    try {
+      await assert.rejects(
+        installDesktopApp({
+          release: fixture.release,
+          artifact: fixture.artifact,
+          installPath: fixture.installPath,
+          userDataPath: fixture.userData,
+          signal: AbortSignal.abort(),
+        }),
+        /download was stopped/,
+      );
+      assert.equal(await exists(fixture.installPath), false);
+    } finally {
+      fixture.close();
+    }
+  },
+);
+
+test("an installed copy is updated where it was found", () => {
+  const env = { RADIUS_APP_PATH: "/elsewhere/Radius.app" };
+  assert.equal(
+    installPathFor({ path: "/Applications/Radius.app", installed: true }, env),
+    "/Applications/Radius.app",
+  );
+  // A repo build output is never installed over.
+  assert.equal(
+    installPathFor({ path: "/repo/dist/Radius.app", installed: false }, env),
+    "/elsewhere/Radius.app",
+  );
+  assert.match(installPathFor(null, {}), /Applications\/Radius\.app$/);
 });
 
 for (const [name, options] of [

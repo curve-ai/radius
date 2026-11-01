@@ -258,7 +258,7 @@ export async function findDesktopApp(input: {
   return null;
 }
 
-async function exists(path: string): Promise<boolean> {
+export async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;

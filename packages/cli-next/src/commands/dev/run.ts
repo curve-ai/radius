@@ -134,22 +134,35 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
       });
 
     const yes = flags.yes;
-    const session = await connectDesktop({
-      platform: context.process.platform,
-      arch: context.process.arch,
-      env: context.env,
-      projectRoot: context.cwd,
-      userDataPath: radiusUserDataPath(context.process.platform, context.env),
-      agentId,
-      noOpen: flags["no-open"],
-      yes,
-      confirm: canPrompt(context, { yes })
-        ? (question) => promptConfirm(context, question)
-        : null,
-      register,
-      note: (message) => context.note(message),
-      verbose,
-    });
+    // Ctrl-C has to reach a download, a prompt and a 30s wait, none of
+    // which would otherwise notice the stop until they finished.
+    const stopping = new AbortController();
+    void context.untilStopped().then(() => stopping.abort());
+    let session;
+    try {
+      session = await connectDesktop({
+        platform: context.process.platform,
+        arch: context.process.arch,
+        env: context.env,
+        projectRoot: context.cwd,
+        userDataPath: radiusUserDataPath(context.process.platform, context.env),
+        agentId,
+        noOpen: flags["no-open"],
+        yes,
+        confirm: canPrompt(context, { yes })
+          ? (question) => promptConfirm(context, question)
+          : null,
+        register,
+        signal: stopping.signal,
+        note: (message) => context.note(message),
+        verbose,
+      });
+    } catch (error) {
+      // Stopped before the session started: connectDesktop has already
+      // removed the descriptor, and the bridge closes below.
+      if (stopping.signal.aborted) return;
+      throw error;
+    }
     const { registration, desktop } = session;
 
     if (context.output === "json") {

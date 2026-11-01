@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 
 import {
-  defaultInstallPath,
   installDesktopApp,
+  installPathFor,
   keychainNotice,
   readBundleVersion,
 } from "./desktop-install.js";
@@ -59,6 +59,11 @@ export interface DesktopSessionInput {
   readonly confirm: ((question: string) => Promise<boolean>) | null;
   /** Writes the descriptor into the given folder. */
   readonly register: (agentsPath: string) => Promise<Registration>;
+  /**
+   * Aborted on Ctrl-C. The download, the prompt and the wait for the app all
+   * stop on it, and the flow throws rather than launch anything afterwards.
+   */
+  readonly signal?: AbortSignal;
   /** Progress and warnings, on stderr. */
   readonly note: (message: string) => void;
   /** Paths and timings, shown only with --verbose. */
@@ -223,7 +228,12 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
             )
           : false;
       if (accepted) {
-        const installed = await tryInstall(input, release, target.artifact);
+        const installed = await tryInstall(
+          input,
+          release,
+          target.artifact,
+          null,
+        );
         if (installed) {
           app = { path: installed.path, installed: true };
           version = installed.version;
@@ -250,8 +260,12 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
           )
         : false;
     if (accepted) {
-      const updated = await tryInstall(input, release, target.artifact);
-      if (updated) version = updated.version;
+      const updated = await tryInstall(input, release, target.artifact, app);
+      if (updated) {
+        // Launch what was installed, not what was found before it.
+        app = { path: updated.path, installed: true };
+        version = updated.version;
+      }
     } else {
       input.note(
         `Radius ${version} is older than ${release.version}; \`radius app update\` updates it.`,
@@ -273,6 +287,8 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
     };
   }
 
+  // Stopped while asking or downloading: open nothing on the way out.
+  input.signal?.throwIfAborted();
   const launch = await launchDesktopApp({
     platform: input.platform,
     env: input.env,
@@ -299,8 +315,9 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
     const arrived = await waitForDesktopPresence(
       input.userDataPath,
       input.presenceTimeoutMs ?? 30_000,
-      { isAlive: input.isAlive },
+      { isAlive: input.isAlive, signal: input.signal },
     ).finally(() => clearTimeout(slow));
+    input.signal?.throwIfAborted();
     ready = arrived !== null && arrived !== undefined;
     if (arrived) {
       input.verbose(
@@ -364,20 +381,23 @@ function unreadableMessage(presence: DesktopPresence): string {
 /**
  * An install failing inside `dev` is reported, not thrown: the agent is
  * already registered, and the session is still worth having without the app.
+ * Being stopped is the exception, since then there is no session to keep.
  */
 async function tryInstall(
   input: DesktopSessionInput,
   release: DesktopRelease,
   artifact: Parameters<typeof installDesktopApp>[0]["artifact"],
+  found: FoundApp | null,
 ): Promise<{ path: string; version: string } | null> {
   try {
     const outcome = await (input.install ?? installDesktopApp)({
       release,
       artifact,
-      installPath: await defaultInstallPath(input.env),
+      installPath: installPathFor(found, input.env),
       userDataPath: input.userDataPath,
       onProgress: input.note,
       isAlive: input.isAlive,
+      signal: input.signal,
     });
     if (outcome.status !== "current") {
       input.note(`Installed Radius ${outcome.version} at ${outcome.path}.`);
@@ -385,6 +405,7 @@ async function tryInstall(
     }
     return { path: outcome.path, version: outcome.version };
   } catch (error) {
+    input.signal?.throwIfAborted();
     input.note(renderError(error));
     return null;
   }

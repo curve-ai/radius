@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 
 import type { RadiusContext } from "./context.js";
-import { UsageError } from "./errors.js";
+import { OperationalError, UsageError } from "./errors.js";
 
 /**
  * Asking the user for something, under ADR-008's one rule:
@@ -51,8 +51,17 @@ async function ask(context: RadiusContext, question: string): Promise<string> {
     input: process.stdin,
     output: context.process.stderr,
   });
+  // A terminal readline takes Ctrl-C as input, so the process never sees
+  // SIGINT and the question would wait forever. Passed on as a stop, which
+  // also cancels the question below.
+  rl.on("SIGINT", () => context.stop());
+  const cancel = new AbortController();
+  void context.untilStopped().then(() => cancel.abort());
   try {
-    return (await rl.question(question)).trim();
+    return (await rl.question(question, { signal: cancel.signal })).trim();
+  } catch (error) {
+    if (cancel.signal.aborted) throw new OperationalError("Stopped.");
+    throw error;
   } finally {
     rl.close();
   }

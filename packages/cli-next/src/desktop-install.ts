@@ -13,7 +13,7 @@ import {
   type DesktopArtifact,
   type DesktopRelease,
 } from "./desktop-release.js";
-import { installedAppCandidates } from "./desktop.js";
+import { exists, type FoundApp } from "./desktop.js";
 import { OperationalError } from "./errors.js";
 
 /**
@@ -28,24 +28,6 @@ import { OperationalError } from "./errors.js";
  * Every step happens next to the target, so the final move is a rename on one
  * volume and an interrupted install never leaves a half-written Radius.app.
  */
-
-export interface InstalledApp {
-  readonly path: string;
-  /** Null when the bundle has no readable version, e.g. a broken copy. */
-  readonly version: string | null;
-}
-
-/** The first installed bundle, with its version. */
-export async function findInstalledApp(
-  env: NodeJS.ProcessEnv,
-): Promise<InstalledApp | null> {
-  for (const path of installedAppCandidates(env)) {
-    if (await exists(path)) {
-      return { path, version: await readBundleVersion(path) };
-    }
-  }
-  return null;
-}
 
 export function readBundleVersion(bundle: string): Promise<string | null> {
   return new Promise((settle) => {
@@ -63,24 +45,22 @@ export function readBundleVersion(bundle: string): Promise<string | null> {
 }
 
 /**
- * Where an install goes: RADIUS_APP_PATH when set, so a test or a careful
- * user can install anywhere; an existing /Applications copy when it can be
- * replaced, because that is the one the user chose; otherwise
- * ~/Applications, which needs no administrator.
+ * Where an install goes, given what `findDesktopApp` found.
+ *
+ * An installed copy is updated where it is, because that is the one every
+ * later lookup finds first: installing beside it would leave `dev`, `app
+ * path` and `app open` on the old bundle while the update reported success.
+ * If it can't be replaced, `installDesktopApp` says so instead of putting a
+ * second copy somewhere else. With nothing installed, RADIUS_APP_PATH when
+ * set, otherwise ~/Applications, which needs no administrator.
  */
-export async function defaultInstallPath(
+export function installPathFor(
+  found: FoundApp | null,
   env: NodeJS.ProcessEnv,
-): Promise<string> {
+): string {
+  if (found?.installed) return found.path;
   const explicit = env.RADIUS_APP_PATH?.trim();
   if (explicit) return explicit;
-  const system = "/Applications/Radius.app";
-  if (
-    (await exists(system)) &&
-    (await writable("/Applications")) &&
-    (await writable(system))
-  ) {
-    return system;
-  }
   return join(homedir(), "Applications", "Radius.app");
 }
 
@@ -108,6 +88,8 @@ export async function installDesktopApp(input: {
   readonly isAlive?: (pid: number) => boolean;
   /** How often progress is reported, at most. */
   readonly progressIntervalMs?: number;
+  /** Abandons the download, e.g. on Ctrl-C; nothing is installed. */
+  readonly signal?: AbortSignal;
 }): Promise<InstallOutcome> {
   const target = input.installPath;
   const onProgress = input.onProgress ?? (() => {});
@@ -141,6 +123,18 @@ export async function installDesktopApp(input: {
   }
 
   const parent = dirname(target);
+  // Checked before a 200 MB download rather than at the rename it would
+  // fail: replacing a bundle needs write access to it and to its folder,
+  // which an /Applications copy installed by an administrator lacks.
+  if (
+    (await exists(target)) &&
+    (!(await writable(parent)) || !(await writable(target)))
+  ) {
+    throw new OperationalError(
+      `Radius at ${target} can't be replaced by this user, so it was not updated.`,
+      "Update it the way it was installed, or remove it and run `radius app install` to install into ~/Applications.",
+    );
+  }
   await mkdir(parent, { recursive: true });
   const suffix = randomBytes(4).toString("hex");
   const name = basename(target);
@@ -157,6 +151,7 @@ export async function installDesktopApp(input: {
       archive,
       onProgress,
       input.progressIntervalMs ?? 1_000,
+      input.signal,
     );
 
     // ditto, not unzip or a JS zip library: it keeps the symlinks and modes
@@ -207,11 +202,13 @@ async function downloadVerified(
   destination: string,
   onProgress: (message: string) => void,
   intervalMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   let response: Response;
   try {
-    response = await fetch(artifact.url);
+    response = await fetch(artifact.url, { signal });
   } catch (error) {
+    if (signal?.aborted) throw interrupted();
     throw new OperationalError(
       `Could not reach the Radius download: ${(error as Error).message}`,
       `URL: ${artifact.url}`,
@@ -250,9 +247,11 @@ async function downloadVerified(
         }
       })(),
       createWriteStream(destination, { mode: 0o600 }),
+      { signal },
     );
   } catch (error) {
     await rm(destination, { force: true });
+    if (signal?.aborted) throw interrupted();
     if (error instanceof SizeMismatch) {
       throw mismatch("size", artifact, `more than ${artifact.size} bytes`);
     }
@@ -271,6 +270,13 @@ async function downloadVerified(
     await rm(destination, { force: true });
     throw mismatch("sha256", artifact, digest);
   }
+}
+
+function interrupted(): OperationalError {
+  return new OperationalError(
+    "The Radius download was stopped.",
+    "Nothing was installed.",
+  );
 }
 
 class SizeMismatch extends Error {
@@ -302,15 +308,6 @@ export function keychainNotice(): string[] {
     "because this build is unsigned and Radius keeps its storage key in the keychain.",
     'Enter it and choose "Always Allow". If you deny it, Radius can\'t open its local storage.',
   ];
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function writable(path: string): Promise<boolean> {

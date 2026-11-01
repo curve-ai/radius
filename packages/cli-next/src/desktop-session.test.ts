@@ -276,6 +276,79 @@ test(
 );
 
 test(
+  "an update goes where the app was found, and launches what was installed",
+  macOnly,
+  async () => {
+    const h = await harness({ app: { version: "0.0.9" }, answer: true });
+    const found = await h.input.findApp!();
+    const scratch = await mkdtemp(join(tmpdir(), "radius-session-moved-"));
+    const installedAt = join(scratch, "Radius.app");
+    const session = await connectDesktop({
+      ...h.input,
+      // Not the default install path: the update must follow the found copy.
+      env: {},
+      install: async (request) => {
+        h.installs.push(request.installPath);
+        await writeFakeBundle(installedAt, request.release.version);
+        return {
+          status: "updated",
+          path: installedAt,
+          version: request.release.version,
+          previousVersion: "0.0.9",
+        };
+      },
+    });
+    assert.deepEqual(h.installs, [found!.path]);
+    assert.equal(session.desktop.launched, true);
+    assert.ok(
+      h.spawned[0]?.includes(installedAt),
+      `opened ${JSON.stringify(h.spawned[0])}`,
+    );
+  },
+);
+
+test("stopped at the install prompt: nothing installed or opened, descriptor removed", async () => {
+  const h = await harness({ app: null });
+  const stopping = new AbortController();
+  await assert.rejects(
+    connectDesktop({
+      ...h.input,
+      signal: stopping.signal,
+      confirm: async () => {
+        stopping.abort();
+        throw new Error("Stopped.");
+      },
+    }),
+  );
+  assert.deepEqual(h.installs, []);
+  assert.deepEqual(h.spawned, []);
+  assert.deepEqual(h.removed, h.registered);
+});
+
+test(
+  "stopped while waiting for the app: the wait ends at once",
+  macOnly,
+  async () => {
+    const h = await harness({ app: { version: "0.1.0" } });
+    const stopping = new AbortController();
+    const started = Date.now();
+    await assert.rejects(
+      connectDesktop({
+        ...h.input,
+        presenceTimeoutMs: 10_000,
+        signal: stopping.signal,
+        spawner: async () => {
+          setTimeout(() => stopping.abort(), 50);
+          return true;
+        },
+      }),
+    );
+    assert.ok(Date.now() - started < 5_000, "did not sit out the 10s wait");
+    assert.deepEqual(h.removed, h.registered);
+  },
+);
+
+test(
   "the app never reports in: the descriptor stays in the default folder",
   macOnly,
   async () => {

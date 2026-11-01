@@ -61,18 +61,27 @@ export async function waitForDesktopPresence(
   options: {
     readonly intervalMs?: number;
     readonly isAlive?: (pid: number) => boolean;
+    /** Gives up early, returning null, e.g. on Ctrl-C. */
+    readonly signal?: AbortSignal;
   } = {},
 ): Promise<DesktopPresence | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const presence = await readDesktopPresence(userDataPath, options.isAlive);
     if (presence || Date.now() >= deadline) return presence;
-    await new Promise((settle) =>
-      setTimeout(
-        settle,
+    if (options.signal?.aborted) return null;
+    await new Promise<void>((settle) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", done);
+        settle();
+      };
+      const timer = setTimeout(
+        done,
         Math.min(options.intervalMs ?? 250, deadline - Date.now()),
-      ),
-    );
+      );
+      options.signal?.addEventListener("abort", done, { once: true });
+    });
   }
 }
 
