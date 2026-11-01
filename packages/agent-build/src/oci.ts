@@ -17,7 +17,7 @@ import {
 } from "@curve-ai/agent-contracts";
 import { build } from "esbuild";
 
-import { BuildError } from "./errors.js";
+import { BuildError, recognisedDockerFailure } from "./errors.js";
 import type { OciCommandRunner } from "./push.js";
 import { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
@@ -253,7 +253,10 @@ async function runCommand(
     child.once("exit", (code) => {
       if (code === 0) resolve();
       else
-        reject(new Error(`${command} failed with ${code}: ${stderr.trim()}`));
+        reject(
+          recognisedDockerFailure(stderr) ??
+            new Error(`${command} failed with ${code}: ${stderr.trim()}`),
+        );
     });
   });
 }
