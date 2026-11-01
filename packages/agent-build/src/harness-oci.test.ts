@@ -63,6 +63,32 @@ test("a binary-only harness ships nothing but the harness", () => {
   assert.match(containerfile, /ENTRYPOINT \["\/opt\/agent\/opencode", "acp"\]/);
 });
 
+test("the config's env reaches the image, so build ships what dev ran", () => {
+  const containerfile = render({
+    env: { OPENCODE_CONFIG: "opencode.prod.json", NOTE: 'say "$HOME"' },
+  });
+  assert.match(containerfile, /^ENV OPENCODE_CONFIG="opencode\.prod\.json"$/m);
+  assert.ok(
+    containerfile.includes('ENV NOTE="say \\"\\$HOME\\""'),
+    containerfile,
+  );
+  // Before the entrypoint, so the harness starts with it.
+  assert.ok(
+    containerfile.indexOf("ENV OPENCODE_CONFIG") <
+      containerfile.indexOf("ENTRYPOINT"),
+  );
+});
+
+test("a config without env adds no ENV lines of its own", () => {
+  const lines = render()
+    .split("\n")
+    .filter((line) => line.startsWith("ENV "));
+  assert.deepEqual(lines, [
+    "ENV HOME=/opt/data",
+    'ENV PATH="/opt/agent/venv/bin:/usr/local/bin:/usr/bin:/bin"',
+  ]);
+});
+
 test("the entrypoint is the harness command, so ACP comes from the harness", () => {
   // The whole point of the harness kind: the project never implements ACP, so
   // nothing in the image may run the project's own code as the entrypoint.
