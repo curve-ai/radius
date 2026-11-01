@@ -229,7 +229,7 @@ test("an installed copy is updated where it was found", () => {
     installPathFor({ path: "/repo/dist/Radius.app", installed: false }, env),
     "/elsewhere/Radius.app",
   );
-  assert.match(installPathFor(null, {}), /Applications\/Radius\.app$/);
+  assert.match(installPathFor(null, {}), /Applications[\\/]Radius\.app$/);
 });
 
 for (const [name, options] of [
