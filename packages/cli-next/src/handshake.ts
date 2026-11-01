@@ -1,6 +1,6 @@
 import type { SessionConfigOption } from "@curve-ai/radius-runtime";
 
-import { probeAcp, type ProbeResult } from "./acp-probe.js";
+import { needsSignIn, probeAcp, type ProbeResult } from "./acp-probe.js";
 import { OperationalError } from "./errors.js";
 
 /**
@@ -9,9 +9,6 @@ import { OperationalError } from "./errors.js";
  * then is not going to.
  */
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 120_000;
-
-/** ACP's `auth_required`, which an agent returns from `session/new`. */
-const ACP_AUTH_REQUIRED_CODE = -32000;
 
 export interface HandshakeResult {
   readonly protocolVersion: number;
@@ -80,10 +77,7 @@ export async function handshakeOverStdio(
     case "rpc":
       // Still a pass: the harness started and speaks ACP, and the desktop
       // runs the sign-in itself on a real thread.
-      if (
-        probe.stage === "session/new" &&
-        failure.code === ACP_AUTH_REQUIRED_CODE
-      ) {
+      if (needsSignIn(probe)) {
         return {
           protocolVersion: 1,
           authMethods,

@@ -31,7 +31,9 @@ process.stdin.on("data", (chunk) => {
       message.method === "initialize" ? behaviour.initialize
       : message.method === "session/new" ? behaviour.session
       : undefined;
-    if (result !== undefined) {
+    if (message.method === "session/new" && behaviour.sessionError) {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: behaviour.sessionError }) + "\\n");
+    } else if (result !== undefined) {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
     }
   }
@@ -125,6 +127,25 @@ test("an agent that advertises the project's own agent passes", async () => {
     verdict(result, "handshake").summary,
     /ACP v1 — OpenCode 1\.19\.4/,
   );
+});
+
+test("an agent that wants sign-in before session/new passes, as it does for dev", async () => {
+  const result = await check({
+    initialize: OPENCODE_INIT,
+    sessionError: { code: -32000, message: "Authentication required" },
+  });
+  assert.equal(result.passed, true, JSON.stringify(result.verdicts, null, 2));
+  assert.match(verdict(result, "handshake").summary, /sign-in required/);
+  assert.equal(verdict(result, "agents").status, "skip");
+});
+
+test("any other session/new error still fails the check", async () => {
+  const result = await check({
+    initialize: OPENCODE_INIT,
+    sessionError: { code: -32603, message: "boom" },
+  });
+  assert.equal(result.passed, false);
+  assert.equal(verdict(result, "handshake").status, "fail");
 });
 
 test("a harness serving only its built-ins fails even though it handshakes", async () => {
