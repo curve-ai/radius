@@ -36,6 +36,7 @@ async function run(this: RadiusContext, flags: CheckFlags): Promise<void> {
   const result = await checkAgent({
     command,
     root,
+    runtime: config.runtime,
     env: startEnvironment(start, context.env),
     timeoutMs: flags.timeout * 1000,
     abort: context.untilStopped(),
