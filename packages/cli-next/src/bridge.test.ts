@@ -6,6 +6,7 @@ import { WebSocket } from "ws";
 
 import {
   harnessEnvironment,
+  splitLines,
   startBridge,
   type Bridge,
   type BridgeEvents,
@@ -296,5 +297,43 @@ test(
       "a stray stdout line must never reach the JSON-RPC stream",
     );
     assert.equal(received.length, 1, "the echoed frame should still arrive");
+  },
+);
+
+test("a character split across two reads arrives whole", () => {
+  const lines: string[] = [];
+  const feed = splitLines((line) => lines.push(line));
+  const bytes = Buffer.from('{"text":"café 🎉"}\n', "utf8");
+  // Inside the four-byte emoji.
+  const cut = bytes.indexOf(0xf0) + 2;
+  feed(bytes.subarray(0, cut));
+  feed(bytes.subarray(cut));
+  assert.deepEqual(lines, ['{"text":"café 🎉"}']);
+});
+
+test(
+  "closing a thread also stops what a wrapper forked",
+  { timeout: 15_000, skip: process.platform === "win32" },
+  async () => {
+    // A shell wrapper that forks the real agent and reports its pid, the
+    // shape `npx` and launcher scripts take.
+    const wrapper = ["sh", "-c", 'sleep 60 & echo "{\\"pid\\":$!}"; wait'];
+    const into = sink();
+    const bridge = await startBridge(
+      wrapper,
+      process.cwd(),
+      process.env,
+      events(into),
+    );
+    const socket = await connect(bridge);
+    try {
+      await until(() => into.frames.length > 0, "the forked pid");
+      const { pid } = JSON.parse(into.frames[0]!) as { pid: number };
+      assert.equal(alive(pid), true);
+      socket.close();
+      await until(() => !alive(pid), "the forked agent to stop");
+    } finally {
+      await bridge.close();
+    }
   },
 );
