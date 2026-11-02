@@ -1,0 +1,457 @@
+import assert from "node:assert/strict";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { test } from "node:test";
+
+import { AgentConfigSchema } from "@curve-ai/agent-contracts";
+
+import { UsageError } from "./errors.js";
+import { resolveStartCommand, startEnvironment } from "./start-command.js";
+
+const silent = (): void => {};
+
+function config(runtime: Record<string, unknown>) {
+  return AgentConfigSchema.parse({
+    schemaVersion: 1,
+    agent: "agent_testtesttest",
+    name: "Test",
+    runtime,
+  });
+}
+
+/**
+ * A PATH holding only the named stand-ins, so each case decides exactly
+ * which tools exist instead of inheriting whatever the machine has.
+ */
+async function pathWith(...tools: string[]): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "radius-path-"));
+  for (const tool of tools) {
+    const path = join(directory, tool);
+    await writeFile(path, "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(path, 0o755);
+  }
+  return directory;
+}
+
+async function project(files: Record<string, string>): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "radius-start-"));
+  for (const [name, contents] of Object.entries(files)) {
+    await mkdir(join(root, name, ".."), { recursive: true });
+    await writeFile(join(root, name), contents, "utf8");
+  }
+  return root;
+}
+
+// The real platform, not a fixed one: PATH lookup splits on `;` on Windows,
+// and a pretend "darwin" split the runner's `D:\...` paths at the colon.
+function host(path: string) {
+  return { platform: process.platform, arch: "arm64", env: { PATH: path } };
+}
+
+test("a harness keeps the runner it was published with", async () => {
+  const resolved = await resolveStartCommand(
+    config({
+      kind: "harness",
+      registryId: "example",
+      distribution: { kind: "npx", package: "p@1.2.3", args: ["--acp"] },
+    }),
+    process.cwd(),
+    host(await pathWith("npx")),
+    silent,
+  );
+  assert.equal(resolved.kind, "harness");
+  assert.deepEqual([...resolved.command], ["npx", "-y", "p@1.2.3", "--acp"]);
+  assert.equal(resolved.summary, "harness example");
+  assert.deepEqual(resolved.harness, { source: "npx p@1.2.3", cached: false });
+});
+
+test("a harness carries the env its config sets, over the caller's", async () => {
+  const resolved = await resolveStartCommand(
+    config({
+      kind: "harness",
+      distribution: { kind: "npx", package: "p@1.2.3" },
+      env: { OPENCODE_CONFIG: "./opencode-async.json" },
+    }),
+    process.cwd(),
+    host(await pathWith("npx")),
+    silent,
+  );
+  assert.deepEqual(resolved.env, { OPENCODE_CONFIG: "./opencode-async.json" });
+  const env = startEnvironment(resolved, {
+    PATH: "/bin",
+    OPENCODE_CONFIG: "./opencode.json",
+  });
+  assert.equal(env.OPENCODE_CONFIG, "./opencode-async.json");
+  assert.equal(env.PATH, "/bin");
+});
+
+test("a harness whose runner is missing names what to install", async () => {
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({
+          kind: "harness",
+          distribution: { kind: "uvx", package: "p@1.2.3", args: [] },
+        }),
+        process.cwd(),
+        host(await pathWith()),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      /`uvx` was not found.*uv/s.test(error.message),
+  );
+});
+
+test("a python agent runs its module through uv on the declared interpreter", async () => {
+  const resolved = await resolveStartCommand(
+    config({ kind: "python", module: "pkg.agent", python: "3.12" }),
+    process.cwd(),
+    host(await pathWith("uv")),
+    silent,
+  );
+  assert.equal(resolved.kind, "python");
+  assert.deepEqual(
+    [...resolved.command],
+    ["uv", "run", "--python", "3.12", "python", "-m", "pkg.agent"],
+  );
+});
+
+test("a python agent without uv is a usage error, not a spawn failure", async () => {
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "python", module: "pkg.agent", python: "3.12" }),
+        process.cwd(),
+        host(await pathWith()),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /`uv` was not found/.test(error.message),
+  );
+});
+
+test("a TypeScript entrypoint runs under node with the tsx loader", async () => {
+  const root = await project({ "radius/agent.ts": "export {};\n" });
+  const path = await pathWith("node");
+  const resolved = await resolveStartCommand(
+    config({ kind: "typescript", entrypoint: "radius/agent.ts" }),
+    root,
+    host(path),
+    silent,
+  );
+  const [node, flag, loader, entry] = resolved.command;
+  assert.equal(node, join(path, "node"));
+  assert.equal(flag, "--import");
+  assert.match(
+    loader ?? "",
+    /^file:.*tsx/,
+    "a file URL, so it resolves even when the project has no tsx",
+  );
+  assert.equal(entry, join(root, "radius/agent.ts"));
+  assert.equal(resolved.command.length, 4, "stdio mode: no --radius-dev");
+});
+
+test("a JavaScript entrypoint runs under plain node", async () => {
+  const root = await project({ "agent.mjs": "\n" });
+  const path = await pathWith("node");
+  const resolved = await resolveStartCommand(
+    config({ kind: "typescript", entrypoint: "agent.mjs" }),
+    root,
+    host(path),
+    silent,
+  );
+  assert.deepEqual(
+    [...resolved.command],
+    [join(path, "node"), join(root, "agent.mjs")],
+  );
+});
+
+test("a missing TypeScript entrypoint is reported before anything spawns", async () => {
+  const root = await project({});
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "typescript", entrypoint: "radius/agent.ts" }),
+        root,
+        host(await pathWith("node")),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /does not exist/.test(error.message),
+  );
+});
+
+test("a command runtime runs as written", async () => {
+  const resolved = await resolveStartCommand(
+    config({ kind: "command", command: ["my-agent", "--stdio"] }),
+    process.cwd(),
+    host(await pathWith("my-agent")),
+    silent,
+  );
+  assert.equal(resolved.kind, "command");
+  assert.deepEqual([...resolved.command], ["my-agent", "--stdio"]);
+});
+
+test("a command runtime may name a path inside the project", async () => {
+  const root = await project({ "bin/agent": "#!/bin/sh\n" });
+  await chmod(join(root, "bin/agent"), 0o755);
+  const resolved = await resolveStartCommand(
+    config({ kind: "command", command: ["./bin/agent"] }),
+    root,
+    host(await pathWith()),
+    silent,
+  );
+  assert.deepEqual([...resolved.command], ["./bin/agent"]);
+});
+
+test("a command runtime whose executable is missing is a usage error", async () => {
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "command", command: ["nope-not-here"] }),
+        process.cwd(),
+        host(await pathWith()),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /nope-not-here/.test(error.message),
+  );
+});
+
+const LANGGRAPH_JSON = JSON.stringify({
+  graphs: { weather: "./graph.py:graph", triage: "agents.triage:graph" },
+});
+
+test("a langgraph runtime runs the Radius adapter over the project through uv", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  const resolved = await resolveStartCommand(
+    config({ kind: "langgraph" }),
+    root,
+    host(await pathWith("uv")),
+    silent,
+  );
+  assert.equal(resolved.kind, "langgraph");
+  assert.deepEqual(
+    [...resolved.command],
+    [
+      "uv",
+      "run",
+      "--python",
+      "3.12",
+      "--with",
+      "radius-langgraph==0.0.1",
+      "radius-langgraph",
+      "--config",
+      "langgraph.json",
+    ],
+  );
+  assert.equal(resolved.summary, "langgraph weather, triage");
+  assert.deepEqual(resolved.env, {});
+});
+
+test("a langgraph runtime pinned to one graph passes it to the adapter", async () => {
+  const root = await project({ "agents/langgraph.json": LANGGRAPH_JSON });
+  const resolved = await resolveStartCommand(
+    config({
+      kind: "langgraph",
+      config: "agents/langgraph.json",
+      graph: "triage",
+      python: "3.13",
+    }),
+    root,
+    host(await pathWith("uv")),
+    silent,
+  );
+  assert.deepEqual(resolved.command.slice(2, 4), ["--python", "3.13"]);
+  assert.deepEqual(resolved.command.slice(-4), [
+    "--config",
+    "agents/langgraph.json",
+    "--graph",
+    "triage",
+  ]);
+  assert.equal(resolved.summary, "langgraph triage");
+});
+
+test("a langgraph adapter given as a path is resolved against the project", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  const path = await pathWith("uv");
+  const withAdapter = async (adapter: string) =>
+    (
+      await resolveStartCommand(
+        config({ kind: "langgraph", adapter }),
+        root,
+        host(path),
+        silent,
+      )
+    ).command[5];
+  assert.equal(
+    await withAdapter("./vendor/adapter"),
+    join(root, "vendor/adapter"),
+  );
+  // Resolved against the project, as the implementation does, so Windows
+  // expects the project's drive rather than the test runner's.
+  assert.equal(
+    await withAdapter("/opt/adapter"),
+    resolve(root, "/opt/adapter"),
+  );
+  assert.equal(
+    await withAdapter("~/src/adapter"),
+    join(homedir(), "src/adapter"),
+  );
+  assert.equal(
+    await withAdapter("radius-langgraph==0.0.2"),
+    "radius-langgraph==0.0.2",
+    "a requirement is passed to uv untouched",
+  );
+});
+
+test("RADIUS_LANGGRAPH_ADAPTER overrides the configured adapter", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  const path = await pathWith("uv");
+  const withOverride = async (override: string) =>
+    (
+      await resolveStartCommand(
+        config({ kind: "langgraph", adapter: "radius-langgraph==0.0.1" }),
+        root,
+        {
+          platform: process.platform,
+          arch: "arm64",
+          env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: override },
+        },
+        silent,
+      )
+    ).command[5];
+  assert.equal(
+    await withOverride("../checkout/langgraph-acp-python"),
+    join(root, "../checkout/langgraph-acp-python"),
+  );
+  assert.equal(
+    await withOverride("radius-langgraph==0.0.1rc1"),
+    "radius-langgraph==0.0.1rc1",
+  );
+  assert.equal(
+    await withOverride(""),
+    "radius-langgraph==0.0.1",
+    "an empty override is no override",
+  );
+});
+
+test("a langgraph runtime without its config file is a usage error", async () => {
+  const root = await project({});
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph" }),
+        root,
+        host(await pathWith("uv")),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      /langgraph\.json does not exist/.test(error.message),
+  );
+});
+
+test("a langgraph runtime without uv is a usage error, not a spawn failure", async () => {
+  const root = await project({ "langgraph.json": LANGGRAPH_JSON });
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph" }),
+        root,
+        host(await pathWith()),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /`uv` was not found/.test(error.message),
+  );
+});
+
+const TYPESCRIPT_LANGGRAPH_JSON = JSON.stringify({
+  graphs: { agent: "./src/agent.ts:graph" },
+});
+
+test("a TypeScript langgraph runtime runs the npm adapter through npx", async () => {
+  const root = await project({ "langgraph.json": TYPESCRIPT_LANGGRAPH_JSON });
+  const resolved = await resolveStartCommand(
+    config({ kind: "langgraph", language: "typescript", graph: "agent" }),
+    root,
+    host(await pathWith("node", "npx")),
+    silent,
+  );
+  assert.equal(resolved.kind, "langgraph");
+  assert.deepEqual(
+    [...resolved.command],
+    [
+      "npx",
+      "--yes",
+      "@curve-ai/radius-langgraph@0.0.1",
+      "--config",
+      "langgraph.json",
+      "--graph",
+      "agent",
+    ],
+  );
+  assert.equal(resolved.summary, "langgraph agent");
+});
+
+test("RADIUS_LANGGRAPH_ADAPTER runs a TypeScript adapter checkout with node", async () => {
+  const root = await project({
+    "langgraph.json": TYPESCRIPT_LANGGRAPH_JSON,
+    "checkout/bin/radius-langgraph.mjs": "",
+  });
+  const path = await pathWith("node");
+  const resolved = await resolveStartCommand(
+    config({ kind: "langgraph", language: "typescript" }),
+    root,
+    {
+      platform: process.platform,
+      arch: "arm64",
+      env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: "./checkout" },
+    },
+    silent,
+  );
+  assert.deepEqual(
+    [...resolved.command],
+    [
+      join(path, "node"),
+      join(root, "checkout", "bin", "radius-langgraph.mjs"),
+      "--config",
+      "langgraph.json",
+    ],
+  );
+
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph", language: "typescript" }),
+        root,
+        {
+          platform: process.platform,
+          arch: "arm64",
+          env: { PATH: path, RADIUS_LANGGRAPH_ADAPTER: "./elsewhere" },
+        },
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      /RADIUS_LANGGRAPH_ADAPTER is \.\/elsewhere/.test(error.message),
+  );
+});
+
+test("a TypeScript langgraph runtime needs node, not uv", async () => {
+  const root = await project({ "langgraph.json": TYPESCRIPT_LANGGRAPH_JSON });
+  await assert.rejects(
+    async () =>
+      resolveStartCommand(
+        config({ kind: "langgraph", language: "typescript" }),
+        root,
+        host(await pathWith("uv", "npx")),
+        silent,
+      ),
+    (error: unknown) =>
+      error instanceof UsageError && /`node` was not found/.test(error.message),
+  );
+});

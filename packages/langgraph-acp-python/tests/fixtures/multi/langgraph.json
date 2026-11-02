@@ -1,0 +1,8 @@
+{
+  "graphs": {
+    "echo": "graphs:echo_factory",
+    "shout": { "path": "graphs:shout_factory", "description": "Shouts back" },
+    "remembered": "./graphs.py:remembered"
+  },
+  "env": { "RADIUS_LANGGRAPH_TEST_ENV": "from-config" }
+}

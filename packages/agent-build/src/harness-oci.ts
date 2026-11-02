@@ -23,7 +23,7 @@ import {
   type HarnessToolchain,
 } from "@curve-ai/agent-contracts";
 
-import { BuildError } from "./errors.js";
+import { BuildError, recognisedDockerFailure } from "./errors.js";
 import type { OciCommandRunner } from "./push.js";
 import { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
@@ -747,11 +747,25 @@ export function renderHarnessContainerfile(input: {
     "USER 10000:10000",
     `ENV HOME=${configRoot}`,
     'ENV PATH="/opt/agent/venv/bin:/usr/local/bin:/usr/bin:/bin"',
+    // After Radius's own, so the config's variables lay over them the way
+    // `dev` and `check` lay them over the developer's shell.
+    ...Object.entries(runtime.env ?? {}).map(
+      ([name, value]) => `ENV ${name}=${containerfileString(value)}`,
+    ),
     `WORKDIR ${configRoot}`,
     `ENTRYPOINT [${launch.entrypoint.map((part) => JSON.stringify(part)).join(", ")}]`,
     "",
   );
   return lines.join("\n");
+}
+
+/**
+ * A double-quoted Containerfile string. JSON escapes the quotes and
+ * backslashes; `$` is escaped on top, or the builder would expand it as a
+ * variable and ship a different value from the one the config names.
+ */
+function containerfileString(value: string): string {
+  return JSON.stringify(value).replaceAll("$", "\\$");
 }
 
 function safeImageName(name: string): string {
@@ -788,17 +802,9 @@ async function runCommand(
         resolveRun();
         return;
       }
-      // Radius needs an OCI layout, which the default docker driver cannot
-      // export. The raw message names neither Radius nor the fix.
-      if (/OCI exporter is not supported for the docker driver/.test(stderr)) {
-        rejectRun(
-          new BuildError(
-            "This Docker builder cannot export an OCI layout, which is the only thing Radius can ship.\n" +
-              "Create one once with:\n" +
-              "  docker buildx create --name radius-oci --driver docker-container --bootstrap\n" +
-              "then build with BUILDX_BUILDER=radius-oci.",
-          ),
-        );
+      const recognised = recognisedDockerFailure(stderr);
+      if (recognised) {
+        rejectRun(recognised);
         return;
       }
       rejectRun(

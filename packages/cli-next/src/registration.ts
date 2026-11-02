@@ -22,8 +22,22 @@ export function radiusUserDataPath(
     }
     return join(appData, "Radius");
   }
-  return join(env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "Radius");
+  return join(
+    env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"),
+    "Radius",
+  );
 }
+
+/** Where agents go when no running app has said otherwise. */
+export function defaultAgentsPath(userDataPath: string): string {
+  return join(userDataPath, "development", "agents");
+}
+
+/**
+ * The descriptor version this CLI writes. A running app lists the versions it
+ * reads, and `dev` checks this against that list before writing anything.
+ */
+export const WRITTEN_AGENT_SCHEMA_VERSION = 1;
 
 export interface Registration {
   readonly path: string;
@@ -35,7 +49,8 @@ export interface Registration {
  * id so two `dev` sessions for one agent cannot clobber each other.
  */
 export async function registerDevelopmentAgent(input: {
-  userDataPath: string;
+  /** The folder the app watches: its presence file's, or the default. */
+  agentsPath: string;
   agentId: string;
   instanceId: string;
   displayName: string;
@@ -46,7 +61,7 @@ export async function registerDevelopmentAgent(input: {
   capabilities: readonly string[];
 }): Promise<Registration> {
   const descriptor = parseDevelopmentAgentConnection({
-    schemaVersion: 1,
+    schemaVersion: WRITTEN_AGENT_SCHEMA_VERSION,
     agentId: input.agentId,
     displayName: input.displayName,
     endpoint: input.endpoint,
@@ -58,9 +73,7 @@ export async function registerDevelopmentAgent(input: {
   });
 
   const path = join(
-    input.userDataPath,
-    "development",
-    "agents",
+    input.agentsPath,
     `${input.agentId}-${input.instanceId}.json`,
   );
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });

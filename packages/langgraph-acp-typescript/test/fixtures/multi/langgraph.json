@@ -1,0 +1,13 @@
+{
+  "graphs": {
+    "echo": "./graphs.mjs:echoFactory",
+    "shout": {
+      "path": "./graphs.mjs:shoutFactory",
+      "description": "Shouts back"
+    },
+    "remembered": "./graphs.mjs:remembered",
+    "forgetful": "./graphs.mjs:forgetful",
+    "count": "./graphs.mjs"
+  },
+  "env": { "RADIUS_LANGGRAPH_TEST_ENV": "from-config" }
+}
