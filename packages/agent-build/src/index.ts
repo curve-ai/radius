@@ -1,5 +1,9 @@
-export { BuildError, isBuildError } from "./errors.js";
-export { canonicalJson, createAgentManifest, defineConfig } from "./manifest.js";
+export { BuildError, isBuildError, recognisedDockerFailure } from "./errors.js";
+export {
+  canonicalJson,
+  createAgentManifest,
+  defineConfig,
+} from "./manifest.js";
 export { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 
 export {
