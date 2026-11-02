@@ -23,7 +23,7 @@ import {
   type HarnessToolchain,
 } from "@curve-ai/agent-contracts";
 
-import { BuildError } from "./errors.js";
+import { BuildError, recognisedDockerFailure } from "./errors.js";
 import type { OciCommandRunner } from "./push.js";
 import { hostImagePlatform, type HostImagePlatform } from "./host-image.js";
 import { canonicalJson, createAgentManifest } from "./manifest.js";
@@ -802,17 +802,9 @@ async function runCommand(
         resolveRun();
         return;
       }
-      // Radius needs an OCI layout, which the default docker driver cannot
-      // export. The raw message names neither Radius nor the fix.
-      if (/OCI exporter is not supported for the docker driver/.test(stderr)) {
-        rejectRun(
-          new BuildError(
-            "This Docker builder cannot export an OCI layout, which is the only thing Radius can ship.\n" +
-              "Create one once with:\n" +
-              "  docker buildx create --name radius-oci --driver docker-container --bootstrap\n" +
-              "then build with BUILDX_BUILDER=radius-oci.",
-          ),
-        );
+      const recognised = recognisedDockerFailure(stderr);
+      if (recognised) {
+        rejectRun(recognised);
         return;
       }
       rejectRun(
