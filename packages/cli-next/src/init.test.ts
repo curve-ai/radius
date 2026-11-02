@@ -480,7 +480,7 @@ test("a Python langgraph.json becomes a langgraph runtime, with no registry and 
   });
   assert.match(
     run.text(),
-    /^detected langgraph \(langgraph\.json: graphs agent, triage\)$/m,
+    /^detected langgraph \(langgraph\.json: python graphs agent, triage\)$/m,
   );
   assert.match(
     await readFile(join(root, ".gitignore"), "utf8"),
@@ -551,10 +551,38 @@ test("--harness wins over a langgraph.json", async () => {
   assert.equal("runtime" in config, false);
 });
 
-test("JavaScript graphs are not taken for a langgraph runtime", async () => {
+test("TypeScript graphs become a TypeScript langgraph runtime", async () => {
   const root = await project({
     "langgraph.json": JSON.stringify({
-      graphs: { agent: "./src/agent.ts:graph" },
+      graphs: { agent: "./src/agent.ts:graph", notes: "./src/notes.mjs" },
+    }),
+    "package-lock.json": "{}",
+  });
+  const run = context(root);
+  const registry = fakeRegistry();
+  await runInit(run.context, flags(), registry);
+  assert.equal(registry.calls.count, 0);
+  const config = await readJson(join(root, "radius.json"));
+  assert.deepEqual(config.runtime, {
+    kind: "langgraph",
+    language: "typescript",
+  });
+  assert.match(
+    run.text(),
+    /^detected langgraph \(langgraph\.json: typescript graphs agent, notes\)$/m,
+  );
+  const loaded = await loadConfigFile(root);
+  assert.equal(
+    loaded.config.runtime.kind === "langgraph" &&
+      loaded.config.runtime.language,
+    "typescript",
+  );
+});
+
+test("a langgraph.json mixing languages is not taken for a langgraph runtime", async () => {
+  const root = await project({
+    "langgraph.json": JSON.stringify({
+      graphs: { agent: "./src/agent.ts:graph", triage: "./triage.py:graph" },
     }),
   });
   const run = context(root);
@@ -568,5 +596,5 @@ test("JavaScript graphs are not taken for a langgraph runtime", async () => {
     /--harness <id>/,
   );
   assert.equal(registry.calls.count, 0);
-  assert.match(notes.join("\n"), /Python graphs only for now/);
+  assert.match(notes.join("\n"), /one language per project/);
 });
