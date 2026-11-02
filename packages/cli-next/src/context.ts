@@ -117,11 +117,17 @@ export function emitJson(context: RadiusContext, data: unknown): void {
   );
 }
 
+/**
+ * `data` is for a command whose failure is itself a structured finding —
+ * `check` failing is a report, and a consumer needs the verdicts, not just
+ * the headline.
+ */
 export function emitJsonError(
   context: RadiusContext,
   error: { code: string; message: string; nextAction?: string },
+  data?: unknown,
 ): void {
   context.process.stdout.write(
-    `${JSON.stringify({ schemaVersion: JSON_ENVELOPE_VERSION, ok: false, error }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: JSON_ENVELOPE_VERSION, ok: false, error, ...(data === undefined ? {} : { data }) }, null, 2)}\n`,
   );
 }
