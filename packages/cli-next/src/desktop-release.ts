@@ -58,10 +58,11 @@ export const PINNED_DESKTOP_RELEASE: DesktopRelease = {
       size: 207587843,
     },
     "windows/amd64": {
-      url: "https://github.com/curve-ai/radius/releases/download/desktop-v0.1.0/radius-0.1.0-win-x64.zip",
+      // The NSIS installer, which desktop-install-windows.ts runs silently.
+      url: "https://github.com/curve-ai/radius/releases/download/desktop-v0.1.0/radius-0.1.0-setup.exe",
       sha256:
-        "c260662553840534c8e9792b7f72a1cba085932ba6bb4a3a9365adc1f9b0d3d0",
-      size: 367445459,
+        "ad3b35b49b0dfa56101233f85cb164c6629b0f38d2bd9521b28776b8c6e78cfa",
+      size: 251427701,
     },
     "linux/amd64": {
       url: "https://github.com/curve-ai/radius/releases/download/desktop-v0.1.0/radius-0.1.0-linux-x86_64.AppImage",
@@ -124,9 +125,10 @@ export function releasePageUrl(release: DesktopRelease): string {
 
 /**
  * Operating systems the CLI can install the app on. The one place a new
- * platform is switched on, once its installer exists in desktop-install.ts.
+ * platform is switched on, once its installer exists (desktop-install.ts for
+ * macOS, desktop-install-windows.ts for Windows).
  */
-const CLI_INSTALLABLE = new Set(["darwin"]);
+const CLI_INSTALLABLE = new Set(["darwin", "win32"]);
 
 const OS_NAMES: Readonly<Record<string, string>> = {
   darwin: "macOS",

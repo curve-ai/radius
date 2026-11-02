@@ -58,8 +58,8 @@ const base = {
         to: "agents",
       },
     ],
-    // nsis is the installer for people; the zip is the unpacked app the
-    // radius CLI installs without an installer UI.
+    // nsis is the installer for people, and the radius CLI runs it silently;
+    // release-manifest.ts relies on its name.
     target: ["nsis", "zip"],
     artifactName: "radius-${version}-win-${arch}.${ext}",
   },

@@ -36,11 +36,11 @@ test("hashes each platform archive and links it under the release tag", async ()
   await withArtifacts(
     {
       "radius-0.4.2-mac-arm64.zip": "mac",
-      "radius-0.4.2-win-x64.zip": "windows",
+      "radius-0.4.2-setup.exe": "windows",
       "radius-0.4.2-linux-x86_64.AppImage": "linux",
-      // Installers and updater metadata sit beside them but are not listed.
+      // Other installers and archives sit beside them but are not listed.
       "radius-0.4.2.dmg": "dmg",
-      "radius-0.4.2-setup.exe": "nsis",
+      "radius-0.4.2-win-x64.zip": "zip",
     },
     async (directory) => {
       const manifest = await buildReleaseManifest({
@@ -58,7 +58,7 @@ test("hashes each platform archive and links it under the release tag", async ()
         "windows/amd64",
       ]);
       assert.deepEqual(manifest.platforms["windows/amd64"], {
-        url: "https://github.com/curve-ai/radius/releases/download/desktop-v0.4.2/radius-0.4.2-win-x64.zip",
+        url: "https://github.com/curve-ai/radius/releases/download/desktop-v0.4.2/radius-0.4.2-setup.exe",
         sha256: createHash("sha256").update("windows").digest("hex"),
         size: "windows".length,
       });

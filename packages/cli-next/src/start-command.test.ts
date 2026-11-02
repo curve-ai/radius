@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -7,7 +7,11 @@ import { test } from "node:test";
 import { AgentConfigSchema } from "@curve-ai/agent-contracts";
 
 import { UsageError } from "./errors.js";
-import { resolveStartCommand, startEnvironment } from "./start-command.js";
+import {
+  LANGGRAPH_TYPESCRIPT_ADAPTER,
+  resolveStartCommand,
+  startEnvironment,
+} from "./start-command.js";
 
 const silent = (): void => {};
 
@@ -453,5 +457,30 @@ test("a TypeScript langgraph runtime needs node, not uv", async () => {
       ),
     (error: unknown) =>
       error instanceof UsageError && /`node` was not found/.test(error.message),
+  );
+});
+
+test("the pinned TypeScript adapter is the version in this checkout", async () => {
+  let adapter: { name: string; version: string };
+  try {
+    adapter = JSON.parse(
+      await readFile(
+        join(
+          import.meta.dirname,
+          "..",
+          "..",
+          "langgraph-acp-typescript",
+          "package.json",
+        ),
+        "utf8",
+      ),
+    );
+  } catch {
+    // Not a checkout; nothing to compare against.
+    return;
+  }
+  assert.equal(
+    LANGGRAPH_TYPESCRIPT_ADAPTER,
+    `${adapter.name}@${adapter.version}`,
   );
 });

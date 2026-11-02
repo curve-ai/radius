@@ -3,6 +3,11 @@ import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import {
+  findWindowsInstallFolder,
+  spawnWindowsApp,
+  windowsAppExecutable,
+} from "./desktop-install-windows.js";
 import { OperationalError, RuntimeUnavailableError } from "./errors.js";
 import { fetchRuntime, runtimeHostIsAvailable } from "./runtime-assets.js";
 
@@ -173,7 +178,11 @@ async function resolveWindowsRuntimeAssets(input: {
     );
   }
   const env = input.env;
+  // The same search `app path` and `dev` use, so a copy installed by hand
+  // into the installer's default folder is found here too.
+  const installed = await findWindowsInstallFolder(env);
   const bundles = [
+    ...(installed ? [installed] : []),
     ...(env.RADIUS_APP_PATH?.trim() ? [env.RADIUS_APP_PATH.trim()] : []),
     ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, "Programs", "Radius")] : []),
     ...(env.ProgramFiles ? [join(env.ProgramFiles, "Radius")] : []),
@@ -246,7 +255,22 @@ export interface FoundApp {
 export async function findDesktopApp(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly projectRoot?: string;
+  readonly platform?: string;
 }): Promise<FoundApp | null> {
+  if (input.platform === "win32") {
+    const folder = await findWindowsInstallFolder(input.env);
+    if (folder) return { path: folder, installed: true };
+    // A packaged build in a Radius checkout: opened, never updated.
+    for (const root of input.projectRoot
+      ? repoCandidates(input.projectRoot)
+      : []) {
+      const build = join(root, "apps", "desktop", "dist", "win-unpacked");
+      if (await exists(windowsAppExecutable(build))) {
+        return { path: build, installed: false };
+      }
+    }
+    return null;
+  }
   for (const path of installedAppCandidates(input.env)) {
     if (await exists(path)) return { path, installed: true };
   }
@@ -280,7 +304,11 @@ export function devAgentLink(agentId: string): string {
   return `radius://dev-agent/${agentId}`;
 }
 
-/** Runs a command to completion; true when it exits 0. Injected by tests. */
+/**
+ * Starts the app; true when that worked. On macOS it runs `open` to
+ * completion (exit 0); on Windows it returns once radius.exe has started,
+ * since the app keeps running. Injected by tests.
+ */
 export type Spawner = (
   command: string,
   args: readonly string[],
@@ -325,10 +353,11 @@ export async function launchDesktopApp(input: {
   readonly bundle?: string;
   readonly spawner?: Spawner;
 }): Promise<LaunchResult> {
+  if (input.platform === "win32") return launchWindowsDesktopApp(input);
   if (input.platform !== "darwin") {
     return {
       launched: false,
-      detail: "Opening Radius automatically is macOS-only for now.",
+      detail: "Opening Radius automatically supports macOS and Windows.",
     };
   }
   // Validated before anything is spawned, so a bad id is an error rather
@@ -374,4 +403,55 @@ export async function launchDesktopApp(input: {
     detail:
       "Radius does not appear to be installed. The agent is registered — run `radius app install`, or open Radius and it will show up.",
   };
+}
+
+/**
+ * radius.exe takes the link as an argument; the app reads it from argv on a
+ * cold start and through `second-instance` when it is already running.
+ */
+async function launchWindowsDesktopApp(input: {
+  readonly env: NodeJS.ProcessEnv;
+  readonly projectRoot: string;
+  readonly agentId?: string;
+  readonly bundle?: string;
+  readonly spawner?: Spawner;
+}): Promise<LaunchResult> {
+  const link = input.agentId ? devAgentLink(input.agentId) : null;
+  const folder =
+    input.bundle ??
+    (
+      await findDesktopApp({
+        env: input.env,
+        projectRoot: input.projectRoot,
+        platform: "win32",
+      })
+    )?.path;
+  if (!folder) {
+    const repo = await findRepoRoot(input.projectRoot);
+    if (repo) {
+      return {
+        launched: false,
+        detail: [
+          "Radius is not installed as an app.",
+          `Running from source: \`bun run dev\` in ${repo}.`,
+          "For a build this command can open: `bun run --cwd apps/desktop package`.",
+        ].join(" "),
+      };
+    }
+    return {
+      launched: false,
+      detail:
+        "Radius does not appear to be installed. The agent is registered — run `radius app install`, or open Radius and it will show up.",
+    };
+  }
+  const opened = await (input.spawner ?? spawnWindowsApp)(
+    windowsAppExecutable(folder),
+    link ? [link] : [],
+  );
+  return opened
+    ? { launched: true, detail: folder, path: folder }
+    : {
+        launched: false,
+        detail: `Found ${folder} but could not open it. Open Radius yourself.`,
+      };
 }

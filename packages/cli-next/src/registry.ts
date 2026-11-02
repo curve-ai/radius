@@ -17,7 +17,10 @@ const RegistryArtifactSchema = z.object({
   archive: z.string().min(1),
   cmd: z.string().min(1).optional(),
   args: z.array(z.string()).optional(),
-  sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 
 const RegistryAgentSchema = z.object({
@@ -30,10 +33,16 @@ const RegistryAgentSchema = z.object({
     .object({
       binary: z.record(z.string(), RegistryArtifactSchema).optional(),
       npx: z
-        .object({ package: z.string().min(1), args: z.array(z.string()).optional() })
+        .object({
+          package: z.string().min(1),
+          args: z.array(z.string()).optional(),
+        })
         .optional(),
       uvx: z
-        .object({ package: z.string().min(1), args: z.array(z.string()).optional() })
+        .object({
+          package: z.string().min(1),
+          args: z.array(z.string()).optional(),
+        })
         .optional(),
     })
     .optional(),
@@ -96,7 +105,9 @@ export async function fetchRegistry(): Promise<unknown> {
   return response.json();
 }
 
-export function parseRegistry(document: unknown): z.output<typeof RegistryDocumentSchema> {
+export function parseRegistry(
+  document: unknown,
+): z.output<typeof RegistryDocumentSchema> {
   const parsed = RegistryDocumentSchema.safeParse(document);
   if (!parsed.success) {
     throw new OperationalError(
@@ -119,6 +130,9 @@ export function listHarnessIds(registry: unknown): string[] {
  * reproducible even as the registry moves beneath it — opencode shipped
  * 1.18.31 → 1.18.34 inside a single day.
  */
+/** The version recorded for a registry entry that lists none. */
+export const DEFAULT_HARNESS_VERSION = "0.0.0";
+
 export function selectEntry(document: unknown, id: string): RegistryEntry {
   const registry = parseRegistry(document);
   const entry = registry.agents.find((candidate) => candidate.id === id);
@@ -132,7 +146,9 @@ export function selectEntry(document: unknown, id: string): RegistryEntry {
   const common = {
     id: entry.id,
     name: entry.name ?? entry.id,
-    version: entry.version ?? "0.0.0",
+    // Only a label when the registry gives none: what gets installed is still
+    // pinned by the URLs and digests copied below.
+    version: entry.version ?? DEFAULT_HARNESS_VERSION,
     license: entry.license,
     licenseUrl: entry.license_url,
   };

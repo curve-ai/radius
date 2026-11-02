@@ -34,25 +34,33 @@ export interface ImportableLayoutResult {
  */
 const DECOMPRESSION_FACTOR = 4;
 
-/** Sums a layout's blob sizes, in MB, as an estimate of the unpacked image. */
+/**
+ * Sums a layout's blob sizes, in MB, as an estimate of the unpacked image.
+ *
+ * Only compressed layers are multiplied. `docker save`, which the Windows
+ * build uses, writes plain `.tar` layers that are already their full size;
+ * multiplying those too overstated an image fourfold and failed the build.
+ */
 export async function measureLayoutMb(
   layoutPath: string,
-  manifest: { layers?: Array<{ size?: number }> },
+  manifest: { layers?: Array<{ size?: number; mediaType?: string }> },
 ): Promise<number> {
-  let compressed = 0;
+  let unpacked = 0;
   for (const layer of manifest.layers ?? []) {
-    if (typeof layer.size === "number") compressed += layer.size;
+    if (typeof layer.size !== "number") continue;
+    const uncompressed = layer.mediaType?.endsWith(".tar") ?? false;
+    unpacked += uncompressed ? layer.size : layer.size * DECOMPRESSION_FACTOR;
   }
-  if (compressed === 0) {
+  if (unpacked === 0) {
     // No sizes in the manifest: fall back to the blobs on disk.
     try {
       const stats = await stat(join(layoutPath, "blobs", "sha256"));
-      compressed = stats.size;
+      unpacked = stats.size * DECOMPRESSION_FACTOR;
     } catch {
       /* leave at zero; the caller still adds headroom */
     }
   }
-  return (compressed * DECOMPRESSION_FACTOR) / (1024 * 1024);
+  return unpacked / (1024 * 1024);
 }
 
 /**
@@ -86,7 +94,7 @@ export async function writeImportableLayout(
       join(input.layoutPath, "blobs", ...digest.replace(":", "/").split("/")),
       "utf8",
     ),
-  ) as { layers?: Array<{ size?: number }> };
+  ) as { layers?: Array<{ size?: number; mediaType?: string }> };
   const imageSizeMb = await measureLayoutMb(input.layoutPath, manifestJson);
 
   descriptor.annotations = {

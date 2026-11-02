@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { buildApplication, buildRouteMap } from "@stricli/core";
 
 import { appRoutes } from "./commands/app/command.js";
@@ -21,7 +23,13 @@ const routes = buildRouteMap<
   docs: { brief: "Build and run agents on Radius" },
 });
 
+// Read from package.json, one level up from both src/ and the bundled dist/,
+// so `radius --version` can never disagree with the published version.
+const { version } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { version: string };
+
 export const app = buildApplication(routes, {
   name: "radius",
-  versionInfo: { currentVersion: "0.0.1" },
+  versionInfo: { currentVersion: version },
 });

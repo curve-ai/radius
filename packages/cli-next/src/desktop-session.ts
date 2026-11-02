@@ -7,6 +7,11 @@ import {
   readBundleVersion,
 } from "./desktop-install.js";
 import {
+  installWindowsDesktopApp,
+  readWindowsAppVersion,
+  windowsInstallPathFor,
+} from "./desktop-install-windows.js";
+import {
   readDesktopPresence,
   waitForDesktopPresence,
   type DesktopPresence,
@@ -138,7 +143,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
 
     const app = input.noOpen ? null : await locate(input);
     const installedVersion = app?.installed
-      ? await readBundleVersion(app.path)
+      ? await appVersion(input, app.path)
       : null;
     // Running, so this is no moment to replace it; say so once and carry on.
     if (
@@ -207,7 +212,7 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
   }
 
   let app = await locate(input);
-  let version = app ? await readBundleVersion(app.path) : null;
+  let version = app ? await appVersion(input, app.path) : null;
   let notInstalledDetail: string | null = null;
 
   const target = await desktopTarget(
@@ -308,7 +313,9 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
     const slow = setTimeout(
       () =>
         input.note(
-          "  waiting for Radius to start — if macOS asks for your login password, enter it and choose Always Allow",
+          input.platform === "win32"
+            ? "  waiting for Radius to start…"
+            : "  waiting for Radius to start — if macOS asks for your login password, enter it and choose Always Allow",
         ),
       input.slowStartNoticeMs ?? 5_000,
     );
@@ -362,7 +369,20 @@ async function decide(input: DesktopSessionInput): Promise<DesktopSession> {
 function locate(input: DesktopSessionInput): Promise<FoundApp | null> {
   return input.findApp
     ? input.findApp()
-    : findDesktopApp({ env: input.env, projectRoot: input.projectRoot });
+    : findDesktopApp({
+        env: input.env,
+        projectRoot: input.projectRoot,
+        platform: input.platform,
+      });
+}
+
+function appVersion(
+  input: DesktopSessionInput,
+  path: string,
+): Promise<string | null> {
+  return input.platform === "win32"
+    ? readWindowsAppVersion(path)
+    : readBundleVersion(path);
 }
 
 function requireReadable(presence: DesktopPresence): void {
@@ -389,11 +409,16 @@ async function tryInstall(
   artifact: Parameters<typeof installDesktopApp>[0]["artifact"],
   found: FoundApp | null,
 ): Promise<{ path: string; version: string } | null> {
+  const windows = input.platform === "win32";
   try {
-    const outcome = await (input.install ?? installDesktopApp)({
+    const outcome = await (
+      input.install ?? (windows ? installWindowsDesktopApp : installDesktopApp)
+    )({
       release,
       artifact,
-      installPath: installPathFor(found, input.env),
+      installPath: windows
+        ? windowsInstallPathFor(found, input.env)
+        : installPathFor(found, input.env),
       userDataPath: input.userDataPath,
       onProgress: input.note,
       isAlive: input.isAlive,
@@ -401,7 +426,7 @@ async function tryInstall(
     });
     if (outcome.status !== "current") {
       input.note(`Installed Radius ${outcome.version} at ${outcome.path}.`);
-      for (const line of keychainNotice()) input.note(line);
+      if (!windows) for (const line of keychainNotice()) input.note(line);
     }
     return { path: outcome.path, version: outcome.version };
   } catch (error) {

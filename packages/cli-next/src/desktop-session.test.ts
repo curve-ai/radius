@@ -381,16 +381,18 @@ test("an agent id the app would ignore fails before anything is written", async 
   assert.deepEqual(h.registered, []);
 });
 
-test("Windows: no install from the CLI yet, and it says where to get one", async () => {
+test("Windows: a missing app is installed, then radius.exe opens on the agent", async () => {
   const h = await harness({ app: null, yes: true });
   const session = await connectDesktop({
     ...h.input,
     platform: "win32",
     arch: "x64",
   });
-  assert.deepEqual(h.installs, []);
-  assert.match(
-    session.desktop.detail,
-    /isn't supported on Windows yet; install it from https:\/\/github\.com\/curve-ai\/radius\/releases\/tag\/desktop-v0\.1\.0/,
-  );
+  assert.equal(h.installs.length, 1);
+  assert.equal(session.desktop.installed, true);
+  assert.equal(session.desktop.launched, true);
+  assert.equal(h.spawned.length, 1);
+  assert.match(h.spawned[0]?.[0] ?? "", /radius\.exe$/);
+  assert.deepEqual(h.spawned[0]?.slice(1), [`radius://dev-agent/${AGENT}`]);
+  assert.ok(!h.notes.some((note) => /keychain|macOS/.test(note)));
 });
