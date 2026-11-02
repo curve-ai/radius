@@ -25,15 +25,16 @@ export interface ReleaseManifest {
   platforms: Partial<Record<PlatformKey, ReleaseArtifact>>;
 }
 
-// The archive the CLI installs on each platform, named by the artifactName
-// settings in electron-builder.config.cjs. Installers such as the dmg and the
-// NSIS setup are for people and are never listed. macOS on Intel is absent
-// because the runtime host only builds for Apple Silicon.
+// The file the CLI installs on each platform, named by the artifactName
+// settings in electron-builder.config.cjs. On Windows that is the NSIS setup,
+// which the CLI runs silently; the dmg is for people and is never listed.
+// macOS on Intel is absent because the runtime host only builds for Apple
+// Silicon.
 export const PLATFORM_ARCHIVES: Partial<
   Record<PlatformKey, (version: string) => string>
 > = {
   "darwin/arm64": (version) => `radius-${version}-mac-arm64.zip`,
-  "windows/amd64": (version) => `radius-${version}-win-x64.zip`,
+  "windows/amd64": (version) => `radius-${version}-setup.exe`,
   "linux/amd64": (version) => `radius-${version}-linux-x86_64.AppImage`,
 };
 

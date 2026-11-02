@@ -6,6 +6,12 @@ import {
   readBundleVersion,
   type InstallOutcome,
 } from "../../desktop-install.js";
+import {
+  installWindowsDesktopApp,
+  readWindowsAppVersion,
+  windowsInstallPathFor,
+  type WindowsInstallOutcome,
+} from "../../desktop-install-windows.js";
 import { desktopTarget, loadDesktopRelease } from "../../desktop-release.js";
 import { findDesktopApp, launchDesktopApp } from "../../desktop.js";
 import { OperationalError } from "../../errors.js";
@@ -28,19 +34,34 @@ async function installOrUpdate(
   );
   if (!target.supported) throw new OperationalError(target.reason);
 
-  // The same lookup `dev`, `path` and `open` use, so the copy updated here
-  // is the one they all find afterwards.
-  const found = await findDesktopApp({ env: context.env });
+  const windows = context.process.platform === "win32";
   const stopping = new AbortController();
   void context.untilStopped().then(() => stopping.abort());
-  const outcome: InstallOutcome = await installDesktopApp({
+  const request = {
     release,
     artifact: target.artifact,
-    installPath: installPathFor(found, context.env),
     userDataPath: radiusUserDataPath(context.process.platform, context.env),
-    onProgress: (message) => context.note(message),
+    onProgress: (message: string) => context.note(message),
     signal: stopping.signal,
-  });
+  };
+  const outcome: InstallOutcome | WindowsInstallOutcome = windows
+    ? await installWindowsDesktopApp({
+        ...request,
+        // Over the copy `path` and `open` find, so they see the update.
+        installPath: windowsInstallPathFor(
+          await findDesktopApp({ env: context.env, platform: "win32" }),
+          context.env,
+        ),
+      })
+    : await installDesktopApp({
+        ...request,
+        // The same lookup `dev`, `path` and `open` use, so the copy updated
+        // here is the one they all find afterwards.
+        installPath: installPathFor(
+          await findDesktopApp({ env: context.env }),
+          context.env,
+        ),
+      });
 
   if (context.output === "json") {
     emitJson(context, {
@@ -65,6 +86,7 @@ async function installOrUpdate(
       ? `✓ Updated Radius ${outcome.previousVersion ?? "(unknown version)"} → ${outcome.version} at ${outcome.path}`
       : `✓ Installed Radius ${outcome.version} at ${outcome.path}`,
   );
+  if (windows) return;
   context.out("");
   for (const line of keychainNotice()) context.out(line);
 }
@@ -78,7 +100,11 @@ export const update = handler<object, []>(async function (this) {
 });
 
 export const path = handler<object, []>(async function (this) {
-  const app = await findDesktopApp({ env: this.env });
+  const windows = this.process.platform === "win32";
+  const app = await findDesktopApp({
+    env: this.env,
+    platform: this.process.platform,
+  });
   if (!app) {
     throw new OperationalError(
       "Radius isn't installed.",
@@ -88,7 +114,9 @@ export const path = handler<object, []>(async function (this) {
   if (this.output === "json") {
     emitJson(this, {
       path: app.path,
-      version: await readBundleVersion(app.path),
+      version: windows
+        ? await readWindowsAppVersion(app.path)
+        : await readBundleVersion(app.path),
     });
     return;
   }

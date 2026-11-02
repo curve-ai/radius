@@ -12,16 +12,24 @@
  * repo path and a Node version. That is not an install, it is a workaround
  * everyone copies slightly differently.
  */
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
-const source = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "bin.ts");
+const source = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "src",
+  "bin.ts",
+);
 
 try {
   const { tsImport } = await import("tsx/esm/api");
-  await tsImport(source, import.meta.url);
+  await tsImport(pathToFileURL(source).href, import.meta.url);
 } catch (error) {
-  if (error?.code === "ERR_MODULE_NOT_FOUND" && /tsx/.test(String(error.message))) {
+  if (
+    error?.code === "ERR_MODULE_NOT_FOUND" &&
+    /tsx/.test(String(error.message))
+  ) {
     process.stderr.write(
       "This CLI runs from source and needs its dependencies installed.\n" +
         "Run `bun install` in the Radius checkout, then try again.\n",

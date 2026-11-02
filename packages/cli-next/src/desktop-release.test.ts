@@ -48,23 +48,28 @@ test("an Intel Mac is told there is no build for it", async () => {
   );
 });
 
-for (const [platform, name] of [
-  ["win32", "Windows"],
-  ["linux", "Linux"],
-] as const) {
-  test(`${name} is not installable from the CLI yet, and says where to get it`, async () => {
-    const target = await desktopTarget(
-      { platform, arch: "x64" },
-      PINNED_DESKTOP_RELEASE,
-      native,
-    );
-    assert.equal(target.supported, false);
-    assert.equal(
-      !target.supported && target.reason,
-      `Installing the desktop app from the CLI isn't supported on ${name} yet; install it from https://github.com/curve-ai/radius/releases/tag/desktop-v0.1.0`,
-    );
-  });
-}
+test("Windows x64 gets the installer", async () => {
+  const target = await desktopTarget(
+    { platform: "win32", arch: "x64" },
+    PINNED_DESKTOP_RELEASE,
+    native,
+  );
+  assert.equal(target.supported && target.key, "windows/amd64");
+  assert.match(target.supported ? target.artifact.url : "", /-setup\.exe$/);
+});
+
+test("Linux is not installable from the CLI yet, and says where to get it", async () => {
+  const target = await desktopTarget(
+    { platform: "linux", arch: "x64" },
+    PINNED_DESKTOP_RELEASE,
+    native,
+  );
+  assert.equal(target.supported, false);
+  assert.equal(
+    !target.supported && target.reason,
+    "Installing the desktop app from the CLI isn't supported on Linux yet; install it from https://github.com/curve-ai/radius/releases/tag/desktop-v0.1.0",
+  );
+});
 
 test("the pin parses under the manifest mirror", () => {
   assert.deepEqual(

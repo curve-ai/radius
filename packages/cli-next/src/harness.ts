@@ -267,6 +267,15 @@ function isZipArchive(label: string): boolean {
   return /\.zip$/i.test(path);
 }
 
+// Windows has no unzip; its built-in bsdtar reads zip. Named by full path so a
+// GNU tar from Git for Windows on PATH (which cannot read zip) is never picked.
+const windows = process.platform === "win32";
+const windowsTar = join(
+  process.env.SystemRoot ?? "C:\\Windows",
+  "System32",
+  "tar.exe",
+);
+
 /**
  * Rejects any entry that could write outside the destination BEFORE extracting.
  *
@@ -280,8 +289,10 @@ async function assertEntriesStayInside(
   zip: boolean,
 ): Promise<void> {
   const [command, args] = zip
-    ? ["unzip", ["-Z1", archivePath]]
-    : ["tar", ["tzf", archivePath]];
+    ? windows
+      ? [windowsTar, ["-tf", archivePath]]
+      : ["unzip", ["-Z1", archivePath]]
+    : [windows ? windowsTar : "tar", ["tzf", archivePath]];
   const listing = await capture(command as string, args as string[]);
   for (const raw of listing.split("\n")) {
     const entry = raw.trim();
@@ -331,10 +342,15 @@ async function extractInto(
   const zip = isZipArchive(label);
   await assertEntriesStayInside(archivePath, zip);
   const [command, args] = zip
-    ? ["unzip", ["-oq", archivePath, "-d", destination]]
+    ? windows
+      ? [windowsTar, ["-xf", archivePath, "-C", destination]]
+      : ["unzip", ["-oq", archivePath, "-d", destination]]
     : // --no-same-owner so extraction never attempts a chown, and -P is
       // deliberately absent so tar keeps stripping leading slashes.
-      ["tar", ["xzf", archivePath, "--no-same-owner", "-C", destination]];
+      [
+        windows ? windowsTar : "tar",
+        ["xzf", archivePath, "--no-same-owner", "-C", destination],
+      ];
   await new Promise<void>((settle, reject) => {
     const child = spawn(command as string, args as string[], {
       stdio: "ignore",

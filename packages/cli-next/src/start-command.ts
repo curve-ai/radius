@@ -217,6 +217,7 @@ export function resolveAdapter(adapter: string, cwd: string): string {
  * the Python adapter it is layered over the project, which keeps its own
  * `@langchain/langgraph`. Not on npm yet, so the default cannot install;
  * `RADIUS_LANGGRAPH_ADAPTER` points at a checkout until it is published.
+ * start-command.test.ts fails if this drifts from the adapter's package.json.
  */
 export const LANGGRAPH_TYPESCRIPT_ADAPTER = "@curve-ai/radius-langgraph@0.0.1";
 
