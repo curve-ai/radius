@@ -44,10 +44,11 @@ async function installOrUpdate(
     onProgress: (message: string) => context.note(message),
     signal: stopping.signal,
   };
+  // Both install over the copy `dev`, `path` and `open` find, so they all see
+  // the update rather than a second copy.
   const outcome: InstallOutcome | WindowsInstallOutcome = windows
     ? await installWindowsDesktopApp({
         ...request,
-        // Over the copy `path` and `open` find, so they see the update.
         installPath: windowsInstallPathFor(
           await findDesktopApp({ env: context.env, platform: "win32" }),
           context.env,
@@ -55,8 +56,6 @@ async function installOrUpdate(
       })
     : await installDesktopApp({
         ...request,
-        // The same lookup `dev`, `path` and `open` use, so the copy updated
-        // here is the one they all find afterwards.
         installPath: installPathFor(
           await findDesktopApp({ env: context.env }),
           context.env,

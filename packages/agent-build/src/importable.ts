@@ -35,11 +35,8 @@ export interface ImportableLayoutResult {
 const DECOMPRESSION_FACTOR = 4;
 
 /**
- * Sums a layout's blob sizes, in MB, as an estimate of the unpacked image.
- *
- * Only compressed layers are multiplied. `docker save`, which the Windows
- * build uses, writes plain `.tar` layers that are already their full size;
- * multiplying those too overstated an image fourfold and failed the build.
+ * Estimates the unpacked image size in MB. Compressed layers are multiplied;
+ * plain `.tar` layers (from `docker save` on Windows) are already full size.
  */
 export async function measureLayoutMb(
   layoutPath: string,
