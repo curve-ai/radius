@@ -130,7 +130,10 @@ export function listHarnessIds(registry: unknown): string[] {
  * reproducible even as the registry moves beneath it — opencode shipped
  * 1.18.31 → 1.18.34 inside a single day.
  */
-/** The version recorded for a registry entry that lists none. */
+/**
+ * Recorded when the registry lists no version. Only a label: what gets
+ * installed is still pinned by the entry's URLs and digests.
+ */
 export const DEFAULT_HARNESS_VERSION = "0.0.0";
 
 export function selectEntry(document: unknown, id: string): RegistryEntry {
@@ -146,8 +149,6 @@ export function selectEntry(document: unknown, id: string): RegistryEntry {
   const common = {
     id: entry.id,
     name: entry.name ?? entry.id,
-    // Only a label when the registry gives none: what gets installed is still
-    // pinned by the URLs and digests copied below.
     version: entry.version ?? DEFAULT_HARNESS_VERSION,
     license: entry.license,
     licenseUrl: entry.license_url,

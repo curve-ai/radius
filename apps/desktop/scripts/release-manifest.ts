@@ -25,11 +25,8 @@ export interface ReleaseManifest {
   platforms: Partial<Record<PlatformKey, ReleaseArtifact>>;
 }
 
-// The file the CLI installs on each platform, named by the artifactName
-// settings in electron-builder.config.cjs. On Windows that is the NSIS setup,
-// which the CLI runs silently; the dmg is for people and is never listed.
-// macOS on Intel is absent because the runtime host only builds for Apple
-// Silicon.
+// The file the CLI installs per platform, named in electron-builder.config.cjs;
+// Windows uses the NSIS setup. No Intel Mac: the runtime host is Apple Silicon only.
 export const PLATFORM_ARCHIVES: Partial<
   Record<PlatformKey, (version: string) => string>
 > = {

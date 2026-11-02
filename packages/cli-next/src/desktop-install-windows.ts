@@ -16,17 +16,8 @@ import {
 import { OperationalError } from "./errors.js";
 
 /**
- * Installing, finding and opening the Radius desktop app on Windows.
- *
- * The CLI downloads the release's NSIS installer, checks it against the
- * pinned size and digest, and runs it silently. The installer is per-user, so
- * no administrator prompt appears, and it adds the Start menu shortcut and the
- * Settings → Apps entry a Windows user expects.
- *
- * `/D=` puts the app in %LOCALAPPDATA%\Programs\Radius. Without it the
- * installer names the folder after the npm package, and the runtime lookup in
- * desktop.ts would not find it. A copy someone installed by hand lands in
- * that other folder, so it is found through its uninstall entry instead.
+ * Windows desktop install: downloads the pinned NSIS installer, checks its
+ * sha256, and runs it silently per-user into %LOCALAPPDATA%\Programs\Radius.
  */
 
 export type WindowsInstallOutcome =
@@ -88,12 +79,8 @@ export async function findWindowsInstallFolder(
 }
 
 /**
- * The installed version, e.g. "0.2.0-beta.1".
- *
- * Read from the folder's uninstall entry, which carries the full version.
- * radius.exe's FileVersion drops a pre-release tag, so an installed beta
- * would compare as the release and never be updated; it is only the fallback
- * for a copy with no entry.
+ * Read from the uninstall entry, which keeps pre-release tags ("0.2.0-beta.1");
+ * radius.exe's FileVersion drops them, so it is only the fallback.
  */
 export async function readWindowsAppVersion(
   folder: string,
@@ -110,7 +97,7 @@ interface UninstallEntry {
   readonly version: string | null;
 }
 
-/** The installer registers its uninstaller as `"<folder>\Uninstall radius.exe" /currentuser`. */
+/** Parses `"<folder>\Uninstall radius.exe" /currentuser` into `<folder>`. */
 export function folderFromUninstallString(value: string): string | null {
   const match = /^"([^"]+\\Uninstall [^"\\]+\.exe)"/i.exec(value.trim());
   return match ? dirname(match[1]!) : null;
@@ -232,9 +219,8 @@ export async function installWindowsDesktopApp(input: {
     );
   }
 
-  // Checked before a 250 MB download rather than by a failing installer: a
-  // copy installed for all users, e.g. in Program Files, needs an
-  // administrator to replace, and the per-user installer cannot.
+  // Checked before downloading: a copy installed for all users (e.g. Program
+  // Files) can't be replaced without an administrator.
   if (hadPrevious && !(await canWriteInto(target))) {
     throw new OperationalError(
       `Radius at ${target} can't be replaced by this user, so it was not updated.`,
