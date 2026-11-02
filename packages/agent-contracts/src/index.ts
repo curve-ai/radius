@@ -72,13 +72,22 @@ export const PythonRuntimeConfigSchema = z.object({
 /**
  * A LangGraph project served as-is: Radius brings the ACP adapter, so the
  * project keeps its `langgraph.json` and graph code and never imports ACP.
- * Python graphs only for now.
+ *
+ * `language` picks the adapter, and defaults to `python` so configs written
+ * before TypeScript graphs were served keep their meaning. A discriminated
+ * union rather than optional fields, so the uv-specific settings cannot be
+ * set on a TypeScript runtime and quietly ignored.
  */
-export const LangGraphRuntimeConfigSchema = z.object({
+const langGraphShape = {
   kind: z.literal("langgraph"),
   config: RelativeProjectPathSchema.default("langgraph.json"),
   /** Serve one graph instead of every graph `config` lists. */
   graph: nonempty.optional(),
+};
+
+export const PythonLangGraphRuntimeConfigSchema = z.object({
+  ...langGraphShape,
+  language: z.literal("python").default("python"),
   python: z
     .string()
     .regex(/^3\.\d+$/)
@@ -92,6 +101,28 @@ export const LangGraphRuntimeConfigSchema = z.object({
    */
   adapter: nonempty.default("radius-langgraph==0.0.1"),
 });
+
+const pythonOnly = z
+  .never({ error: 'applies only to "language": "python"' })
+  .optional();
+
+/**
+ * JavaScript and TypeScript graphs. The adapter is an npm package the CLI
+ * pins, and the graphs import the project's own `@langchain/langgraph`, so
+ * there is nothing here to choose beyond what `langgraph.json` says.
+ */
+export const TypeScriptLangGraphRuntimeConfigSchema = z.object({
+  ...langGraphShape,
+  language: z.literal("typescript"),
+  python: pythonOnly,
+  lockfile: pythonOnly,
+  adapter: pythonOnly,
+});
+
+export const LangGraphRuntimeConfigSchema = z.discriminatedUnion("language", [
+  PythonLangGraphRuntimeConfigSchema,
+  TypeScriptLangGraphRuntimeConfigSchema,
+]);
 
 export const CommandRuntimeConfigSchema = z.object({
   kind: z.literal("command"),
