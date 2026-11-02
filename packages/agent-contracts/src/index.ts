@@ -69,6 +69,61 @@ export const PythonRuntimeConfigSchema = z.object({
   lockfile: RelativeProjectPathSchema.default("uv.lock"),
 });
 
+/**
+ * A LangGraph project served as-is: Radius brings the ACP adapter, so the
+ * project keeps its `langgraph.json` and graph code and never imports ACP.
+ *
+ * `language` picks the adapter, and defaults to `python` so configs written
+ * before TypeScript graphs were served keep their meaning. A discriminated
+ * union rather than optional fields, so the uv-specific settings cannot be
+ * set on a TypeScript runtime and quietly ignored.
+ */
+const langGraphShape = {
+  kind: z.literal("langgraph"),
+  config: RelativeProjectPathSchema.default("langgraph.json"),
+  /** Serve one graph instead of every graph `config` lists. */
+  graph: nonempty.optional(),
+};
+
+export const PythonLangGraphRuntimeConfigSchema = z.object({
+  ...langGraphShape,
+  language: z.literal("python").default("python"),
+  python: z
+    .string()
+    .regex(/^3\.\d+$/)
+    .default("3.12"),
+  lockfile: RelativeProjectPathSchema.default("uv.lock"),
+  /**
+   * The uv requirement that provides `radius-langgraph`. Pinned so a
+   * project runs on the adapter it was tested against; a path (leading
+   * `.`, `/` or `~`) points at a local checkout instead, resolved against
+   * the project.
+   */
+  adapter: nonempty.default("radius-langgraph==0.0.1"),
+});
+
+const pythonOnly = z
+  .never({ error: 'applies only to "language": "python"' })
+  .optional();
+
+/**
+ * JavaScript and TypeScript graphs. The adapter is an npm package the CLI
+ * pins, and the graphs import the project's own `@langchain/langgraph`, so
+ * there is nothing here to choose beyond what `langgraph.json` says.
+ */
+export const TypeScriptLangGraphRuntimeConfigSchema = z.object({
+  ...langGraphShape,
+  language: z.literal("typescript"),
+  python: pythonOnly,
+  lockfile: pythonOnly,
+  adapter: pythonOnly,
+});
+
+export const LangGraphRuntimeConfigSchema = z.discriminatedUnion("language", [
+  PythonLangGraphRuntimeConfigSchema,
+  TypeScriptLangGraphRuntimeConfigSchema,
+]);
+
 export const CommandRuntimeConfigSchema = z.object({
   kind: z.literal("command"),
   command: z.array(nonempty).min(1),
@@ -224,6 +279,16 @@ export const HarnessRuntimeConfigSchema = z
       )
       .default("/opt/data"),
     toolchains: z.array(HarnessToolchainSchema).default([]),
+    /**
+     * Environment the harness process starts with.
+     *
+     * Some harnesses pick their configuration by variable rather than by
+     * flag — opencode reads `OPENCODE_CONFIG` — so a project shipping two
+     * configs has no other way to say which one runs. Optional with no
+     * default, so a config without it parses to the same object, and builds
+     * to the same manifest bytes, as it did before the field existed.
+     */
+    env: z.record(z.string().regex(environmentVariable), z.string()).optional(),
   })
   .superRefine((value, context) => {
     const kinds = value.toolchains.map((toolchain) => toolchain.kind);
@@ -256,6 +321,7 @@ export const HarnessRuntimeConfigSchema = z
 export const AgentRuntimeConfigSchema = z.discriminatedUnion("kind", [
   TypeScriptRuntimeConfigSchema,
   PythonRuntimeConfigSchema,
+  LangGraphRuntimeConfigSchema,
   CommandRuntimeConfigSchema,
   HarnessRuntimeConfigSchema,
 ]);
@@ -351,11 +417,60 @@ export const AgentManifestSchema = z.object({
   minimumDesktopVersion: semanticVersion,
 });
 
+/**
+ * `<registry id>@<version>`, the short form `radius.json` names a harness by.
+ *
+ * Only the name and the version are for people to read and change. The URLs
+ * and digests that make the pin reproducible are machine data, and live in
+ * `radius.lock`, which is checked against this on every load.
+ */
+export const HarnessPinSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]*@[0-9A-Za-z][0-9A-Za-z.+-]*$/,
+    "harness must be <registry id>@<version>, e.g. opencode@1.19.4",
+  );
+
+export function parseHarnessPin(pin: string): {
+  readonly id: string;
+  readonly version: string;
+} {
+  const parsed = HarnessPinSchema.parse(pin);
+  const at = parsed.lastIndexOf("@");
+  return { id: parsed.slice(0, at), version: parsed.slice(at + 1) };
+}
+
+export const RADIUS_LOCK_VERSION = 1;
+
+/**
+ * `radius.lock`: what `init` copied out of the ACP registry for the pinned
+ * harness. Generated, committed, never edited by hand — a package manager's
+ * lockfile contract, for the same reason: the registry moves, and a build
+ * has to come out the same next month.
+ */
+export const RadiusLockSchema = z.object({
+  /** The "do not edit" notice. JSON has no comments. */
+  "//": z.string().optional(),
+  lockfileVersion: z.literal(RADIUS_LOCK_VERSION),
+  harness: z.object({
+    registryId: nonempty,
+    version: nonempty,
+    license: nonempty.optional(),
+    licenseUrl: nonempty.optional(),
+    distribution: HarnessDistributionSchema,
+  }),
+});
+
+export type RadiusLock = z.output<typeof RadiusLockSchema>;
+
 export type AgentConfigInput = z.input<typeof AgentConfigSchema>;
 export type AgentConfig = z.output<typeof AgentConfigSchema>;
 export type AgentManifest = z.output<typeof AgentManifestSchema>;
 export type AgentRuntimeConfig = z.output<typeof AgentRuntimeConfigSchema>;
 export type HarnessRuntimeConfig = z.output<typeof HarnessRuntimeConfigSchema>;
+export type LangGraphRuntimeConfig = z.output<
+  typeof LangGraphRuntimeConfigSchema
+>;
 export type HarnessDistribution = z.output<typeof HarnessDistributionSchema>;
 export type HarnessPlatformArtifact = z.output<
   typeof HarnessPlatformArtifactSchema

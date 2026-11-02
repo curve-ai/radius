@@ -1,0 +1,35 @@
+{
+  "name": "@curve-ai/radius-langgraph",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Serve any LangGraph.js graph over the Agent Client Protocol on stdio.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "radius-langgraph": "./bin/radius-langgraph.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "bun check -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
+    "@langchain/langgraph-checkpoint-sqlite": "1.1.0",
+    "tsx": "4.23.12"
+  },
+  "peerDependencies": {
+    "@langchain/core": "^1.0.0",
+    "@langchain/langgraph": "^1.0.0"
+  },
+  "devDependencies": {
+    "@langchain/core": "1.3.0",
+    "@langchain/langgraph": "1.5.2",
+    "@types/node": "22.19.1",
+    "typescript": "5.9.3",
+    "zod": "4.6.7"
+  }
+}

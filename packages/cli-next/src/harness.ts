@@ -43,7 +43,7 @@ export async function resolveHarness(
 ): Promise<ResolvedHarness> {
   if (config.runtime.kind !== "harness") {
     throw new UsageError(
-      `radius dev currently supports runtime.kind "harness"; this config declares "${config.runtime.kind}".`,
+      `A harness must declare runtime.kind "harness"; this config declares "${config.runtime.kind}".`,
     );
   }
   const distribution = config.runtime.distribution;
