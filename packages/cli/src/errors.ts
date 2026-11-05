@@ -63,6 +63,7 @@ export function renderError(error: unknown): string {
       : error.message;
   }
   if (error instanceof UsageError) return error.message;
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const detail =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
   return `Internal error — please report this with the trace below.\n\n${detail}`;
 }

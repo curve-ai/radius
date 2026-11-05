@@ -31,10 +31,7 @@ function config(platforms: Record<string, unknown>) {
  * GNU tar uses --transform and Windows tar neither — so building the bytes
  * here is the only way this test runs the same everywhere.
  */
-async function tarball(
-  storedName: string,
-  body: string,
-): Promise<string> {
+async function tarball(storedName: string, body: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "radius-tar-"));
   const archive = join(root, "a.tar.gz");
 
@@ -44,7 +41,12 @@ async function tarball(
   header.write("0000644\0", 100, 8, "utf8"); // mode
   header.write("0000000\0", 108, 8, "utf8"); // uid
   header.write("0000000\0", 116, 8, "utf8"); // gid
-  header.write(`${content.length.toString(8).padStart(11, "0")}\0`, 124, 12, "utf8");
+  header.write(
+    `${content.length.toString(8).padStart(11, "0")}\0`,
+    124,
+    12,
+    "utf8",
+  );
   header.write(`${(0).toString(8).padStart(11, "0")}\0`, 136, 12, "utf8"); // mtime
   header.write("        ", 148, 8, "utf8"); // checksum placeholder: spaces
   header.write("0", 156, 1, "utf8"); // typeflag: regular file
@@ -71,7 +73,12 @@ test("a local archive whose digest does not match is refused", async () => {
   });
   await assert.rejects(
     () =>
-      resolveHarness(parsed, process.cwd(), { platform: "darwin", arch: "arm64" }, silent),
+      resolveHarness(
+        parsed,
+        process.cwd(),
+        { platform: "darwin", arch: "arm64" },
+        silent,
+      ),
     /Checksum mismatch/,
     "a pinned digest that does not match must stop the harness running",
   );
@@ -88,7 +95,9 @@ test("a URL archive without a digest is refused by the schema", () => {
         kind: "binary",
         cmd: "./agent",
         args: [],
-        platforms: { "darwin/arm64": { archive: "https://example.test/a.tar.gz" } },
+        platforms: {
+          "darwin/arm64": { archive: "https://example.test/a.tar.gz" },
+        },
       },
     },
   });
@@ -105,7 +114,12 @@ test("an archive that escapes its directory is refused before extraction", async
   const parsed = config({ "darwin/arm64": { archive } });
   await assert.rejects(
     () =>
-      resolveHarness(parsed, process.cwd(), { platform: "darwin", arch: "arm64" }, silent),
+      resolveHarness(
+        parsed,
+        process.cwd(),
+        { platform: "darwin", arch: "arm64" },
+        silent,
+      ),
     /path-traversal/,
     "a traversal entry must be rejected even though the digest is unpinned",
   );
@@ -115,7 +129,12 @@ test("a harness with no build for this platform names what it does ship", async 
   const parsed = config({ "linux/amd64": { archive: "./vendor/a.tar.gz" } });
   await assert.rejects(
     () =>
-      resolveHarness(parsed, process.cwd(), { platform: "darwin", arch: "arm64" }, silent),
+      resolveHarness(
+        parsed,
+        process.cwd(),
+        { platform: "darwin", arch: "arm64" },
+        silent,
+      ),
     /publishes no build for darwin\/arm64/,
   );
 });
@@ -129,7 +148,10 @@ test("npx and uvx are spawned through their own runner, with -y only for npx", a
       schemaVersion: 1,
       agent: "agent_testtesttest",
       name: "Test",
-      runtime: { kind: "harness", distribution: { kind, package: "p@1.2.3", args: [] } },
+      runtime: {
+        kind: "harness",
+        distribution: { kind, package: "p@1.2.3", args: [] },
+      },
     });
     const resolved = await resolveHarness(
       parsed,
