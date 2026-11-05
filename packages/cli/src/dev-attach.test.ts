@@ -276,6 +276,9 @@ test("an attached dev stays up as a real process until it is stopped", async (t)
   assert.equal(child.exitCode, null, "dev exited on its own");
   assert.equal((await p.descriptors()).length, 1);
 
+  // Windows has no SIGINT to send: kill() ends the process without cleanup.
+  if (process.platform === "win32") return;
+
   child.kill("SIGINT");
   const [code] = await exited;
   assert.equal(code, 0);
