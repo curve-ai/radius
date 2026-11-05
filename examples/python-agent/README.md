@@ -6,8 +6,8 @@ runtime contract as TypeScript.
 
 ```bash
 uv sync --locked
-node ../../packages/cli/dist/cli.js validate
-node ../../packages/cli/dist/cli.js dev --prompt RADIUS_PYTHON_READY
+node ../../packages/cli/dist/bin.js check
+node ../../packages/cli/dist/bin.js dev
 ```
 
 The Python SDK is currently a workspace package and is not published to PyPI.

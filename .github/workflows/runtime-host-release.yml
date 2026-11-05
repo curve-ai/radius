@@ -8,7 +8,7 @@ name: Runtime host release
 # workflow is what makes it fetchable on its own.
 #
 # Run it manually against a tag, then update the `HOST` pin in
-# packages/cli-next/src/runtime-assets.ts with the printed digest. The pin is
+# packages/cli/src/runtime-assets.ts with the printed digest. The pin is
 # deliberately a committed constant rather than a lookup: resolving it must
 # not need the network, and a given CLI version must always want the same
 # bytes.
@@ -56,7 +56,7 @@ jobs:
           {
             echo "### Runtime host published"
             echo
-            echo "Update the \`HOST\` pin in \`packages/cli-next/src/runtime-assets.ts\`:"
+            echo "Update the \`HOST\` pin in \`packages/cli/src/runtime-assets.ts\`:"
             echo
             echo '```ts'
             echo "const HOST = {"

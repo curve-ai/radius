@@ -1,11 +1,18 @@
 import { randomBytes } from "node:crypto";
 
+import type { AgentConfig } from "@curve-ai/agent-contracts";
+
+import {
+  handshakeOverWebSocket,
+  resolveAttachTarget,
+  type AttachTarget,
+} from "../../attach.js";
 import { startBridge } from "../../bridge.js";
 import { loadConfig } from "../../config.js";
 import { emitJson, type RadiusContext } from "../../context.js";
 import { connectDesktop } from "../../desktop-session.js";
 import { handler } from "../../handler.js";
-import { handshakeOverStdio } from "../../handshake.js";
+import { handshakeOverStdio, type HandshakeResult } from "../../handshake.js";
 import { canPrompt, promptConfirm } from "../../prompt.js";
 import {
   radiusUserDataPath,
@@ -18,21 +25,51 @@ interface DevFlags {
   readonly verbose: boolean;
   readonly "no-open": boolean;
   readonly yes: boolean;
+  readonly endpoint?: string;
+  readonly "authorization-env"?: string;
 }
 
-async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
-  const context = this;
-  const verbose = (message: string): void => {
-    if (flags.verbose) context.note(message);
-  };
-  const config = await loadConfig(context.cwd);
-  if (!config.agent) {
-    throw new OperationalError(
-      "This config has no agent id.",
-      "Run `radius init --harness <id>` to assign one.",
-    );
-  }
+/** What `dev` registers with the app, whichever side owns the agent. */
+interface Served {
+  readonly kind: string;
+  /** Null when attached: the developer started it, however they like. */
+  readonly command: readonly string[] | null;
+  readonly summary: string;
+  readonly endpoint: string;
+  readonly authorization: string | null;
+  readonly preflight: HandshakeResult;
+  readonly harness?: { readonly source: string; readonly cached: boolean };
+  close(): Promise<void>;
+}
 
+async function attachTo(
+  context: RadiusContext,
+  target: AttachTarget,
+  verbose: (message: string) => void,
+): Promise<Served> {
+  verbose(`[radius] preflight ${target.endpoint}`);
+  const preflight = await handshakeOverWebSocket(target, context.cwd);
+  const keepAlive = setInterval(() => {}, 2 ** 30);
+  return {
+    kind: "attached",
+    command: null,
+    summary: `attached to ${target.endpoint}`,
+    endpoint: target.endpoint,
+    authorization: target.authorization,
+    preflight,
+    // The agent stays up after Radius disconnects, so this only releases the
+    // timer. With no bridge socket, nothing else keeps this process alive
+    // while it waits for Ctrl-C, and Node would exit with the await unfinished.
+    close: async () => clearInterval(keepAlive),
+  };
+}
+
+async function startManaged(
+  context: RadiusContext,
+  config: AgentConfig,
+  flags: DevFlags,
+  verbose: (message: string) => void,
+): Promise<Served> {
   const start = await resolveStartCommand(
     config,
     context.cwd,
@@ -110,6 +147,36 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
     },
   });
 
+  return {
+    kind: start.kind,
+    command: start.command,
+    summary: start.summary,
+    endpoint: bridge.endpoint,
+    authorization: `Bearer ${bridge.token}`,
+    preflight,
+    ...(start.harness ? { harness: start.harness } : {}),
+    close: () => bridge.close(),
+  };
+}
+
+async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
+  const context = this;
+  const verbose = (message: string): void => {
+    if (flags.verbose) context.note(message);
+  };
+  const config = await loadConfig(context.cwd);
+  if (!config.agent) {
+    throw new OperationalError(
+      "This config has no agent id.",
+      "Run `radius init --harness <id>` to assign one.",
+    );
+  }
+
+  const attach = resolveAttachTarget(config, flags, context.env);
+  const served = attach
+    ? await attachTo(context, attach, verbose)
+    : await startManaged(context, config, flags, verbose);
+
   const instanceId = randomBytes(4).toString("hex");
   const agentId = config.agent;
   // From here on the bridge owns a listening socket and, once a thread opens,
@@ -122,8 +189,8 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
         agentId,
         instanceId,
         displayName: config.name,
-        endpoint: bridge.endpoint,
-        token: bridge.token,
+        endpoint: served.endpoint,
+        authorization: served.authorization,
         cwd: context.cwd,
         ownerPid: context.process.pid,
         capabilities: config.capabilities.flatMap((capability) =>
@@ -169,19 +236,19 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
       emitJson(context, {
         agentId: config.agent,
         displayName: config.name,
-        kind: start.kind,
-        command: start.command,
-        agents: preflight.advertisedAgents,
-        authRequired: preflight.authRequired,
-        authMethods: preflight.authMethods,
-        endpoint: bridge.endpoint,
+        kind: served.kind,
+        command: served.command,
+        agents: served.preflight.advertisedAgents,
+        authRequired: served.preflight.authRequired,
+        authMethods: served.preflight.authMethods,
+        endpoint: served.endpoint,
         descriptor: registration.path,
-        ...(start.harness
+        ...(served.harness
           ? {
               harness: {
-                command: start.command,
-                source: start.harness.source,
-                cached: start.harness.cached,
+                command: served.command,
+                source: served.harness.source,
+                cached: served.harness.cached,
               },
             }
           : {}),
@@ -195,22 +262,24 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
         },
       });
     } else {
-      const details = [start.summary];
-      if (preflight.advertisedAgents.length > 0) {
-        details.push(`agents: ${preflight.advertisedAgents.join(", ")}`);
+      const details = [served.summary];
+      if (served.preflight.advertisedAgents.length > 0) {
+        details.push(`agents: ${served.preflight.advertisedAgents.join(", ")}`);
       }
-      if (preflight.authRequired) details.push("sign-in required");
+      if (served.preflight.authRequired) details.push("sign-in required");
       context.out(
         `✓ ${config.name} ready in Radius   (${details.join(" · ")})`,
       );
       if (flags.verbose) {
-        context.out(`  command     ${start.command.join(" ")}`);
-        if (start.harness) {
+        if (served.command) {
+          context.out(`  command     ${served.command.join(" ")}`);
+        }
+        if (served.harness) {
           context.out(
-            `  source      ${start.harness.source}${start.harness.cached ? " (cached)" : ""}`,
+            `  source      ${served.harness.source}${served.harness.cached ? " (cached)" : ""}`,
           );
         }
-        context.out(`  endpoint    ${bridge.endpoint}`);
+        context.out(`  endpoint    ${served.endpoint}`);
         context.out(`  descriptor  ${registration.path}`);
         context.out(`  desktop     ${desktop.detail}`);
         context.out(`  agents      ${desktop.agentsPath}`);
@@ -234,7 +303,11 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
             : `  ${desktop.detail}`,
         );
       }
-      context.out("Ctrl-C to stop.");
+      context.out(
+        attach
+          ? "Ctrl-C to disconnect. Your agent keeps running."
+          : "Ctrl-C to stop.",
+      );
     }
 
     try {
@@ -245,7 +318,7 @@ async function run(this: RadiusContext, flags: DevFlags): Promise<void> {
   } finally {
     // Closes whether registration succeeded, the session ended normally, or
     // anything in between threw — and takes every thread's harness with it.
-    await bridge.close();
+    await served.close();
   }
 }
 

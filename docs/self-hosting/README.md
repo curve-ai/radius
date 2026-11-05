@@ -97,15 +97,7 @@ bootstrap account ID after linking and recreate `platform-api`. New allowlisted
 users receive `RADIUS_OIDC_AUTO_JOIN_ROLE`, which defaults to viewer.
 
 After each allowlisted user's first sign-in, an owner can assign the intended
-role from Settings or the CLI:
-
-```bash
-radius members list --organization acme
-radius members role <membership-id> --role developer --organization acme
-radius members suspend <membership-id> --organization acme
-radius members restore <membership-id> --organization acme
-radius members remove <membership-id> --organization acme
-```
+role from Settings, which also suspends, restores, and removes members.
 
 The current owner cannot alter itself. Promote a second owner before changing
 ownership. Role changes revoke that member's existing developer tokens, and
@@ -152,39 +144,16 @@ provider incident runbooks remain the operator's responsibility.
 
 ## Developer-token rotation
 
-After bootstrap, token lifecycle no longer requires database access. With a
-profile and the current owner token configured through `RADIUS_ACCESS_TOKEN`:
-
-```bash
-radius tokens list --json
-
-radius tokens create \
-  --label "Replacement owner" \
-  --scope organization.admin \
-  --scope agent.read \
-  --scope agent.write \
-  --scope deployment.read \
-  --scope deployment.write \
-  --scope installation.read \
-  --scope installation.write \
-  --scope token.admin
-```
-
-Store the new token shown once, authenticate with it, and revoke the old token:
-
-```bash
-RADIUS_ACCESS_TOKEN="$replacement_token" \
-  radius tokens revoke "$old_token_id"
-```
+After bootstrap, token lifecycle no longer requires database access. Owners and
+admins create a replacement token under Settings, store the secret shown once,
+authenticate with it, and then revoke the old token.
 
 The API rejects scope escalation, never persists or replays a created secret,
 and prevents a token from revoking itself. Creation retries with the same
 idempotency key fail with the created token ID but never replay its secret.
 Revocation is idempotent and audit-recorded.
 
-Owners and admins can perform the same lifecycle from the open dashboard under
-Settings. The created secret is shown once and must be copied before leaving the
-page. Owners, admins, and developers can promote or roll back verified
+The created secret must be copied before leaving the page. Owners, admins, and developers can promote or roll back verified
 deployments from an agent's deployment inventory. Viewers remain read-only.
 
 ## Desktop installation reporting

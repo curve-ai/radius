@@ -22,7 +22,7 @@ export default async function AgentsPage() {
     return (
       <EmptyState
         title="No agents"
-        body="Link an agent with the Radius CLI, then deploy its first version."
+        body="Agents appear here after their first deployment."
       />
     );
   }
@@ -80,9 +80,6 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <div>
         <h2 className="type-md font-normal text-foreground">{title}</h2>
         <p className="mt-2 max-w-prose text-sm text-muted-foreground">{body}</p>
-        <code className="mt-4 inline-block rounded-sm border border-border bg-card px-2 py-1 font-mono text-xs text-foreground">
-          radius deploy --environment staging
-        </code>
       </div>
     </main>
   );

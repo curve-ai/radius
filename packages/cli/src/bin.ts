@@ -4,8 +4,9 @@ import { run } from "@stricli/core";
 import { app } from "./app.js";
 import { buildContext } from "./context.js";
 import { EXIT_INTERNAL, renderError } from "./errors.js";
+import { expandHelpCommand } from "./help.js";
 
-const argv = process.argv.slice(2);
+const argv = expandHelpCommand(process.argv.slice(2));
 const context = buildContext(argv);
 
 /**

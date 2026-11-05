@@ -55,18 +55,15 @@ minimum desktop version. This deployment metadata is separate from ACP.
 TypeScript development:
 
 ```sh
-# In the example or generated project, use two terminals:
-bun run agent:dev
+radius check
 radius dev
-radius validate
 radius build
-radius deploy
 ```
 
-`radius dev` registers the configured live development endpoint; it does not
-build or deploy an image. Python authors can use an upstream ACP transport
-server and configure `development.endpoint` when they need this live workflow.
-Both languages support stdio inside their packaged agents.
+`radius dev` registers the agent with the Radius app and starts one process per
+thread over stdio; it does not build or deploy an image. `radius dev --endpoint`
+attaches to an agent you run yourself, if it speaks ACP over a loopback
+WebSocket. Both languages use stdio inside their packaged agents.
 
 ## OCI builds
 
@@ -83,9 +80,9 @@ architecture and runtime contracts. The CLI validates the package and executes
 its existing ACP verification before a successful build receipt is promoted.
 Failed builds do not become the latest verified build.
 
-Deployment, promotion, rollback, organization membership, and token commands
-remain owned by the CLI and Platform APIs. They are independent of which
-language or official ACP SDK produced the agent.
+Deployment, promotion, rollback, organization membership, and tokens are owned
+by the Platform APIs and dashboard. The CLI has no deployment command yet. They
+are independent of which language or official ACP SDK produced the agent.
 
 Detailed development, build-receipt, deployment, profile, and compatibility
 contracts remain in [CLI workflow contracts](cli-workflow-contracts.md).

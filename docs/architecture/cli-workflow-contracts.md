@@ -6,47 +6,40 @@ authoring specification. Agent implementations now use the official ACP SDKs;
 
 ## `radius dev`
 
-Development connects the ready Radius application to an agent process that the
-developer already runs with the repository's normal tools.
+Development connects the Radius application to agent processes the CLI starts.
 
 ```text
-developer-owned watcher and process
-    │ ACP over authenticated loopback WebSocket
+radius dev: preflight handshake, then a local bridge
+    │ ACP over an authenticated loopback WebSocket
     ▼
 installed Radius development registration
     │ real desktop UI, host tools, history, and approvals
     ▼
-agent response
+one agent process per thread, over stdio
 ```
 
-- Radius never owns the agent process, package manager, file watcher, or hot
-  reload policy.
-- The development endpoint must be `ws://` or `wss://` on loopback. ACP
-  specifies stdio only; WebSocket is an `experimental/` export of the
-  `@agentclientprotocol/sdk` package, not a spec transport. Radius uses that
-  experimental export and may attach a bearer value read from a named
-  environment variable.
-- The CLI writes one mode-0600 registration beneath Radius user data, launches
-  or focuses Radius, watches only the Radius config file, and deletes the
-  registration on termination.
-- The desktop watches registrations, gives an active development connection
-  precedence over an installed release with the same agent identity, and opens
-  a fresh ACP connection for each run. Agent restarts therefore affect the next
-  run without restarting Radius.
-- Cosmetic and endpoint config changes reload. Agent identity cannot change
-  while the registration is active. Invalid config retains the last valid
-  registration and reports the error in the CLI.
+- The CLI writes one mode-0600 registration where the running app watches,
+  launches or focuses Radius, and deletes the registration on termination.
+- A failed thread does not stop `radius dev`; the next thread gets a fresh
+  process.
 - Development mode uses the real Radius desktop, host capability broker,
   project context, history, and approval behavior, but no VM or OCI image.
 - Development registration is local-only and is never accepted as production
   desired state.
+- With `--endpoint` or `development.endpoint`, Radius attaches instead of
+  starting anything. The endpoint must be loopback and speak ACP over a
+  WebSocket. A failed handshake registers nothing, and exit leaves the agent
+  running.
 
 Implemented options:
 
 ```text
---endpoint <ws-url>              override development.endpoint
---authorization-env <name>      override development.authorizationEnv
---config <path>                 select a non-default config
+--endpoint <ws-url>          attach to a running agent; overrides development.endpoint
+--authorization-env <name>   its bearer token variable; overrides development.authorizationEnv
+--no-open                    do not bring the Radius desktop app up
+--yes                        never prompt; install or update the Radius app without asking
+--verbose                    also print connection details and log every ACP frame
+--json                       emit the machine-readable envelope
 ```
 
 ## `radius build`
@@ -94,9 +87,13 @@ installing locked projects in separate dependency/source layers. Radius should
 adopt that reproducible pattern without inheriting an unpinned `latest` image.
 See [`uv` in Docker](https://docs.astral.sh/uv/guides/integration/docker/).
 
-## Authentication and target profiles
+## Authentication and target profiles (not implemented)
 
-The CLI supports the same commands against Curve Cloud and compatible
+The commands in this section and in `radius deploy` below describe an earlier
+contract, kept for reference. The CLI does not provide them; the Platform API
+and dashboard do. Only `radius deploy` is planned.
+
+The CLI should support the same commands against Curve Cloud and compatible
 self-hosted Platform instances:
 
 ```bash
@@ -130,7 +127,7 @@ Credential precedence is explicit argument for library callers, then
 allowing local commands such as deploy, inventory, promotion, rollback,
 whoami, and token management to reuse validated stored credentials.
 
-## `radius deploy`
+## `radius deploy` (not implemented)
 
 Deploy consumes a successful local build receipt for both Cloud and self-hosted
 targets. It never compiles source or recreates the OCI image.
@@ -169,13 +166,13 @@ Deploy steps:
 10. Print the deployment digest, human version, environment revision, and
     dashboard URL.
 
-The implemented development provider completes this sequence against a pinned
+The Platform's development provider supports this sequence against a pinned
 local Distribution registry. It verifies the pushed digest with the registry
 before finalization, persists the immutable deployment and revision-checked
 promotion in PostgreSQL, and transactionally creates a credential-free outbox
 message for independent BullMQ verification.
 
-Commands and options (implemented unless noted):
+Commands and options from that contract:
 
 ```bash
 radius deploy

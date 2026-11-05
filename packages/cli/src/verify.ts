@@ -17,7 +17,7 @@ import { advertisedAgents } from "./handshake.js";
 /**
  * Boots the built image in a microVM and checks it speaks ACP.
  *
- * Carried across from the old CLI's `sandbox.ts` rather than imported — the
+ * Kept here rather than imported — the
  * two defects it had are requirements here, not patches there:
  *
  *  1. It hardcoded `rootfsMb: 2048`, so it verified a guest sized differently

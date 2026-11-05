@@ -48,9 +48,13 @@ export async function findLegacyConfig(
     const result = AgentConfigSchema.safeParse(value);
     if (!result.success) {
       const detail = result.error.issues
-        .map((issue) => `  ${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .map(
+          (issue) => `  ${issue.path.join(".") || "(root)"}: ${issue.message}`,
+        )
         .join("\n");
-      throw new UsageError(`${filename} is not a valid agent config:\n${detail}`);
+      throw new UsageError(
+        `${filename} is not a valid agent config:\n${detail}`,
+      );
     }
     return { config: result.data, path: candidate, filename };
   }
@@ -72,7 +76,10 @@ async function readLegacy(
     return JSON.parse(await readFile(path, "utf8"));
   }
   const { tsImport } = await import("tsx/esm/api");
-  const imported = (await tsImport(pathToFileURL(path).href, import.meta.url)) as {
+  const imported = (await tsImport(
+    pathToFileURL(path).href,
+    import.meta.url,
+  )) as {
     default?: unknown;
   };
   if (!("default" in imported)) {
@@ -82,9 +89,7 @@ async function readLegacy(
 }
 
 /** Reads one named legacy config, for `--config path/to/radius.config.ts`. */
-export async function readLegacyConfigFile(
-  path: string,
-): Promise<AgentConfig> {
+export async function readLegacyConfigFile(path: string): Promise<AgentConfig> {
   const filename = path.split("/").pop() ?? path;
   const value = await readLegacy(path, filename);
   if (value === null) {

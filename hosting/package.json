@@ -1,6 +1,11 @@
 {
   "name": "@curve-ai/radius-hosting",
   "private": true,
+  "devDependencies": {
+    "@curve-ai/agent-contracts": "0.0.1",
+    "@curve-ai/build": "0.0.1",
+    "@curve-ai/platform-client": "0.0.1"
+  },
   "scripts": {
     "infra:up": "docker compose --env-file ../.env.local -p radius-local -f docker/compose.dev.yml up -d postgres jobs-redis registry",
     "infra:down": "docker compose --env-file ../.env.local -p radius-local -f docker/compose.dev.yml stop postgres jobs-redis registry",

@@ -123,7 +123,7 @@ packages/agent-contracts Versioned manifest and agent configuration contracts
 packages/runtime      ACP client and supervised microVM process sidecar
 packages/tool-broker  Host tool authorization and brokered MCP servers
 packages/agent-build  Deterministic TypeScript and Python OCI build tooling
-packages/cli          Init, native/sandbox dev, profiles, and dry-run deploy CLI
+packages/cli          The `radius` CLI: init, dev, check, build, and desktop app install
 packages/platform-contracts Versioned public Platform HTTP and inventory contracts
 packages/platform-client Validated Cloud/self-hosted HTTP client
 packages/platform-job-contracts Versioned credential-free background job schemas
