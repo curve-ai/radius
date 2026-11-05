@@ -100,12 +100,12 @@ required. Browser-session writes currently fail closed with
 rule. Organization administration, developer-token management, and deployment
 promotion/rollback now use:
 
-| Role | Read | Deploy/promote/rollback | Manage developer tokens | Manage members |
-| --- | --- | --- | --- | --- |
-| owner | yes | yes | yes | yes |
-| admin | yes | yes | yes | no |
-| developer | yes | yes | no | no |
-| viewer | yes | no | no | no |
+| Role      | Read | Deploy/promote/rollback | Manage developer tokens | Manage members |
+| --------- | ---- | ----------------------- | ----------------------- | -------------- |
+| owner     | yes  | yes                     | yes                     | yes            |
+| admin     | yes  | yes                     | yes                     | no             |
+| developer | yes  | yes                     | no                      | no             |
+| viewer    | yes  | no                      | no                      | no             |
 
 Browser actors are stored as membership IDs in deployment and audit evidence;
 developer-token actors remain token IDs. Idempotency fingerprints include the
@@ -117,11 +117,10 @@ admins a scoped token form, one-time secret disclosure, token inventory, and
 revocation. Agent deployment rows give owners, admins, and developers contextual
 Promote or Roll back actions. Each Server Action validates the selected
 organization, reloads the current deployment revision, and then calls the same
-public Platform API used by the CLI. Viewer pages contain no mutation controls;
+public Platform API. Viewer pages contain no mutation controls;
 forged writes still fail at the API boundary.
 
-Owners can also list and mutate organization memberships in Settings or with
-`radius members`. The current actor cannot mutate itself, and the final active
+Owners can also list and mutate organization memberships in Settings. The current actor cannot mutate itself, and the final active
 owner cannot be demoted, suspended, or removed. Role changes revoke the target
 membership's developer tokens so old scopes cannot survive a downgrade.
 Suspension revokes browser sessions while preserving blocked tokens for a later

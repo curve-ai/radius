@@ -1,101 +1,38 @@
-# Radius CLI four-command workflow
+# Radius CLI workflow
 
-The primary Radius CLI workflow has four commands:
+The primary Radius CLI workflow is:
 
 ```text
-radius init -> radius dev -> radius build -> radius deploy
+radius init -> radius check -> radius dev -> radius build
 ```
 
-The lifecycle separates repository setup, live development, packaging, and
-distribution. Development connects to a running agent over a configured URL
-without bundling it. Bundling begins only during `radius build`.
+The lifecycle separates repository setup, verification, live development, and
+packaging. `radius app` installs, updates, locates, and opens the desktop app.
+`radius deploy` is planned and not implemented yet.
 
 ## Command responsibilities
 
-| Command | Developer job | Behavior |
-| --- | --- | --- |
-| `radius init` | Bootstrap the repository | Add Radius integration files and create the repository configuration. |
-| `radius dev` | Iterate against a running agent | Read the configured ACP WebSocket URL and connect the installed Radius application to the independently running agent without building or bundling it. |
+| Command        | Developer job                   | Behavior                                                                                                            |
+| -------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `radius init`  | Bootstrap the repository        | Write `radius.json` and `radius.lock` for a harness, or fill in what is missing.                                    |
+| `radius check` | Confirm the agent works         | Start the configured command and complete the ACP handshake over stdio, stopping before any prompt.                 |
+| `radius dev`   | Iterate against the real app    | Register the agent with the Radius app and start one process per thread over stdio.                                 |
 | `radius build` | Create a distributable artifact | Package the agent as an immutable OCI artifact, verify it in the Radius microVM runtime, and write a build receipt. |
-| `radius deploy` | Publish the verified artifact | Upload the exact artifact recorded by the build receipt to Curve Cloud or a compatible self-hosted Radius Platform without rebuilding. |
 
 ## Repository configuration
 
-The CLI accepts `radius.config.json` as a repository configuration source. The
-`development.endpoint` field supplies the ACP WebSocket URL used by
-`radius dev`.
-
-```json
-{
-  "schemaVersion": 1,
-  "agent": null,
-  "name": "My Agent",
-  "runtime": {
-    "kind": "command",
-    "command": ["my-agent", "serve"]
-  },
-  "development": {
-    "endpoint": "ws://127.0.0.1:7331/acp",
-    "authorizationEnv": null
-  },
-  "capabilities": [],
-  "networkAllowlist": [],
-  "resources": {
-    "cpu": 2,
-    "memoryMb": 4096,
-    "diskMb": 5120
-  },
-  "minimumDesktopVersion": "0.0.1"
-}
-```
-
-The endpoint must use `ws://` or `wss://` and resolve to a loopback host. The
-`--endpoint <ws-url>` option may override the configured value for one run.
-The JSON config contains no credentials. If the endpoint requires a bearer
-value, `development.authorizationEnv` names the environment variable that
-provides it.
-
-## `radius init`
-
-`radius init` adds Radius to an existing agent repository. It should:
-
-1. Detect the repository root and package manager.
-2. Refuse to overwrite existing Radius configuration unless replacement is
-   explicit.
-3. Add the selected Radius integration and entrypoint files.
-4. Create a repository config, including the development endpoint when known.
-5. Validate the normalized configuration.
-6. Print `radius dev` as the next command.
-
-Initialization does not require a build, deployment, organization, or access
-token.
+`radius.json` is the repository configuration, beside the `radius.lock` that pins
+a harness. Formats that predate it, such as `radius.config.ts` and
+`[tool.radius]` in `pyproject.toml`, are still read behind a deprecation warning.
 
 ## `radius dev`
 
-The developer owns the agent process, watcher, and reload policy. `radius dev`
-reads `development.endpoint` from the selected repository config and registers
-that independently running agent with the installed Radius application.
+Radius owns the agent processes. It checks that the agent starts and speaks ACP,
+then registers a local bridge endpoint with the Radius app. Each thread the
+desktop opens gets its own process, so one crash ends only that thread.
 
-```text
-developer-owned agent process
-    | ACP over a configured loopback WebSocket URL
-    v
-installed Radius application
-    | desktop UI, host capabilities, history, and approvals
-    v
-agent response
-```
-
-Development mode does not:
-
-- build an OCI image;
-- bundle the agent into Radius;
-- start a microVM;
-- launch, watch, or restart the agent process; or
-- create production deployment state.
-
-The CLI removes the temporary development registration when it exits. Agent
-restarts affect the next run without requiring Radius to restart.
+The CLI removes the registration when it exits. There is no option yet to attach
+to an agent the developer already runs, and `development.endpoint` is not read.
 
 ## `radius build`
 
@@ -110,9 +47,9 @@ restarts affect the next run without requiring Radius to restart.
 Failed builds and failed runtime smokes must never become the latest verified
 build.
 
-## `radius deploy`
+## `radius deploy` (not implemented)
 
-`radius deploy` is the distribution boundary. It should:
+The planned distribution boundary. It should:
 
 1. Load the latest verified build receipt.
 2. Confirm that the receipt still matches the repository configuration.
@@ -122,10 +59,3 @@ build.
 
 Deploy must not rebuild the agent. The artifact tested by `radius build` is the
 artifact published by `radius deploy`.
-
-## CLI boundary
-
-The four commands cover the primary developer lifecycle: setup, iteration,
-packaging, and distribution. Informational, authentication, inventory,
-promotion, and rollback commands may exist, but they do not change this core
-workflow.

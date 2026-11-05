@@ -28,6 +28,8 @@ interface SourceManifest {
 interface ReleasePackage {
   directory: string;
   description: string;
+  /** Set for a command-line package, which ships this bin and no library. */
+  executable?: string;
 }
 
 const repositoryRoot = resolve(
@@ -61,9 +63,25 @@ const packages: readonly ReleasePackage[] = [
   {
     directory: "packages/cli",
     description:
-      "Radius developer CLI for init, dev, packaging, deploy, and management.",
+      "Radius developer CLI for init, check, dev, packaging, and the desktop app.",
+    executable: "dist/bin.js",
   },
 ];
+
+/** Just enough ACP over stdio for `radius check` to pass. */
+const SMOKE_ACP_AGENT = `
+import { createInterface } from "node:readline";
+for await (const line of createInterface({ input: process.stdin })) {
+  const { id, method } = JSON.parse(line);
+  const result =
+    method === "initialize"
+      ? { protocolVersion: 1, agentCapabilities: {}, authMethods: [] }
+      : method === "session/new"
+        ? { sessionId: "smoke" }
+        : null;
+  if (result) console.log(JSON.stringify({ jsonrpc: "2.0", id, result }));
+}
+`;
 
 const explicitOutput = parseOutput(process.argv.slice(2));
 const temporaryRoot = await mkdtemp(join(tmpdir(), "radius-npm-release-"));
@@ -91,7 +109,11 @@ try {
     ) as SourceManifest;
     const stage = join(stageRoot, source.name.replaceAll("/", "__"));
     await mkdir(stage, { recursive: true });
-    await copyBuiltOutput(join(sourceRoot, "dist"), join(stage, "dist"));
+    await copyBuiltOutput(
+      join(sourceRoot, "dist"),
+      join(stage, "dist"),
+      releasePackage.executable,
+    );
     await cp(join(repositoryRoot, "LICENSE"), join(stage, "LICENSE"));
     await writeFile(
       join(stage, "README.md"),
@@ -99,7 +121,7 @@ try {
     );
     await writeFile(
       join(stage, "package.json"),
-      `${JSON.stringify(publicManifest(source, releasePackage.description), null, 2)}\n`,
+      `${JSON.stringify(publicManifest(source, releasePackage), null, 2)}\n`,
     );
 
     const packed = await run("npm", [
@@ -143,7 +165,10 @@ try {
   await rm(temporaryRoot, { recursive: true, force: true });
 }
 
-function publicManifest(source: SourceManifest, description: string) {
+function publicManifest(
+  source: SourceManifest,
+  { description, executable }: ReleasePackage,
+) {
   const exports: Record<
     string,
     { types: string; import: string; default: string }
@@ -174,10 +199,17 @@ function publicManifest(source: SourceManifest, description: string) {
     description,
     license: source.license ?? "MIT",
     type: source.type ?? "module",
-    main: "./dist/index.js",
-    types: "./dist/index.d.ts",
-    exports,
-    bin: source.bin,
+    // A workspace bin may run from source; a published one runs the bundle.
+    ...(executable
+      ? {
+          bin: Object.fromEntries(
+            Object.keys(source.bin ?? {}).map((name) => [
+              name,
+              `./${executable}`,
+            ]),
+          ),
+        }
+      : { main: "./dist/index.js", types: "./dist/index.d.ts", exports }),
     files: ["dist", "LICENSE", "README.md"],
     engines: { node: ">=22" },
     repository: {
@@ -193,9 +225,17 @@ function publicManifest(source: SourceManifest, description: string) {
   };
 }
 
-async function copyBuiltOutput(source: string, target: string): Promise<void> {
-  await stat(join(source, "index.js"));
-  await stat(join(source, "index.d.ts"));
+async function copyBuiltOutput(
+  source: string,
+  target: string,
+  executable?: string,
+): Promise<void> {
+  if (executable) {
+    await stat(join(source, basename(executable)));
+  } else {
+    await stat(join(source, "index.js"));
+    await stat(join(source, "index.d.ts"));
+  }
   await cp(source, target, {
     recursive: true,
     filter: (candidate) =>
@@ -239,33 +279,57 @@ async function verifyExternalInstall(
         'import { serveDevelopmentAgent } from "@curve-ai/radius-runtime/development";',
         'import { AgentManifestSchema } from "@curve-ai/agent-contracts";',
         'import { RadiusPlatformClient } from "@curve-ai/platform-client";',
-        'import { credentialAccount } from "@curve-ai/cli";',
         'if (typeof createRadiusAuthentication !== "function") process.exit(1);',
         'if (typeof serveDevelopmentAgent !== "function") process.exit(1);',
         'if (typeof AgentManifestSchema?.parse !== "function") process.exit(1);',
         'if (typeof RadiusPlatformClient !== "function") process.exit(1);',
-        'if (!credentialAccount({name:"smoke",apiUrl:"https://example.com"}).startsWith("profile:smoke:")) process.exit(1);',
       ].join(""),
     ],
     consumer,
   );
   const bin = join(consumer, "node_modules", ".bin", "radius");
   const help = await run(bin, ["--help"], consumer);
-  if (!help.includes("radius tokens create")) {
-    throw new Error("Packaged Radius CLI help is incomplete");
+  if ((await run(bin, ["help"], consumer)) !== help) {
+    throw new Error("Packaged `radius help` differs from `radius --help`");
   }
+  for (const command of ["init", "check", "dev", "build", "app"]) {
+    if (!help.includes(`radius ${command}`)) {
+      throw new Error(`Packaged Radius CLI help is missing ${command}`);
+    }
+  }
+
+  // `init` needs no registry for a LangGraph project, so this stays offline.
+  const initialized = join(consumer, "external-graph");
+  await mkdir(initialized);
+  await writeFile(
+    join(initialized, "langgraph.json"),
+    `${JSON.stringify({ graphs: { agent: "./agent.py:graph" } })}\n`,
+  );
+  await run(bin, ["init", "--yes"], initialized);
+  await stat(join(initialized, "radius.json"));
+
   const project = join(consumer, "external-agent");
   await mkdir(project);
   await writeFile(
-    join(project, "package.json"),
-    `${JSON.stringify({ name: "external-agent", private: true, type: "module" }, null, 2)}\n`,
+    join(project, "radius.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        agent: "agent_external1",
+        name: "External Agent",
+        runtime: { kind: "command", command: ["node", "agent.mjs"] },
+      },
+      null,
+      2,
+    )}\n`,
   );
-  await run(
-    bin,
-    ["init", "--skip-install", "--agent-ref", "agent_external1"],
-    project,
-  );
-  await run(bin, ["validate"], project);
+  await writeFile(join(project, "agent.mjs"), SMOKE_ACP_AGENT);
+  const check = JSON.parse(await run(bin, ["check", "--json"], project)) as {
+    ok?: unknown;
+  };
+  if (check.ok !== true) {
+    throw new Error("Packaged Radius CLI failed check in a fresh project");
+  }
 }
 
 async function createLocalDependencyMirror(

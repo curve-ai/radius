@@ -27,7 +27,6 @@ The first coherent npm release unit contains six packages at one version:
 @curve-ai/cli
 ├── agent-contracts
 ├── build
-├── platform-client
 └── radius-runtime
 ```
 
@@ -39,8 +38,8 @@ set.
 
 `scripts/release/npm.ts`:
 
-1. requires built `dist/index.js` and `dist/index.d.ts` for every package and
-   retains the runtime's development-server and authentication subpath exports;
+1. requires built `dist/index.js` and `dist/index.d.ts` for every library
+   package, and `dist/bin.js` for the CLI, and retains the runtime's development-server and authentication subpath exports;
 2. excludes test output and all source/workspace-only files;
 3. stages a public manifest with `private` removed, Node 22 engines, dist-only
    exports, public access metadata, repository links, and exact dependencies;
@@ -49,11 +48,11 @@ set.
 5. creates npm tarballs and a SHA-256/size release manifest; and
 6. installs and executes the complete graph in a clean external project.
 
-The CLI build emits both its self-contained executable `dist/cli.js` and a
-runtime library entrypoint `dist/index.js`; declaration output retains the
-public package relationships. The native `@napi-rs/keyring` adapter remains an
-external exact dependency so the package manager selects the correct optional
-platform binary; native binaries are not embedded into the JavaScript bundle.
+The CLI is an executable with no library entrypoint: its published `radius` bin
+is the bundled `dist/bin.js`. `jsonc-parser` and `tsx` stay external exact
+dependencies because neither works from inside the bundle: `jsonc-parser`'s UMD
+build loads its modules through dynamic `require` calls, and `tsx` loads its
+loader from its own package directory.
 
 ## Pre-publication verification
 
@@ -69,7 +68,7 @@ publish. To test without weakening the real artifacts, verification:
 - imports `@curve-ai/radius-runtime/development`,
   `@curve-ai/radius-runtime/authentication`,
   `@curve-ai/agent-contracts`, and
-  `@curve-ai/platform-client`, then runs packaged CLI help, init, and validate.
+  `@curve-ai/platform-client`, then runs packaged CLI help, init, and check.
 
 This mirror is temporary and is never a publish artifact.
 

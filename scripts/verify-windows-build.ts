@@ -6,8 +6,8 @@ import { join } from "node:path";
 
 import { AgentBuildReceiptSchema } from "@curve-ai/agent-contracts";
 import { parseAgentReleaseDescriptor } from "@curve-ai/radius-runtime";
-import buildCommand from "../packages/cli-next/src/commands/build/run.js";
-import { buildContext } from "../packages/cli-next/src/context.js";
+import buildCommand from "../packages/cli/src/commands/build/run.js";
+import { buildContext } from "../packages/cli/src/context.js";
 
 // Build real images through the new CLI with Windows host facts. This smoke
 // needs Docker; running a Windows VM remains a separate WHP-host check.

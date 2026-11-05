@@ -63,13 +63,6 @@ The fixture authority exists only because this development profile defaults
 `RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY=true`. Disable that flag and use the
 [initial owner bootstrap](../../docs/self-hosting/README.md#initial-owner-bootstrap)
 to exercise a real first-run installation.
-The CLI can target the stack without writing a profile:
-
-```bash
-RADIUS_API_URL=http://127.0.0.1:3110 \
-RADIUS_ACCESS_TOKEN=radius-dev-token \
-radius deploy --environment staging
-```
 
 Useful commands:
 

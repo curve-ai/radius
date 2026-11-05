@@ -73,8 +73,6 @@ docker run --rm \
   -v "${ROOT_DIR}/hosting/docker/Caddyfile.self-host:/etc/caddy/Caddyfile:ro" \
   "${CADDY_IMAGE}" caddy validate --config /etc/caddy/Caddyfile >/dev/null
 
-bun run --cwd "${ROOT_DIR}/packages/cli" build >/dev/null
-
 "${compose[@]}" up -d --build \
   postgres registry jobs-redis platform-api platform-jobs platform-web
 
@@ -156,44 +154,44 @@ docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" \
     ) VALUES ('52000000-0000-4000-8000-000000000002', 'agent.read');
   " >/dev/null
 
-radius_cli() {
+platform_driver() {
   local token=$1
   shift
   RADIUS_API_URL="http://127.0.0.1:${TEST_API_PORT}" \
     RADIUS_ACCESS_TOKEN="${token}" \
-    node "${ROOT_DIR}/packages/cli/dist/cli.js" "$@"
+    bun "${ROOT_DIR}/hosting/tests/platform-driver.mts" "$@"
 }
 
-members_json="$(radius_cli "${access_token}" members list --organization verify --json)"
+members_json="$(platform_driver "${access_token}" members list --organization verify)"
 [[ "$(jq -r '.memberships | length' <<<"${members_json}")" == "2" ]]
 owner_membership_id="$(jq -er '.memberships[] | select(.current) | .id' <<<"${members_json}")"
-if radius_cli "${access_token}" members role "${owner_membership_id}" \
+if platform_driver "${access_token}" members role "${owner_membership_id}" \
   --role admin --organization verify >/dev/null 2>&1; then
   echo "self-host verify: current owner changed its own membership" >&2
   exit 1
 fi
-if radius_cli "${member_access_token}" members list \
+if platform_driver "${member_access_token}" members list \
   --organization verify >/dev/null 2>&1; then
   echo "self-host verify: viewer token listed organization members" >&2
   exit 1
 fi
 
-radius_cli "${access_token}" members role \
+platform_driver "${access_token}" members role \
   50000000-0000-4000-8000-000000000002 \
   --role developer --organization verify >/dev/null
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Authorization: Bearer ${member_access_token}" \
   "http://127.0.0.1:${TEST_API_PORT}/api/platform/v1/identity")" == "401" ]]
-radius_cli "${access_token}" members suspend \
+platform_driver "${access_token}" members suspend \
   50000000-0000-4000-8000-000000000002 --organization verify >/dev/null
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Cookie: radius_platform_session=${member_session_token}" \
   "http://127.0.0.1:${TEST_API_PORT}/api/platform/v1/auth/session")" == "401" ]]
-radius_cli "${access_token}" members restore \
+platform_driver "${access_token}" members restore \
   50000000-0000-4000-8000-000000000002 --organization verify >/dev/null
-radius_cli "${access_token}" members remove \
+platform_driver "${access_token}" members remove \
   50000000-0000-4000-8000-000000000002 --organization verify >/dev/null
-radius_cli "${access_token}" members restore \
+platform_driver "${access_token}" members restore \
   50000000-0000-4000-8000-000000000002 --organization verify >/dev/null
 
 membership_evidence="$(docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" \
@@ -227,7 +225,7 @@ deploy_output="$(
   cd "${ROOT_DIR}/examples/typescript-agent"
   RADIUS_API_URL="http://127.0.0.1:${TEST_API_PORT}" \
     RADIUS_ACCESS_TOKEN="${access_token}" \
-    node ../../packages/cli/dist/cli.js deploy \
+    bun ../../hosting/tests/platform-driver.mts deploy \
       --organization verify \
       --environment staging
 )"
@@ -381,7 +379,7 @@ restored_inventory="$(
   cd "${ROOT_DIR}/examples/typescript-agent"
   RADIUS_API_URL="http://127.0.0.1:${TEST_API_PORT}" \
     RADIUS_ACCESS_TOKEN="${access_token}" \
-    node ../../packages/cli/dist/cli.js deployments list --json
+    bun ../../hosting/tests/platform-driver.mts deployments list
 )"
 grep -q "${deployment_digest}" <<<"${restored_inventory}"
 

@@ -32,18 +32,6 @@ flag `RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE=true`: the CLI receives the
 host-reachable registry address while the API verifies the same repository on
 the internal Compose network.
 
-In another terminal:
-
-```bash
-profile_dir=$(mktemp -d)
-RADIUS_CONFIG_HOME="$profile_dir" radius profiles add local \
-  --api-url http://127.0.0.1:3110
-
-RADIUS_CONFIG_HOME="$profile_dir" \
-RADIUS_ACCESS_TOKEN=dev-token \
-radius deploy --environment staging
-```
-
 Stop the registry without deleting its volume:
 
 ```bash
