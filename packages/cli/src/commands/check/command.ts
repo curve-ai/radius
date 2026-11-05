@@ -35,6 +35,6 @@ export const checkCommand = buildCommand({
   docs: {
     brief: "Check this agent speaks ACP and serves your own agents",
     fullDescription:
-      "Starts the command radius.json declares, sends ACP initialize and session/new over stdio, and stops before any prompt, so no provider key is needed.\n\nPasses only if the handshake completes (an agent that asks for sign-in at session/new counts, as it does for dev), stdout carries nothing but JSON-RPC, and the agents advertised are the ones this project defines — read from .opencode/agent(s)/*.md and opencode.json, or the graphs in langgraph.json. A harness that answers but serves its own defaults fails.",
+      "Starts the command radius.json declares, sends ACP initialize and session/new over stdio, and stops before any prompt, so no provider key is needed.\n\nPasses only if the handshake completes (an agent that asks for sign-in at session/new counts, as it does for dev), stdout carries nothing but JSON-RPC, and the agents advertised are the ones this project defines — read from .opencode/agent(s)/*.md and opencode.json, or the graphs in langgraph.json. A harness that answers but serves its own defaults fails.\n\nA harness pinned outside the versions Radius supports fails too, because the handshake cannot show what it breaks: opencode 2.x advertises a project's agents and then fails every custom tool call. `radius init --force` moves the pin.",
   },
 });

@@ -36,7 +36,8 @@ import {
   promptText,
   requireFlag,
 } from "../../prompt.js";
-import { fetchRegistry, listHarnessIds, selectEntry } from "../../registry.js";
+import { describeUnsupported, resolveEntry } from "../../harness-support.js";
+import { fetchRegistry, listHarnessIds } from "../../registry.js";
 import {
   detectLanggraph,
   detectProject,
@@ -165,18 +166,28 @@ export async function runInit(
       currentLock.harness.registryId === pin.id &&
       currentLock.harness.version === pin.version &&
       pin.id === wantedId;
-    const inlineLock =
+    const inlineCandidate =
       migrate && inlineId === wantedId
         ? lockFromInline(runtimeBlock)
         : undefined;
+    const inlineUnsupported =
+      inlineCandidate &&
+      describeUnsupported(wantedId, inlineCandidate.harness.version);
+    const inlineLock = inlineUnsupported ? undefined : inlineCandidate;
     if (lockAgrees && !flags.force) {
       lock = currentLock;
+      // A pin stays put without --force, even an unsupported one. `check` is
+      // what fails on it; here the developer is only told.
+      const unsupported = describeUnsupported(pin.id, pin.version);
+      if (unsupported) {
+        pinNotes.push(`${unsupported} \`radius init --force\` re-pins.`);
+      }
     } else if (inlineLock) {
       // Migrating moves the pin; it does not upgrade it. Re-pinning to the
-      // registry's latest is a separate `--force` once the lock exists.
+      // newest supported version is a separate `--force` once the lock exists.
       lock = inlineLock;
     } else {
-      const entry = selectEntry(await registry(), wantedId);
+      const { entry, note } = resolveEntry(await registry(), wantedId);
       // Without --force, a pin is a promise not to move. The registry only
       // serves its latest version, so a lost lock for an older pin cannot be
       // rebuilt from it — and quietly moving the pin would be an upgrade
@@ -188,21 +199,26 @@ export async function runInit(
         !flags.force
       ) {
         throw new OperationalError(
-          `${CONFIG_FILENAME} pins ${pin.id}@${pin.version}, and ${LOCK_FILENAME} ${currentLock ? "does not match it" : "is missing"}. The ACP registry now offers ${entry.version}, so the old pin cannot be re-read from it.`,
+          `${CONFIG_FILENAME} pins ${pin.id}@${pin.version}, and ${LOCK_FILENAME} ${currentLock ? "does not match it" : "is missing"}. Radius would now pin ${entry.version}, so the old pin cannot be rebuilt.`,
           `Restore ${LOCK_FILENAME} from version control, or run \`radius init --force\` to pin ${entry.id}@${entry.version}.`,
         );
       }
       lock = lockFromEntry(entry);
-      // The inline form never recorded a version, so the registry's current
-      // entry is the only source for the lock. Say so when that moved the pin.
-      if (
+      if (note) pinNotes.push(note);
+      if (inlineUnsupported) {
+        pinNotes.push(
+          `the inline pin moved to ${entry.id} ${entry.version} instead of carrying across. ${inlineUnsupported}`,
+        );
+      } else if (
+        // The inline form never recorded a version, so the current entry is the
+        // only source for the lock. Say so when that moved the pin.
         migrate &&
         runtimeBlock.distribution !== undefined &&
         JSON.stringify(runtimeBlock.distribution) !==
           JSON.stringify(entry.distribution)
       ) {
         pinNotes.push(
-          `the inline pin names no version Radius can read back, so ${LOCK_FILENAME} now holds the registry's current ${entry.id} ${entry.version}.`,
+          `the inline pin names no version Radius can read back, so ${LOCK_FILENAME} now holds ${entry.id} ${entry.version}.`,
         );
       }
     }
@@ -213,7 +229,8 @@ export async function runInit(
     // An inline runtime block without a distribution — someone wrote
     // `runtime.include` first. Filled leaf by leaf, as before the lock, so
     // nothing they wrote is moved.
-    const entry = selectEntry(await registry(), harnessId);
+    const { entry, note } = resolveEntry(await registry(), harnessId);
+    if (note) pinNotes.push(note);
     edits.push(
       { path: ["runtime", "kind"], value: "harness" },
       { path: ["runtime", "registryId"], value: entry.id },
@@ -221,6 +238,13 @@ export async function runInit(
       { path: ["runtime", "license"], value: entry.license },
       { path: ["runtime", "licenseUrl"], value: entry.licenseUrl },
     );
+  } else {
+    const harness = lockFromInline(runtimeBlock)?.harness;
+    const unsupported =
+      harness && describeUnsupported(harness.registryId, harness.version);
+    if (unsupported) {
+      pinNotes.push(`${unsupported} \`radius init --force\` re-pins.`);
+    }
   }
 
   // Where the person-written harness fields live: top level beside

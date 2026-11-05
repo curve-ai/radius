@@ -10,6 +10,8 @@ import {
 } from "./acp-probe.js";
 import { discoverProjectAgents, type ProjectAgents } from "./project-agents.js";
 import { advertisedFromSession } from "./handshake.js";
+import { HARNESS_SUPPORT, isSupported } from "./harness-support.js";
+import { parseLock, readRawLock, versionOf } from "./lock.js";
 
 /**
  * What `radius check` concludes, kept apart from how it is printed so the
@@ -25,7 +27,7 @@ import { advertisedFromSession } from "./handshake.js";
 export type VerdictStatus = "pass" | "fail" | "skip";
 
 export interface Verdict {
-  readonly id: "handshake" | "agents" | "stdout";
+  readonly id: "harness-version" | "handshake" | "agents" | "stdout";
   readonly status: VerdictStatus;
   readonly summary: string;
   readonly detail: readonly string[];
@@ -79,17 +81,19 @@ export async function checkAgent(
     readonly runtime?: AgentConfig["runtime"];
   },
 ): Promise<CheckResult> {
-  const [project, probe] = await Promise.all([
+  const [project, probe, harnessVersion] = await Promise.all([
     discoverProjectAgents(options.root, options.runtime),
     probeAcp({ ...options, cwd: options.root }),
+    judgePinnedVersion(options.root, options.runtime),
   ]);
-  return evaluate(options.command, project, probe);
+  return evaluate(options.command, project, probe, harnessVersion);
 }
 
 export function evaluate(
   command: readonly string[],
   project: ProjectAgents,
   probe: ProbeResult,
+  harnessVersion?: Verdict,
 ): CheckResult {
   const protocolVersion =
     typeof probe.initialize?.protocolVersion === "number"
@@ -100,6 +104,7 @@ export function evaluate(
   const signIn = needsSignIn(probe);
 
   const verdicts: Verdict[] = [
+    ...(harnessVersion ? [harnessVersion] : []),
     judgeHandshake(probe, protocolVersion, agentInfo, signIn),
     probe.session
       ? judgeAgents(project, advertised, agentInfo)
@@ -130,6 +135,74 @@ export function evaluate(
     },
     verdicts,
   };
+}
+
+/**
+ * Whether the pinned harness is one Radius supports. Undefined, and so no line
+ * in the report, for a runtime that is not a registry harness with a declared
+ * range.
+ *
+ * Unsupported is a failure rather than a warning, because this verdict exists
+ * for what the rest of `check` cannot see. opencode 2.x answers the handshake
+ * and advertises the right agents, then fails every custom tool call; a warning
+ * would leave `check` exiting 0 in CI on exactly that project, and the fix is
+ * one command with no code to change. Only `check` fails: `dev` and `build`
+ * still run a pin someone chose deliberately.
+ */
+function judgeHarnessVersion(
+  id: string,
+  version: string | undefined,
+): Verdict | undefined {
+  const support = HARNESS_SUPPORT.get(id);
+  if (!support) return undefined;
+  if (version === undefined) {
+    return {
+      id: "harness-version",
+      status: "skip",
+      summary: `${id} version not compared — the pin names no version Radius can read`,
+      detail: [`Radius supports ${id} ${support.range}.`],
+    };
+  }
+  if (isSupported(support, version)) {
+    return {
+      id: "harness-version",
+      status: "pass",
+      summary: `pins ${id} ${version}, which Radius supports (${support.range})`,
+      detail: [],
+    };
+  }
+  return {
+    id: "harness-version",
+    status: "fail",
+    summary: `pins ${id} ${version}, which Radius does not support (${support.range})`,
+    detail: [
+      support.reason,
+      "The checks below stop at the handshake, so they can pass on this version anyway.",
+      "Run `radius init --force` to pin the newest supported version.",
+    ],
+  };
+}
+
+async function judgePinnedVersion(
+  root: string,
+  runtime: AgentConfig["runtime"] | undefined,
+): Promise<Verdict | undefined> {
+  if (runtime?.kind !== "harness" || !runtime.registryId) return undefined;
+  // The artifacts are what actually runs, so they outrank the lock's label.
+  // The lock is the fallback for a distribution whose URLs name no version.
+  let version = versionOf(runtime.distribution);
+  if (version === undefined) {
+    const raw = await readRawLock(root);
+    const parsed = raw === null ? undefined : parseLock(raw);
+    if (
+      parsed &&
+      "lock" in parsed &&
+      parsed.lock.harness.registryId === runtime.registryId
+    ) {
+      version = parsed.lock.harness.version;
+    }
+  }
+  return judgeHarnessVersion(runtime.registryId, version);
 }
 
 function judgeHandshake(
