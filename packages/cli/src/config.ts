@@ -196,7 +196,7 @@ async function expandHarness(
   const locked = lock.harness;
   if (locked.registryId !== pin.id || locked.version !== pin.version) {
     throw new UsageError(
-      `${CONFIG_FILENAME} pins ${pin.id}@${pin.version}, but ${LOCK_FILENAME} holds ${locked.registryId}@${locked.version}.\n\nRun \`radius init\` to re-pin, or \`radius init --force\` to move to what the registry offers now.`,
+      `${CONFIG_FILENAME} pins ${pin.id}@${pin.version}, but ${LOCK_FILENAME} holds ${locked.registryId}@${locked.version}.\n\nRun \`radius init\` to re-pin, or \`radius init --force\` to move to the newest version Radius supports.`,
     );
   }
 

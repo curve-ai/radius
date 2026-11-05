@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { HarnessRuntimeConfigSchema } from "@curve-ai/agent-contracts";
+
 import { checkAgent, type CheckResult } from "./check.js";
 
 /**
@@ -234,6 +236,104 @@ test("an agent that exits before answering reports the exit and stderr", async (
   assert.match(handshake.summary, /exited during initialize \(code 3\)/);
   assert.ok(
     handshake.detail.some((line) => line.includes("ANTHROPIC_API_KEY")),
+  );
+});
+
+function harnessRuntime(id: string, archive: string) {
+  return HarnessRuntimeConfigSchema.parse({
+    kind: "harness",
+    registryId: id,
+    distribution: {
+      kind: "binary",
+      cmd: "./agent",
+      args: [],
+      platforms: { "linux/arm64": { archive, sha256: "a".repeat(64) } },
+    },
+  });
+}
+
+async function checkPinned(
+  runtime: ReturnType<typeof harnessRuntime>,
+  lockVersion?: string,
+): Promise<CheckResult> {
+  const { root, script } = await fixture();
+  if (lockVersion) {
+    await writeFile(
+      join(root, "radius.lock"),
+      JSON.stringify({
+        lockfileVersion: 1,
+        harness: {
+          registryId: runtime.registryId,
+          version: lockVersion,
+          distribution: runtime.distribution,
+        },
+      }),
+    );
+  }
+  return checkAgent({
+    command: [
+      process.execPath,
+      script,
+      JSON.stringify({
+        initialize: OPENCODE_INIT,
+        session: opencodeSession(["ops"]),
+      }),
+    ],
+    root,
+    runtime,
+    env: process.env,
+    timeoutMs: 5000,
+  });
+}
+
+test("an unsupported pin fails the check even though the handshake and agents pass", async () => {
+  const result = await checkPinned(
+    harnessRuntime("opencode", "https://example.invalid/v2.2.5/a.tar.gz"),
+  );
+  assert.equal(result.passed, false);
+  assert.equal(verdict(result, "handshake").status, "pass");
+  assert.equal(verdict(result, "agents").status, "pass");
+  const version = verdict(result, "harness-version");
+  assert.equal(version.status, "fail");
+  assert.match(version.summary, /pins opencode 2\.2\.5/);
+  assert.match(version.detail.join("\n"), /No tool named/);
+  assert.match(version.detail.join("\n"), /radius init --force/);
+});
+
+test("a supported pin says so and passes", async () => {
+  const result = await checkPinned(
+    harnessRuntime("opencode", "https://example.invalid/v1.19.4/a.tar.gz"),
+  );
+  assert.equal(result.passed, true, JSON.stringify(result.verdicts, null, 2));
+  assert.equal(verdict(result, "harness-version").status, "pass");
+});
+
+test("the lock supplies the version when the artifact URLs name none", async () => {
+  const runtime = harnessRuntime(
+    "opencode",
+    "https://example.invalid/a.tar.gz",
+  );
+  const result = await checkPinned(runtime, "2.2.5");
+  assert.equal(result.passed, false);
+  assert.equal(verdict(result, "harness-version").status, "fail");
+});
+
+test("a pin with no readable version is reported as not compared, not failed", async () => {
+  const result = await checkPinned(
+    harnessRuntime("opencode", "https://example.invalid/a.tar.gz"),
+  );
+  assert.equal(result.passed, true, JSON.stringify(result.verdicts, null, 2));
+  assert.equal(verdict(result, "harness-version").status, "skip");
+});
+
+test("a harness with no declared range gets no version verdict", async () => {
+  const result = await checkPinned(
+    harnessRuntime("goose", "https://example.invalid/v99.0.0/a.tar.gz"),
+  );
+  assert.equal(result.passed, true, JSON.stringify(result.verdicts, null, 2));
+  assert.equal(
+    result.verdicts.some((candidate) => candidate.id === "harness-version"),
+    false,
   );
 });
 

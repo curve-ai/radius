@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { runInit, type InitFlags } from "./commands/init/run.js";
 import { loadConfigFile } from "./config.js";
 import type { RadiusContext } from "./context.js";
+import { HARNESS_SUPPORT } from "./harness-support.js";
 
 async function project(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "radius-init-test-"));
@@ -274,9 +275,213 @@ test("a lost lock for an older pin is not silently upgraded", async () => {
     () => runInit(context(root).context, flags(), fakeRegistry("1.20.0")),
     (error: Error & { nextAction?: string }) =>
       /pins opencode@1\.19\.4/.test(error.message) &&
-      /now offers 1\.20\.0/.test(error.message) &&
+      /would now pin 1\.20\.0/.test(error.message) &&
       /radius init --force/.test(error.nextAction ?? ""),
   );
+});
+
+/** What the registry serves once opencode has moved to an unsupported major. */
+const UNSUPPORTED = "2.2.5";
+
+test("init pins the newest supported version when the registry's is unsupported", async () => {
+  const root = await project(shopfloor);
+  const run = context(root);
+  await runInit(run.context, flags(), fakeRegistry(UNSUPPORTED));
+
+  const config = await readJson(join(root, "radius.json"));
+  assert.equal(config.harness, "opencode@1.19.4");
+  const lock = await readJson(join(root, "radius.lock"));
+  const pinned = HARNESS_SUPPORT.get("opencode")!.pinned!;
+  assert.deepEqual(lock.harness, {
+    registryId: "opencode",
+    version: pinned.version,
+    license: pinned.license,
+    licenseUrl: pinned.licenseUrl,
+    distribution: pinned.distribution,
+  });
+  assert.match(run.text(), /pinned opencode 1\.19\.4 for 6 platforms/);
+  assert.match(run.text(), /registry offers opencode 2\.2\.5/);
+  assert.match(run.text(), /1\.19\.4 was pinned instead/);
+  await loadConfigFile(root);
+
+  // Stable: a second run holds to the lock without asking the registry, and
+  // leaves its bytes alone.
+  const written = await readFile(join(root, "radius.lock"), "utf8");
+  const again = fakeRegistry(UNSUPPORTED);
+  const second = context(root);
+  await runInit(second.context, flags(), again);
+  assert.equal(again.calls.count, 0);
+  assert.equal(await readFile(join(root, "radius.lock"), "utf8"), written);
+  assert.match(second.text(), /already complete/);
+});
+
+test("--json carries the same note when the registry's version is passed over", async () => {
+  const root = await project({ "README.md": "" });
+  const run = context(root, "json");
+  await runInit(
+    run.context,
+    flags({ harness: "opencode" }),
+    fakeRegistry(UNSUPPORTED),
+  );
+  const result = run.json() as {
+    data: { harness: { version: string }; notes: string[] };
+  };
+  assert.equal(result.data.harness.version, "1.19.4");
+  assert.match(result.data.notes.join("\n"), /offers opencode 2\.2\.5/);
+});
+
+/** A project someone pinned to the registry's 2.x before Radius declared a range. */
+async function pinnedToUnsupported(): Promise<string> {
+  const root = await project(shopfloor);
+  await runInit(context(root).context, flags(), fakeRegistry());
+  const config = await readJson(join(root, "radius.json"));
+  await writeFile(
+    join(root, "radius.json"),
+    JSON.stringify({ ...config, harness: `opencode@${UNSUPPORTED}` }),
+    "utf8",
+  );
+  const lock = await readJson(join(root, "radius.lock"));
+  const harness = lock.harness as Record<string, unknown>;
+  await writeFile(
+    join(root, "radius.lock"),
+    `${JSON.stringify(
+      { ...lock, harness: { ...harness, version: UNSUPPORTED } },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  return root;
+}
+
+test("--force follows the same rule, moving an unsupported pin to a supported one", async () => {
+  const root = await pinnedToUnsupported();
+  const run = context(root);
+  await runInit(run.context, flags({ force: true }), fakeRegistry(UNSUPPORTED));
+  assert.equal(
+    (await readJson(join(root, "radius.json"))).harness,
+    "opencode@1.19.4",
+  );
+  const lock = await readJson(join(root, "radius.lock"));
+  assert.equal((lock.harness as { version: string }).version, "1.19.4");
+  assert.match(run.text(), /1\.19\.4 was pinned instead/);
+  await loadConfigFile(root);
+});
+
+test("without --force an unsupported pin stays, and init says so", async () => {
+  const root = await pinnedToUnsupported();
+  const before = await readFile(join(root, "radius.lock"), "utf8");
+  const run = context(root);
+  const registry = fakeRegistry(UNSUPPORTED);
+  await runInit(run.context, flags(), registry);
+
+  assert.equal(registry.calls.count, 0);
+  assert.equal(await readFile(join(root, "radius.lock"), "utf8"), before);
+  assert.equal(
+    (await readJson(join(root, "radius.json"))).harness,
+    `opencode@${UNSUPPORTED}`,
+  );
+  assert.match(run.text(), /opencode 2\.2\.5 is not a version Radius supports/);
+  assert.match(run.text(), /radius init --force/);
+});
+
+test("a lost lock for an unsupported pin is not rebuilt, even if the registry still serves it", async () => {
+  const root = await pinnedToUnsupported();
+  await writeFile(join(root, "radius.lock"), "{}", "utf8");
+  await assert.rejects(
+    () => runInit(context(root).context, flags(), fakeRegistry(UNSUPPORTED)),
+    (error: Error & { nextAction?: string }) =>
+      /pins opencode@2\.2\.5/.test(error.message) &&
+      /would now pin 1\.19\.4/.test(error.message) &&
+      /pin opencode@1\.19\.4/.test(error.nextAction ?? ""),
+  );
+});
+
+function inlineConfig(version: string) {
+  return JSON.stringify({
+    agent: "agent_e8ef37424de7ded8",
+    version: "0.0.0",
+    name: "inline",
+    runtime: {
+      kind: "harness",
+      registryId: "opencode",
+      distribution: {
+        kind: "binary",
+        platforms: {
+          "linux/arm64": {
+            archive: `https://example.invalid/v${version}/opencode.tar.gz`,
+            sha256: "3".repeat(64),
+          },
+        },
+        cmd: "./opencode",
+        args: ["acp"],
+      },
+    },
+  });
+}
+
+test("an unsupported inline pin is reported, and --force does not carry it across", async () => {
+  const root = await project({
+    "README.md": "",
+    "radius.json": inlineConfig(UNSUPPORTED),
+  });
+
+  const plain = context(root);
+  await runInit(plain.context, flags(), fakeRegistry(UNSUPPORTED));
+  assert.match(
+    plain.text(),
+    /opencode 2\.2\.5 is not a version Radius supports/,
+  );
+  assert.equal("harness" in (await readJson(join(root, "radius.json"))), false);
+
+  const forced = context(root);
+  await runInit(
+    forced.context,
+    flags({ force: true }),
+    fakeRegistry(UNSUPPORTED),
+  );
+  const config = await readJson(join(root, "radius.json"));
+  assert.equal(config.harness, "opencode@1.19.4");
+  assert.match(forced.text(), /inline pin moved to opencode 1\.19\.4/);
+  await loadConfigFile(root);
+});
+
+test("an inline runtime with no distribution yet is filled by the same rule", async () => {
+  const root = await project({
+    "README.md": "",
+    "radius.json": JSON.stringify({
+      agent: "agent_e8ef37424de7ded8",
+      version: "0.0.0",
+      name: "inline",
+      runtime: { registryId: "opencode", include: ["README.md"] },
+    }),
+  });
+  const run = context(root);
+  await runInit(run.context, flags(), fakeRegistry(UNSUPPORTED));
+  const config = await readJson(join(root, "radius.json"));
+  const distribution = (
+    config.runtime as { distribution: { platforms: Record<string, unknown> } }
+  ).distribution;
+  assert.deepEqual(
+    distribution,
+    HARNESS_SUPPORT.get("opencode")!.pinned!.distribution,
+  );
+  assert.match(run.text(), /1\.19\.4 was pinned instead/);
+});
+
+test("a harness with no declared range still pins whatever the registry offers", async () => {
+  const root = await project({ "README.md": "" });
+  const run = context(root);
+  await runInit(
+    run.context,
+    flags({ harness: "goose" }),
+    fakeRegistry(UNSUPPORTED),
+  );
+  assert.equal(
+    (await readJson(join(root, "radius.json"))).harness,
+    "goose@1.0.0",
+  );
+  assert.doesNotMatch(run.text(), /note:/);
 });
 
 test("--force re-pins to the registry's current version, keeping the agent", async () => {
