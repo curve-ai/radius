@@ -61,8 +61,9 @@ radius build
 ```
 
 `radius dev` registers the agent with the Radius app and starts one process per
-thread over stdio; it does not build or deploy an image. Both languages use
-stdio inside their packaged agents.
+thread over stdio; it does not build or deploy an image. `radius dev --endpoint`
+attaches to an agent you run yourself, if it speaks ACP over a loopback
+WebSocket. Both languages use stdio inside their packaged agents.
 
 ## OCI builds
 

@@ -31,8 +31,14 @@ Radius owns the agent processes. It checks that the agent starts and speaks ACP,
 then registers a local bridge endpoint with the Radius app. Each thread the
 desktop opens gets its own process, so one crash ends only that thread.
 
-The CLI removes the registration when it exits. There is no option yet to attach
-to an agent the developer already runs, and `development.endpoint` is not read.
+The CLI removes the registration when it exits.
+
+To attach to an agent the developer already runs, pass `--endpoint <ws-url>` or set
+`development.endpoint` in the config. The flag wins. Radius then starts nothing:
+it completes an ACP handshake over that loopback WebSocket, registers the
+endpoint, and on exit removes only the registration, so the agent keeps running.
+`--authorization-env <name>` or `development.authorizationEnv` names the variable
+holding a bearer token. The agent has to speak ACP over a WebSocket itself.
 
 ## `radius build`
 

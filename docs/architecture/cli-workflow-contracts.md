@@ -26,15 +26,20 @@ one agent process per thread, over stdio
   project context, history, and approval behavior, but no VM or OCI image.
 - Development registration is local-only and is never accepted as production
   desired state.
-- Attaching to an agent the developer already runs is not implemented.
+- With `--endpoint` or `development.endpoint`, Radius attaches instead of
+  starting anything. The endpoint must be loopback and speak ACP over a
+  WebSocket. A failed handshake registers nothing, and exit leaves the agent
+  running.
 
 Implemented options:
 
 ```text
---no-open    do not bring the Radius desktop app up
---yes        never prompt; install or update the Radius app without asking
---verbose    also print connection details and log every ACP frame
---json       emit the machine-readable envelope
+--endpoint <ws-url>          attach to a running agent; overrides development.endpoint
+--authorization-env <name>   its bearer token variable; overrides development.authorizationEnv
+--no-open                    do not bring the Radius desktop app up
+--yes                        never prompt; install or update the Radius app without asking
+--verbose                    also print connection details and log every ACP frame
+--json                       emit the machine-readable envelope
 ```
 
 ## `radius build`

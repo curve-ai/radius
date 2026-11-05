@@ -7,6 +7,7 @@
   "scripts": {
     "check": "radius check",
     "dev": "radius dev",
+    "agent:dev": "tsx watch radius/agent.ts --radius-dev",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:image": "radius build",
     "test": "tsx --test radius/*.test.ts"

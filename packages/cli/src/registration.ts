@@ -55,7 +55,8 @@ export async function registerDevelopmentAgent(input: {
   instanceId: string;
   displayName: string;
   endpoint: string;
-  token: string;
+  /** The full header value, or null for an attached agent that takes none. */
+  authorization: string | null;
   cwd: string;
   ownerPid: number;
   capabilities: readonly string[];
@@ -65,7 +66,7 @@ export async function registerDevelopmentAgent(input: {
     agentId: input.agentId,
     displayName: input.displayName,
     endpoint: input.endpoint,
-    authorization: `Bearer ${input.token}`,
+    authorization: input.authorization,
     cwd: input.cwd,
     ownerPid: input.ownerPid,
     capabilities: [...input.capabilities],
