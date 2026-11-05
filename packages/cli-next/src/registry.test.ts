@@ -7,7 +7,9 @@ test("a registry entry with no version still installs, under the default version
   const entry = selectEntry(
     {
       version: "1",
-      agents: [{ id: "nover", distribution: { npx: { package: "nover@1.0.0" } } }],
+      agents: [
+        { id: "nover", distribution: { npx: { package: "nover@1.0.0" } } },
+      ],
     },
     "nover",
   );
