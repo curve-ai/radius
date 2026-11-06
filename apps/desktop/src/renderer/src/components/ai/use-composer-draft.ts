@@ -18,43 +18,55 @@ interface DraftErrorState {
   message: string;
 }
 
-export function useComposerDraft(context: ComposerDraftContext): {
+export function useComposerDraft(
+  context: ComposerDraftContext,
+  initialValue = "",
+): {
   error: string | null;
-  flush(): Promise<void>;
+  flush(): Promise<string>;
   reset(): void;
   setValue(value: string): void;
   value: string;
 } {
   const contextKey = composerDraftContextKey(context);
   const editRevisionRef = useRef(0);
+  const loadRevisionRef = useRef(0);
+  const currentValueRef = useRef(initialValue);
+  const pendingLoadRef = useRef<Promise<void> | null>(null);
   const pendingSaveRef = useRef<Promise<void> | null>(null);
   const [state, setState] = useState<DraftState>({
     contextKey,
-    value: "",
+    value: initialValue,
   });
   const [errorState, setErrorState] = useState<DraftErrorState | null>(null);
 
   useEffect(() => {
     let disposed = false;
     const editRevisionAtLoad = editRevisionRef.current;
-    void window.radius
-      .getComposerDraft(context)
-      .then((content) => {
-        if (disposed || editRevisionRef.current !== editRevisionAtLoad) {
-          return;
-        }
-        setState({ contextKey, value: content ?? "" });
-        setErrorState((current) =>
-          current?.contextKey === contextKey ? null : current,
-        );
-      })
-      .catch(() => {
-        if (disposed) return;
-        setErrorState({
-          contextKey,
-          message: "This draft could not be loaded.",
-        });
+    const loadRevision = ++loadRevisionRef.current;
+    const load = window.radius.getComposerDraft(context).then((content) => {
+      if (
+        loadRevisionRef.current !== loadRevision ||
+        editRevisionRef.current !== editRevisionAtLoad
+      ) {
+        return;
+      }
+      currentValueRef.current = content ?? "";
+      // Cached chat captures can outlive this hook's mounted view.
+      if (disposed) return;
+      setState({ contextKey, value: content ?? "" });
+      setErrorState((current) =>
+        current?.contextKey === contextKey ? null : current,
+      );
+    });
+    pendingLoadRef.current = load;
+    void load.catch(() => {
+      if (disposed) return;
+      setErrorState({
+        contextKey,
+        message: "This draft could not be loaded.",
       });
+    });
     return () => {
       disposed = true;
       void draftWriteQueue.waitForIdle(contextKey);
@@ -64,6 +76,7 @@ export function useComposerDraft(context: ComposerDraftContext): {
   const setValue = useCallback(
     (value: string): void => {
       editRevisionRef.current += 1;
+      currentValueRef.current = value;
       setState({ contextKey, value });
       const pendingSave = draftWriteQueue.scheduleLatest(contextKey, () =>
         window.radius.saveComposerDraft({ context, content: value }),
@@ -96,16 +109,24 @@ export function useComposerDraft(context: ComposerDraftContext): {
 
   const reset = useCallback((): void => {
     editRevisionRef.current += 1;
+    currentValueRef.current = "";
     setState({ contextKey, value: "" });
     setErrorState((current) =>
       current?.contextKey === contextKey ? null : current,
     );
   }, [contextKey]);
 
-  const flush = useCallback(
-    (): Promise<void> => draftWriteQueue.waitForIdle(contextKey),
-    [contextKey],
-  );
+  const flush = useCallback(async (): Promise<string> => {
+    await pendingLoadRef.current;
+    try {
+      await draftWriteQueue.flush(contextKey);
+    } catch {
+      throw new Error(
+        "This draft could not be saved. Edit it and try again before moving the chat.",
+      );
+    }
+    return currentValueRef.current;
+  }, [contextKey]);
 
   return {
     error: errorState?.contextKey === contextKey ? errorState.message : null,

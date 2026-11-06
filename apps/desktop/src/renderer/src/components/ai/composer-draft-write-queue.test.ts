@@ -71,6 +71,46 @@ test("continues a context queue after a failed draft write", async () => {
   assert.deepEqual(operations, ["latest"]);
 });
 
+test("flushing one project does not inherit another project's save failure", async () => {
+  const queue = new ComposerDraftWriteQueue();
+  const firstProject = composerDraftContextKey({
+    kind: "new_chat",
+    projectId: "first",
+  });
+  const secondProject = composerDraftContextKey({
+    kind: "new_chat",
+    projectId: "second",
+  });
+  await assert.rejects(
+    queue.enqueue(firstProject, async () => {
+      throw new Error("first project failed");
+    }),
+    /first project failed/,
+  );
+
+  await queue.enqueue(secondProject, async () => undefined);
+  await queue.flush(secondProject);
+  await assert.rejects(queue.flush(firstProject), /first project failed/);
+
+  await queue.enqueue(firstProject, async () => undefined);
+  await queue.flush(firstProject);
+});
+
+test("flush reports a failed scheduled save after its queue entry is cleaned up", async () => {
+  const queue = new ComposerDraftWriteQueue();
+  const save = queue.scheduleLatest(
+    "session:failed",
+    async () => {
+      throw new Error("save failed");
+    },
+    10_000,
+  );
+  const rejected = assert.rejects(save, /save failed/);
+  await assert.rejects(queue.flush("session:failed"), /save failed/);
+  await rejected;
+  await assert.rejects(queue.flush("session:failed"), /save failed/);
+});
+
 test("coalesces pending draft saves and flushes the latest value", async () => {
   const queue = new ComposerDraftWriteQueue();
   const operations: string[] = [];

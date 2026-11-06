@@ -1,9 +1,45 @@
 import {
   appendSessionEvent,
   updateSessionTitle,
+  getSessionRevision,
+  setSessionAccessModeAndDefault,
   type AppendEventOptions,
   type RadiusDatabase,
 } from "@curve-ai/radius-storage";
+
+const sessionWrites = new Map<string, Promise<unknown>>();
+function withSessionWrite<T>(
+  sessionId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const pending = (sessionWrites.get(sessionId) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(operation);
+  sessionWrites.set(sessionId, pending);
+  void pending
+    .finally(() => {
+      if (sessionWrites.get(sessionId) === pending)
+        sessionWrites.delete(sessionId);
+    })
+    .catch(() => undefined);
+  return pending;
+}
+export async function updateSessionAccessModeForDesktop(
+  database: RadiusDatabase,
+  clientInstanceId: string,
+  sessionId: string | null,
+  accessMode: "ask" | "project" | "full",
+): Promise<void> {
+  const write = async (): Promise<void> => {
+    await setSessionAccessModeAndDefault(database, {
+      clientInstanceId,
+      sessionId,
+      accessMode,
+    });
+  };
+  if (sessionId) await withSessionWrite(sessionId, write);
+  else await write();
+}
 
 export type RuntimeSessionEvent = Parameters<typeof appendSessionEvent>[1];
 type RuntimeSessionEventBody = RuntimeSessionEvent extends infer Event
@@ -21,7 +57,6 @@ type RuntimeSessionEventBody = RuntimeSessionEvent extends infer Event
 
 export class RuntimeSessionJournal {
   private revision: number;
-  private tail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly database: RadiusDatabase,
@@ -33,9 +68,7 @@ export class RuntimeSessionJournal {
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
-    const pending = this.tail.catch(() => undefined).then(operation);
-    this.tail = pending.catch(() => undefined);
-    return pending;
+    return withSessionWrite(this.sessionId, operation);
   }
 
   append(
@@ -45,6 +78,9 @@ export class RuntimeSessionJournal {
     } = {},
   ): Promise<void> {
     return this.enqueue(async () => {
+      this.revision =
+        (await getSessionRevision(this.database, this.sessionId)) ??
+        this.revision;
       const nextRevision = this.revision + 1;
       await appendSessionEvent(
         this.database,

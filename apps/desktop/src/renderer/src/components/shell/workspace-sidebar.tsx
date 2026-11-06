@@ -1,3 +1,6 @@
+import { useLayoutEffect } from "react";
+import { useChatWindow } from "./chat-window-context";
+import { DetachedSessionList } from "./detached-session-list";
 import { Clock3, Plug, Search, SquarePen } from "lucide-react";
 import {
   useCallback,
@@ -179,10 +182,57 @@ export function WorkspaceSidebar({
   onWidthCommit: (width: number) => void;
   onSearch: () => void;
 }): ReactNode {
+  const { state: chatWindow, reportError } = useChatWindow();
+  const detached = chatWindow.kind === "detached";
   const { activeView, navigate } = useWorkspaceNavigation();
   const startNewChat = useStartNewChat();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
+  const materialRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const update = (): void => {
+      const node = materialRef.current;
+      if (!node || collapsed) {
+        void window.radius.chatWindows.setDropZone(null);
+        return;
+      }
+      const box = node.getBoundingClientRect();
+      const rows = [
+        ...node.querySelectorAll<HTMLElement>("[data-chat-session-id]"),
+      ].map((row) => ({
+        sessionId: row.dataset.chatSessionId!,
+        middle:
+          row.getBoundingClientRect().top +
+          row.getBoundingClientRect().height / 2,
+      }));
+      void window.radius.chatWindows
+        .setDropZone({
+          x: box.x,
+          y: 40,
+          width: box.width,
+          height: box.height - 40,
+          rows,
+        })
+        .catch(reportError);
+    };
+    update();
+    const node = materialRef.current;
+    const observer = new ResizeObserver(update);
+    if (node) observer.observe(node);
+    node?.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      node?.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [
+    collapsed,
+    width,
+    chatWindow.sessionIds,
+    chatWindow.dragging,
+    reportError,
+  ]);
 
   return (
     <>
@@ -208,95 +258,125 @@ export function WorkspaceSidebar({
         )}
       >
         <div className="electron-window-drag absolute inset-x-0 top-0 h-10" />
-        <div className="radius-sidebar-material relative flex h-full w-full flex-col">
+        <div
+          ref={materialRef}
+          data-chat-drop-target={chatWindow.dragging || undefined}
+          className="radius-sidebar-material relative flex h-full w-full flex-col data-[chat-drop-target=true]:ring-1 data-[chat-drop-target=true]:ring-inset data-[chat-drop-target=true]:ring-sidebar-ring/40"
+        >
           <SidebarHeader className="relative z-10 h-[5.25rem] shrink-0 justify-end px-2 pb-2 pt-8">
             <div className="flex h-8 items-center gap-1">
               <button
                 type="button"
                 className="electron-window-no-drag flex h-8 min-w-0 flex-1 items-center px-2 text-left"
                 title="Go to workspace"
-                onClick={startNewChat}
+                onClick={
+                  detached
+                    ? () =>
+                        void window.radius.chatWindows
+                          .openMain()
+                          .catch(reportError)
+                    : startNewChat
+                }
               >
                 <Wordmark size="sm" className="-translate-y-px" />
               </button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Search"
-                title="Search"
-                className="electron-window-no-drag size-7 shrink-0 rounded-md text-muted-foreground hover:text-sidebar-accent-foreground"
-                onClick={onSearch}
-              >
-                <Search className="size-3.5" aria-hidden />
-              </Button>
+              {!detached && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Search"
+                  title="Search"
+                  className="electron-window-no-drag size-7 shrink-0 rounded-md text-muted-foreground hover:text-sidebar-accent-foreground"
+                  onClick={onSearch}
+                >
+                  <Search className="size-3.5" aria-hidden />
+                </Button>
+              )}
             </div>
           </SidebarHeader>
 
           <SidebarContent className="overflow-hidden">
-            <SidebarGroup className="shrink-0 pt-1">
-              <SidebarGroupContent>
-                <nav aria-label="Primary">
-                  <SidebarMenu>
-                    {navigationItems.map((item) => {
-                      const isActive =
-                        item.showsActiveState && activeView === item.view;
+            {!detached && (
+              <SidebarGroup className="shrink-0 pt-1">
+                <SidebarGroupContent>
+                  <nav aria-label="Primary">
+                    <SidebarMenu>
+                      {navigationItems.map((item) => {
+                        const isActive =
+                          item.showsActiveState && activeView === item.view;
 
-                      return (
-                        <SidebarMenuItem key={item.view}>
-                          <SidebarMenuButton
-                            type="button"
-                            isActive={isActive}
-                            tooltip={item.label}
-                            className="focus-visible:ring-0 focus-visible:ring-offset-0 data-[active=true]:font-normal"
-                            aria-current={isActive ? "page" : undefined}
-                            onClick={() => {
-                              if (item.view === "workspace") startNewChat();
-                              else navigate(item.view);
-                            }}
-                          >
-                            <item.icon aria-hidden />
-                            <span>{item.label}</span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })}
-                  </SidebarMenu>
-                </nav>
-              </SidebarGroupContent>
-            </SidebarGroup>
+                        return (
+                          <SidebarMenuItem key={item.view}>
+                            <SidebarMenuButton
+                              type="button"
+                              isActive={isActive}
+                              tooltip={item.label}
+                              className="focus-visible:ring-0 focus-visible:ring-offset-0 data-[active=true]:font-normal"
+                              aria-current={isActive ? "page" : undefined}
+                              onClick={() => {
+                                if (item.view === "workspace") startNewChat();
+                                else navigate(item.view);
+                              }}
+                            >
+                              <item.icon aria-hidden />
+                              <span>{item.label}</span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </nav>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
 
-            <WorkspaceSessionList />
+            {detached ? <DetachedSessionList /> : <WorkspaceSessionList />}
           </SidebarContent>
 
-          <SidebarFooter className="p-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="w-full"
-              onClick={() => navigate("agents")}
-            >
-              Agents
-            </Button>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  type="button"
-                  tooltip="Account settings"
-                  className="h-10"
-                  onClick={() => navigate("settings")}
-                >
-                  <UserAvatar size={16} />
-                  <span className="min-w-0 flex-1 truncate">
-                    Local workspace
-                  </span>
-                  <span className="sr-only">Open account settings</span>
-                </SidebarMenuButton>
-                <DesktopUpdateAction />
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarFooter>
+          {!detached ? (
+            <SidebarFooter className="p-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="w-full"
+                onClick={() => navigate("agents")}
+              >
+                Agents
+              </Button>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    type="button"
+                    tooltip="Account settings"
+                    className="h-10"
+                    onClick={() => navigate("settings")}
+                  >
+                    <UserAvatar size={16} />
+                    <span className="min-w-0 flex-1 truncate">
+                      Local workspace
+                    </span>
+                    <span className="sr-only">Open account settings</span>
+                  </SidebarMenuButton>
+                  <DesktopUpdateAction />
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarFooter>
+          ) : (
+            <SidebarFooter className="p-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start font-normal text-muted-foreground"
+                onClick={() =>
+                  void window.radius.chatWindows.openMain().catch(reportError)
+                }
+              >
+                Open main window
+              </Button>
+            </SidebarFooter>
+          )}
 
           {!collapsed && (
             <WorkspaceSidebarResizeEdge

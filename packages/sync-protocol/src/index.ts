@@ -107,7 +107,12 @@ export const ApprovalDecisionSchema = z.enum([
   "expired",
 ]);
 
+export const AccessModeSchema = z.enum(["ask", "project", "full"]);
+export type AccessMode = z.infer<typeof AccessModeSchema>;
+
 export const SessionRecordSchema = z.object({
+  // Absent in legacy payloads: readers must preserve an existing saved mode.
+  accessMode: AccessModeSchema.optional(),
   id: uuid,
   originClientInstanceId: uuid,
   projectId: uuid.nullable(),
@@ -644,6 +649,7 @@ export const PullResponseSchema = z.object({
 });
 
 export const ProviderCapabilitiesSchema = z.object({
+  sessionAccessMode: z.boolean().optional(),
   protocolVersions: z.array(z.literal(SYNC_PROTOCOL_VERSION)).min(1),
   maxBatchSize: z.number().int().min(1).max(MAX_SYNC_BATCH_SIZE),
   artifactTransfer: z.boolean(),

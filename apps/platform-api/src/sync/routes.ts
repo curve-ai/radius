@@ -16,11 +16,7 @@ import {
 
 import { getArtifactStore } from "./artifact-store.js";
 import { verifyDeviceRequest } from "./device-auth.js";
-import {
-  applySyncChange,
-  pullSyncChanges,
-  type SyncOwner,
-} from "./service.js";
+import { applySyncChange, pullSyncChanges, type SyncOwner } from "./service.js";
 
 const {
   organizationMemberships,
@@ -86,7 +82,9 @@ async function resolveSyncOwner(
 }
 
 export function createSyncRoutes(database: PlatformDatabase) {
-  const sync = new Hono<{ Variables: { identity: { accountId: string; response: SyncIdentity } } }>();
+  const sync = new Hono<{
+    Variables: { identity: { accountId: string; response: SyncIdentity } };
+  }>();
 
   const owner = async (context: {
     get: (key: "identity") => { accountId: string; response: SyncIdentity };
@@ -109,6 +107,7 @@ export function createSyncRoutes(database: PlatformDatabase) {
   sync.get("/capabilities", (context) =>
     context.json({
       protocolVersions: [SYNC_PROTOCOL_VERSION],
+      sessionAccessMode: true,
       maxBatchSize: MAX_SYNC_BATCH_SIZE,
       artifactTransfer: getArtifactStore() !== null,
     }),

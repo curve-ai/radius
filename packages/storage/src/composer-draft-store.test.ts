@@ -218,7 +218,7 @@ test("deleting a session cascades its local composer draft", async () => {
   });
 });
 
-test("archiving a session removes its device-local composer draft", async () => {
+test("archiving a session retains its device-local composer draft", async () => {
   await withDatabase(async (database) => {
     const session = await createSession(database, {
       originClientInstanceId: clientInstanceId,
@@ -228,7 +228,7 @@ test("archiving a session removes its device-local composer draft", async () => 
     await saveComposerDraft(database, {
       clientInstanceId,
       context,
-      content: "Do not retain after archive",
+      content: "Retain after archive",
     });
 
     await setSessionArchived(database, {
@@ -237,7 +237,7 @@ test("archiving a session removes its device-local composer draft", async () => 
     });
     assert.equal(
       await getComposerDraft(database, { clientInstanceId, context }),
-      null,
+      "Retain after archive",
     );
   });
 });

@@ -39,7 +39,7 @@ import {
   artifactTransfers,
   artifacts,
   clientInstances,
-  composerDrafts,
+  desktopPreferences,
   errors,
   eventArtifacts,
   eventRuns,
@@ -82,6 +82,7 @@ export interface CreateSessionInput {
   originClientInstanceId: string;
   projectId?: string | null;
   title: string;
+  accessMode?: "ask" | "project" | "full";
   status?: SessionRecord["status"];
   now?: number;
 }
@@ -882,9 +883,7 @@ async function insertEventSubtype(
         sessionId: event.sessionId,
         createdByEventId: event.eventId,
         providerKey: event.providerKey,
-        providerRunId: event.providerSessionId
-          ? event.providerRunId
-          : null,
+        providerRunId: event.providerSessionId ? event.providerRunId : null,
         // Older events predate the split and carry the session id in
         // `providerRunId`; read it from there so history stays queryable.
         providerSessionId: event.providerSessionId ?? event.providerRunId,
@@ -2068,6 +2067,7 @@ export async function updateSessionTitle(
       originClientInstanceId: current.originClientInstanceId,
       projectId: current.projectId,
       title,
+      accessMode: current.accessMode,
       status: current.status,
       revision: current.revision + (titleChanged ? 1 : 0),
       createdAt: toIso(current.createdAtMs),
@@ -2139,6 +2139,7 @@ export async function setSessionArchived(
       originClientInstanceId: current.originClientInstanceId,
       projectId: current.projectId,
       title: current.title,
+      accessMode: current.accessMode,
       status: current.status,
       revision: current.revision + 1,
       createdAt: toIso(current.createdAtMs),
@@ -2174,11 +2175,123 @@ export async function setSessionArchived(
     }
 
     await tx.delete(sessionPins).where(eq(sessionPins.sessionId, session.id));
-    await tx
-      .delete(composerDrafts)
-      .where(eq(composerDrafts.sessionId, session.id));
     await insertLocalChange(tx, envelope, payloadJson);
     return session;
+  });
+}
+
+export async function getComposerAccessMode(
+  database: RadiusDatabase,
+  clientInstanceId: string,
+  sessionId?: string | null,
+): Promise<"ask" | "project" | "full"> {
+  if (sessionId) {
+    const [session] = await database.db
+      .select({ mode: sessions.accessMode })
+      .from(sessions)
+      .where(and(eq(sessions.id, sessionId), isNull(sessions.deletedAtMs)))
+      .limit(1);
+    if (!session) throw new Error("Session does not exist");
+    return session.mode;
+  }
+  const [preferences] = await database.db
+    .select()
+    .from(desktopPreferences)
+    .where(eq(desktopPreferences.clientInstanceId, clientInstanceId))
+    .limit(1);
+  return preferences?.defaultAccessMode ?? "project";
+}
+
+export async function setSessionAccessModeAndDefault(
+  database: RadiusDatabase,
+  input: {
+    clientInstanceId: string;
+    sessionId?: string | null;
+    accessMode: "ask" | "project" | "full";
+  },
+): Promise<number | null> {
+  if (!["ask", "project", "full"].includes(input.accessMode))
+    throw new Error("Invalid access mode");
+  return database.db.transaction(async (tx) => {
+    const [client] = await tx
+      .select()
+      .from(clientInstances)
+      .where(
+        and(
+          eq(clientInstances.id, input.clientInstanceId),
+          eq(clientInstances.isLocal, true),
+        ),
+      )
+      .limit(1);
+    if (!client) throw new Error("Preferences must belong to the local client");
+    const now = Date.now();
+    let revision: number | null = null;
+    if (input.sessionId) {
+      const [current] = await tx
+        .select()
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.id, input.sessionId),
+            eq(sessions.originClientInstanceId, input.clientInstanceId),
+            isNull(sessions.archivedAtMs),
+            isNull(sessions.deletedAtMs),
+          ),
+        )
+        .limit(1);
+      if (!current)
+        throw new Error("Only the local origin can change session access");
+      revision = current.revision;
+      if (current.accessMode !== input.accessMode) {
+        revision += 1;
+        const session = SessionRecordSchema.parse({
+          id: current.id,
+          originClientInstanceId: current.originClientInstanceId,
+          projectId: current.projectId,
+          title: current.title,
+          status: current.status,
+          accessMode: input.accessMode,
+          revision,
+          createdAt: toIso(current.createdAtMs),
+          updatedAt: toIso(now),
+          archivedAt: null,
+          deletedAt: null,
+        });
+        const { envelope, payloadJson } = prepareLocalChange({
+          originClientInstanceId: input.clientInstanceId,
+          sessionId: current.id,
+          sessionRevision: revision,
+          createdAt: session.updatedAt,
+          kind: "session.upsert",
+          payload: session,
+        });
+        const updated = await tx
+          .update(sessions)
+          .set({ accessMode: input.accessMode, revision, updatedAtMs: now })
+          .where(
+            and(
+              eq(sessions.id, current.id),
+              eq(sessions.revision, current.revision),
+            ),
+          )
+          .returning({ id: sessions.id });
+        if (updated.length !== 1)
+          throw new Error("Session revision changed concurrently");
+        await insertLocalChange(tx, envelope, payloadJson);
+      }
+    }
+    await tx
+      .insert(desktopPreferences)
+      .values({
+        clientInstanceId: input.clientInstanceId,
+        defaultAccessMode: input.accessMode,
+        updatedAtMs: now,
+      })
+      .onConflictDoUpdate({
+        target: desktopPreferences.clientInstanceId,
+        set: { defaultAccessMode: input.accessMode, updatedAtMs: now },
+      });
+    return revision;
   });
 }
 
@@ -2187,11 +2300,19 @@ export async function createSession(
   input: CreateSessionInput,
 ): Promise<SessionRecord> {
   const now = input.now ?? Date.now();
+  const [preferences] = await database.db
+    .select()
+    .from(desktopPreferences)
+    .where(
+      eq(desktopPreferences.clientInstanceId, input.originClientInstanceId),
+    )
+    .limit(1);
   const session = SessionRecordSchema.parse({
     id: randomUUID(),
     originClientInstanceId: input.originClientInstanceId,
     projectId: input.projectId ?? null,
     title: input.title,
+    accessMode: input.accessMode ?? preferences?.defaultAccessMode ?? "project",
     status: input.status ?? "active",
     revision: 1,
     createdAt: toIso(now),
@@ -2237,6 +2358,7 @@ export async function createSession(
       originClientInstanceId: session.originClientInstanceId,
       projectId: session.projectId,
       title: session.title,
+      accessMode: session.accessMode ?? "project",
       status: session.status,
       revision: session.revision,
       createdAtMs: now,
@@ -2953,6 +3075,7 @@ export async function applyRemoteChange(
           originClientInstanceId: session.originClientInstanceId,
           projectId: session.projectId,
           title: session.title,
+          accessMode: session.accessMode ?? "project",
           status: session.status,
           revision: session.revision,
           createdAtMs: Date.parse(session.createdAt),
@@ -2968,6 +3091,7 @@ export async function applyRemoteChange(
           .set({
             projectId: session.projectId,
             title: session.title,
+            ...(session.accessMode ? { accessMode: session.accessMode } : {}),
             status: session.status,
             revision: session.revision,
             updatedAtMs: Date.parse(session.updatedAt),

@@ -141,9 +141,7 @@ async function main(): Promise<void> {
     // --- device signature ------------------------------------------------
     const signedBody = "{}";
     const signedTimestamp = new Date().toISOString();
-    const signedUrl = new URL(
-      "http://localhost/api/platform/v1/sync/push",
-    );
+    const signedUrl = new URL("http://localhost/api/platform/v1/sync/push");
     const signedHash = createHash("sha256").update(signedBody).digest("hex");
     const signedInput = `POST\n${signedUrl.pathname}\n${signedTimestamp}\n${signedHash}`;
     const signature = sign(null, Buffer.from(signedInput), privateKey).toString(
@@ -746,6 +744,59 @@ async function main(): Promise<void> {
       ).length,
       1,
     );
+
+    const modeSessionId = randomUUID();
+    const modePayload = {
+      id: modeSessionId,
+      originClientInstanceId: deviceId,
+      projectId: null,
+      title: "Mode compatibility",
+      status: "active" as const,
+      accessMode: "ask" as const,
+      revision: 1,
+      createdAt,
+      updatedAt: createdAt,
+      archivedAt: null,
+      deletedAt: null,
+    };
+    const modeChange = change({
+      protocolVersion: 1,
+      changeId: randomUUID(),
+      originClientInstanceId: deviceId,
+      sessionId: modeSessionId,
+      sessionRevision: 1,
+      payloadSchemaVersion: 1,
+      createdAt,
+      kind: "session.upsert",
+      payload: modePayload,
+    });
+    assert.equal(
+      (await applySyncChange(database, owner, deviceId, modeChange)).status,
+      "accepted",
+    );
+    const { accessMode: omittedMode, ...legacyModePayload } = modePayload;
+    assert.equal(omittedMode, "ask");
+    const legacyModeChange = change({
+      protocolVersion: 1,
+      changeId: randomUUID(),
+      originClientInstanceId: deviceId,
+      sessionId: modeSessionId,
+      sessionRevision: 2,
+      payloadSchemaVersion: 1,
+      createdAt,
+      kind: "session.upsert",
+      payload: { ...legacyModePayload, title: "Legacy rename", revision: 2 },
+    });
+    assert.equal(
+      (await applySyncChange(database, owner, deviceId, legacyModeChange))
+        .status,
+      "accepted",
+    );
+    const [modeProjection] = await database
+      .select()
+      .from(syncSessions)
+      .where(eq(syncSessions.id, modeSessionId));
+    assert.equal(modeProjection.accessMode, "ask");
 
     console.info(
       "Platform sync verification passed: projections, cursor, device binding and organization isolation.",

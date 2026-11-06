@@ -1,3 +1,10 @@
+import {
+  initializeChatWindows,
+  openMainChatWindow,
+  restoreChatWindows,
+  assertChatWindowOwnsSession,
+  releaseArchivedChat,
+} from "./chat-windows";
 import { mkdirSync } from "node:fs";
 import { readDistribution } from "./distribution";
 import {
@@ -67,10 +74,19 @@ import {
   resolveMarkdownMedia,
 } from "./markdown-resource";
 import {
-  clearComposerDraftForRenderer,
   getComposerDraftForRenderer,
   saveComposerDraftForRenderer,
 } from "./composer-drafts";
+import {
+  getComposerStateForRenderer,
+  getComposerAccessModeForRenderer,
+  setComposerAccessModeForRenderer,
+  addComposerAttachmentsForRenderer,
+  removeComposerAttachmentForRenderer,
+  clearAcceptedComposerDraft,
+  cleanupUnusedComposerAttachments,
+} from "./composer-state";
+import { parseComposerDraftContext } from "./composer-drafts";
 import { resolveSessionArtifactImage } from "./session-artifacts";
 import { openSessionFile } from "./session-file-links";
 import {
@@ -124,11 +140,7 @@ const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 
 app.on("second-instance", () => {
-  const mainWindow = BrowserWindow.getAllWindows()[0];
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  openMainChatWindow();
 });
 
 const isSafeExternalUrl = (value: string): boolean => {
@@ -144,6 +156,9 @@ const isSafeExternalUrl = (value: string): boolean => {
 };
 
 const publicChannels = new Set([
+  "radius:chat-window-state",
+  "radius:chat-window-reply",
+  "radius:chat-window-drop-zone",
   "radius:auth-status",
   "radius:auth-sign-in",
   "radius:auth-sign-out",
@@ -165,14 +180,36 @@ const handleRadiusIpc: typeof ipcMain.handle = (channel, listener) => {
     )
       throw new Error("DISTRIBUTION_MANAGED_CONNECTION");
     if (!publicChannels.has(channel)) assertDesktopAuthenticated();
+    if (
+      [
+        "radius:start-agent-prompt",
+        "radius:save-composer-draft",
+        "radius:clear-composer-draft",
+        "radius:set-composer-access-mode",
+        "radius:add-composer-attachments",
+        "radius:remove-composer-attachment",
+        "radius:set-agent-session-config-option",
+        "radius:set-agent-session-mode",
+      ].includes(channel)
+    ) {
+      const value = args[0];
+      assertChatWindowOwnsSession(
+        event,
+        value?.sessionId ?? value?.context?.sessionId,
+      );
+    }
     return listener(event, ...args);
   });
 };
 
-const createWindow = (): void => {
+const createWindow = (
+  kind: "main" | "detached" = "main",
+  bounds?: Partial<Electron.Rectangle>,
+): BrowserWindow => {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
+    ...bounds,
     minWidth: 480,
     minHeight: 620,
     show: false,
@@ -201,7 +238,8 @@ const createWindow = (): void => {
     void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  if (kind === "main")
+    mainWindow.once("ready-to-show", () => mainWindow.show());
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeExternalUrl(url)) {
@@ -212,6 +250,7 @@ const createWindow = (): void => {
   });
 
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+  return mainWindow;
 };
 
 // This method will be called when Electron has finished
@@ -223,6 +262,9 @@ app.whenReady().then(async () => {
   try {
     await removeOrphanedFxProfiles();
     const storageContext = await initializeStorage();
+    await cleanupUnusedComposerAttachments().catch((error) =>
+      console.error("[drafts] Attachment cleanup could not finish", error),
+    );
     void reportPlatformClientInstallation(storageContext).catch((error) => {
       console.error(
         "[platform] Radius could not report this client installation",
@@ -296,7 +338,22 @@ app.whenReady().then(async () => {
       saveComposerDraftForRenderer(input),
     );
     handleRadiusIpc("radius:clear-composer-draft", (_event, context) =>
-      clearComposerDraftForRenderer(context),
+      clearAcceptedComposerDraft(parseComposerDraftContext(context)),
+    );
+    handleRadiusIpc("radius:get-composer-state", (_event, context) =>
+      getComposerStateForRenderer(context),
+    );
+    handleRadiusIpc("radius:get-composer-access-mode", (_event, context) =>
+      getComposerAccessModeForRenderer(context),
+    );
+    handleRadiusIpc("radius:set-composer-access-mode", (_event, value) =>
+      setComposerAccessModeForRenderer(value),
+    );
+    handleRadiusIpc("radius:add-composer-attachments", (_event, value) =>
+      addComposerAttachmentsForRenderer(value),
+    );
+    handleRadiusIpc("radius:remove-composer-attachment", (_event, value) =>
+      removeComposerAttachmentForRenderer(value),
     );
     handleRadiusIpc(
       "radius:choose-project-folder",
@@ -316,10 +373,10 @@ app.whenReady().then(async () => {
     handleRadiusIpc("radius:rename-session", renameSessionFromRenderer);
     handleRadiusIpc("radius:reveal-project", revealProjectInFinder);
     handleRadiusIpc("radius:set-session-pinned", setSessionPinnedFromRenderer);
-    handleRadiusIpc(
-      "radius:set-session-archived",
-      setSessionArchivedFromRenderer,
-    );
+    handleRadiusIpc("radius:set-session-archived", async (event, sessionId) => {
+      await setSessionArchivedFromRenderer(event, sessionId);
+      releaseArchivedChat(sessionId);
+    });
     handleRadiusIpc("radius:list-connectors", listConnectorsForRenderer);
     handleRadiusIpc("radius:list-connector-tools", (_event, installationId) =>
       listConnectorToolsForRenderer(installationId),
@@ -416,7 +473,9 @@ app.whenReady().then(async () => {
     handleRadiusIpc("radius:auth-sign-in", signInToDistribution);
     handleRadiusIpc("radius:auth-sign-out", signOutOfDistribution);
     handleRadiusIpc("radius:auth-cancel", cancelDistributionSignIn);
-    createWindow();
+    initializeChatWindows(createWindow, handleRadiusIpc);
+    await restoreChatWindows();
+    openMainChatWindow();
     void initializeDesktopAuthentication(stopAgentRuntime);
     await initializeDevelopmentAgentConnections(() => {
       for (const window of BrowserWindow.getAllWindows()) {
@@ -474,6 +533,6 @@ app.on("activate", () => {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+    openMainChatWindow();
   }
 });

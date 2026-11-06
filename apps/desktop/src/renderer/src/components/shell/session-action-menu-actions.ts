@@ -31,6 +31,8 @@ export async function showSessionActionMenu(
   options: SessionActionMenuOptions,
   point: NativeControlMenuPoint,
 ): Promise<void> {
+  const windowState = await window.radius.chatWindows.state();
+  const owner = windowState.detached[options.sessionId];
   const copyItems: NativeControlMenuLeafItem[] = [
     {
       id: SESSION_ACTION.copyWorkingDirectory,
@@ -90,19 +92,57 @@ export async function showSessionActionMenu(
       id: "open-new-window",
       label: "Open in new window",
       icon: "macwindow",
-      enabled: false,
-      toolTip: "Opening a chat in another window is not implemented yet",
+      enabled: true,
     },
   ];
+  if (owner)
+    items.push({
+      id: "bring-back",
+      label: "Bring back to main window",
+      icon: "macwindow",
+    });
+  if (owner === windowState.id)
+    items.push({ id: "close-chat", label: "Close tab", icon: "xmark" });
+  const targets = windowState.windows.filter(
+    (target) => target.id !== windowState.detached[options.sessionId],
+  );
+  if (targets.length)
+    items.push({
+      id: "move-to-window",
+      label: "Move to window",
+      icon: "macwindow",
+      submenu: targets.slice(0, 16).map((target, index) => ({
+        id: `move-window-${index}`,
+        label: target.title.slice(0, 120) || "Chat window",
+        icon: "macwindow",
+      })),
+    });
   const selection = await window.radius.showNativeControlMenu({
     items,
     point,
     positioningItem: 0,
   });
 
-  if (selection === SESSION_ACTION.togglePin) await options.onTogglePin();
-  else if (selection === SESSION_ACTION.rename) options.onRename();
-  else if (selection === SESSION_ACTION.markUnread) options.onMarkUnread();
+  const targetIndex = targets.findIndex(
+    (_target, index) => selection === `move-window-${index}`,
+  );
+  if (targetIndex >= 0)
+    await window.radius.chatWindows.move(
+      options.sessionId,
+      targets[targetIndex].id,
+    );
+  else if (selection === "close-chat")
+    await window.radius.chatWindows.close(options.sessionId);
+  else if (selection === "open-new-window")
+    await window.radius.chatWindows.detach(options.sessionId);
+  else if (selection === "bring-back")
+    await window.radius.chatWindows.bringBack(options.sessionId);
+  else if (selection === SESSION_ACTION.togglePin) await options.onTogglePin();
+  else if (selection === SESSION_ACTION.rename) {
+    if (owner && owner !== windowState.id)
+      await window.radius.chatWindows.beginRename(options.sessionId);
+    else options.onRename();
+  } else if (selection === SESSION_ACTION.markUnread) options.onMarkUnread();
   else if (selection === SESSION_ACTION.archive) await options.onArchive();
   else if (selection === SESSION_ACTION.copyWorkingDirectory) {
     await window.radius.writeClipboardText(

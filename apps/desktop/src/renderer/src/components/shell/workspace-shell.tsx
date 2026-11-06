@@ -1,3 +1,9 @@
+import { getChatViewState } from "./chat-view-state";
+import {
+  useChatWindow,
+  windowPreferenceKey,
+  readWindowPreference,
+} from "./chat-window-context";
 import {
   useCallback,
   useEffect,
@@ -45,7 +51,7 @@ type WorkspaceDimensions = {
 };
 
 function getInitialSidebarWidth(): number {
-  const storedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+  const storedWidth = Number(readWindowPreference(SIDEBAR_WIDTH_STORAGE_KEY));
 
   return Number.isFinite(storedWidth) && storedWidth > 0
     ? clampWorkspaceSidebarWidth(storedWidth)
@@ -57,6 +63,7 @@ export function WorkspaceShell({
 }: {
   children: ReactNode;
 }): ReactNode {
+  const { state: chatWindow } = useChatWindow();
   const { activeView } = useWorkspaceNavigation();
   const { activeSession } = useProjects();
   const isNewChat = activeView === "workspace" && activeSession === null;
@@ -68,7 +75,7 @@ export function WorkspaceShell({
       ? activeSession.session.title
       : WORKSPACE_TITLES[activeView];
   const [sidebarOpen, setSidebarOpen] = useState(
-    () => localStorage.getItem("sidebar_state") !== "false",
+    () => readWindowPreference("sidebar_state") !== "false",
   );
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [dimensions, setDimensions] = useState<WorkspaceDimensions>(() => ({
@@ -78,8 +85,17 @@ export function WorkspaceShell({
   const [windowResizing, setWindowResizing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolPanelOpen, setToolPanelOpen] = useState(
-    () => localStorage.getItem(TOOL_PANEL_STORAGE_KEY) !== "false",
+    () => readWindowPreference(TOOL_PANEL_STORAGE_KEY) !== "false",
   );
+  const sessionId = activeSession?.session.id;
+  useEffect(() => {
+    const open = sessionId
+      ? getChatViewState(sessionId)?.toolPanelOpen
+      : undefined;
+    if (open === undefined) return;
+    const frame = window.requestAnimationFrame(() => setToolPanelOpen(open));
+    return () => window.cancelAnimationFrame(frame);
+  }, [sessionId]);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const workspaceScrollRef = useRef<HTMLElement>(null);
   const reduceMotion = useReducedMotion();
@@ -168,16 +184,22 @@ export function WorkspaceShell({
 
   const handleSidebarOpenChange = useCallback((open: boolean) => {
     setSidebarOpen(open);
-    localStorage.setItem("sidebar_state", String(open));
+    localStorage.setItem(windowPreferenceKey("sidebar_state"), String(open));
   }, []);
 
   const handleSidebarWidthCommit = useCallback((width: number) => {
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width));
+    localStorage.setItem(
+      windowPreferenceKey(SIDEBAR_WIDTH_STORAGE_KEY),
+      String(width),
+    );
   }, []);
 
   const handleToolPanelOpenChange = useCallback((open: boolean) => {
     setToolPanelOpen(open);
-    localStorage.setItem(TOOL_PANEL_STORAGE_KEY, String(open));
+    localStorage.setItem(
+      windowPreferenceKey(TOOL_PANEL_STORAGE_KEY),
+      String(open),
+    );
   }, []);
 
   return (
@@ -204,7 +226,9 @@ export function WorkspaceShell({
         onWidthCommit={handleSidebarWidthCommit}
         onSearch={() => setSearchOpen(true)}
       />
-      <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      {chatWindow.kind === "main" ? (
+        <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      ) : null}
       <WorkspaceHistoryControls />
       <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <WorkspaceWindowResizeContext.Provider value={windowResizing}>

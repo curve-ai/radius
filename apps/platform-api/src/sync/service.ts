@@ -231,9 +231,7 @@ async function insertEventProjection(
         eventId: event.eventId,
         sessionId: event.sessionId,
         providerKey: event.providerKey,
-        providerRunId: event.providerSessionId
-          ? event.providerRunId
-          : null,
+        providerRunId: event.providerSessionId ? event.providerRunId : null,
         // Optional on the wire, so a desktop that predates the split still
         // syncs; its session id arrives in providerRunId and is read from
         // there rather than being dropped.
@@ -629,7 +627,10 @@ async function applySessionChange(
         .limit(1);
       if (!project) return conflict(change.changeId, "PROJECT_NOT_FOUND");
     }
-    const values = sessionValues(owner, change.payload);
+    const values = sessionValues(owner, {
+      ...change.payload,
+      accessMode: change.payload.accessMode ?? current?.accessMode ?? "project",
+    });
     const [written] = await transaction
       .insert(syncSessions)
       .values(values)
@@ -764,6 +765,7 @@ function sessionValues(owner: SyncOwner, session: SessionRecord) {
     originDeviceId: session.originClientInstanceId,
     projectId: session.projectId,
     title: session.title,
+    accessMode: session.accessMode ?? "project",
     status: session.status,
     revision: session.revision,
     createdAt: new Date(session.createdAt),

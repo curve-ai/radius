@@ -13,10 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { radiusSync } from "../common.js";
-import {
-  organizationMemberships,
-  organizations,
-} from "../organizations.js";
+import { organizationMemberships, organizations } from "../organizations.js";
 
 /**
  * A device that pushes conversations.
@@ -124,6 +121,9 @@ export const syncSessions = radiusSync.table(
       onDelete: "cascade",
     }),
     title: text("title").notNull(),
+    accessMode: text("access_mode", { enum: ["ask", "project", "full"] })
+      .notNull()
+      .default("project"),
     status: text("status").notNull(),
     revision: bigint("revision", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -164,6 +164,10 @@ export const syncSessions = radiusSync.table(
     check(
       "sync_sessions_status_check",
       sql`${table.status} IN ('active', 'completed', 'cancelled', 'failed')`,
+    ),
+    check(
+      "sync_sessions_access_mode_check",
+      sql`${table.accessMode} IN ('ask', 'project', 'full')`,
     ),
     check("sync_sessions_revision_check", sql`${table.revision} > 0`),
   ],

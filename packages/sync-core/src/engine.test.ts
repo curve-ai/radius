@@ -61,6 +61,7 @@ class EchoProvider implements SyncProvider {
   async capabilities(): Promise<ProviderCapabilities> {
     return {
       protocolVersions: [1],
+      sessionAccessMode: true,
       maxBatchSize: 100,
       artifactTransfer: false,
     };
@@ -91,7 +92,12 @@ class ArtifactProvider extends EchoProvider {
   uploaded = new Map<string, Uint8Array>();
 
   override async capabilities(): Promise<ProviderCapabilities> {
-    return { protocolVersions: [1], maxBatchSize: 100, artifactTransfer: true };
+    return {
+      protocolVersions: [1],
+      sessionAccessMode: true,
+      maxBatchSize: 100,
+      artifactTransfer: true,
+    };
   }
 
   async hasArtifact(): Promise<boolean> {
@@ -136,6 +142,54 @@ test("rejects artifact paths outside the configured root", async () => {
       await realpath(nestedArtifact),
     );
   } finally {
+    await removeTemporaryDirectory(directory);
+  }
+});
+
+test("keeps mode-bearing changes queued when a provider has not advertised support", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "radius-mode-provider-"));
+  const database = await openRadiusDatabase({
+    path: path.join(directory, "radius.db"),
+  });
+  try {
+    await migrateRadiusDatabase(database, migrationsFolder);
+    await ensureClientInstance(database, {
+      id: clientInstanceId,
+      displayName: "Test",
+      platform: "darwin",
+      publicKeyJwk: "{}",
+    });
+    await configureSyncConnection(database, {
+      id: connectionId,
+      providerKey: "old",
+      endpointUrl: "https://sync.example.test",
+      credentialRef: null,
+      remoteSubject: null,
+      accountLabel: null,
+      enabled: true,
+    });
+    await createSession(database, {
+      originClientInstanceId: clientInstanceId,
+      title: "Keep queued",
+      accessMode: "ask",
+    });
+    const provider = new EchoProvider();
+    provider.capabilities = async () => ({
+      protocolVersions: [1],
+      maxBatchSize: 100,
+      artifactTransfer: false,
+    });
+    await assert.rejects(
+      new SyncEngine().run(database, connectionId, clientInstanceId, provider),
+      /SESSION_ACCESS_MODE_UPGRADE_REQUIRED/,
+    );
+    assert.equal(provider.changes.length, 0);
+    assert.equal(
+      (await database.db.select().from(syncDeliveries))[0]?.state,
+      "pending",
+    );
+  } finally {
+    database.close();
     await removeTemporaryDirectory(directory);
   }
 });

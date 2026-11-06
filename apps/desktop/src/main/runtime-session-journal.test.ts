@@ -9,13 +9,17 @@ import {
   clientInstances,
   createSession,
   getSessionRevision,
+  getComposerAccessMode,
   listRecentSessions,
   listSessionTranscript,
   migrateRadiusDatabase,
   openRadiusDatabase,
 } from "@curve-ai/radius-storage";
 
-import { RuntimeSessionJournal } from "./runtime-session-journal";
+import {
+  RuntimeSessionJournal,
+  updateSessionAccessModeForDesktop,
+} from "./runtime-session-journal";
 
 const migrationsFolder = fileURLToPath(
   new URL("../../../../packages/storage/drizzle", import.meta.url),
@@ -36,7 +40,7 @@ async function removeTemporaryDirectory(directory: string): Promise<void> {
   }
 }
 
-test("serializes an agent title between transcript events", async () => {
+test("serializes session mode and title changes between transcript events", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "radius-title-journal-"));
   const database = await openRadiusDatabase({
     path: path.join(directory, "radius.db"),
@@ -75,6 +79,12 @@ test("serializes an agent title between transcript events", async () => {
       triggeringMessageEventId: null,
     });
     await journal.updateTitle("Generated session title");
+    const modeUpdate = updateSessionAccessModeForDesktop(
+      database,
+      clientId,
+      session.id,
+      "ask",
+    );
     await journal.append({
       eventId: "3421d2a4-9505-4352-980e-dc48b2ed3744",
       agentRunId,
@@ -83,7 +93,13 @@ test("serializes an agent title between transcript events", async () => {
       detail: null,
     });
 
-    assert.equal(await getSessionRevision(database, session.id), 4);
+    await modeUpdate;
+    assert.equal(await getSessionRevision(database, session.id), 5);
+    assert.equal(
+      await getComposerAccessMode(database, clientId, session.id),
+      "ask",
+    );
+    assert.equal(await getComposerAccessMode(database, clientId), "ask");
     assert.equal(
       (await listRecentSessions(database, clientId))[0]?.title,
       "Generated session title",

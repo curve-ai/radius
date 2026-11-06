@@ -1,3 +1,8 @@
+import {
+  CHAT_WINDOWS_CHANNEL,
+  CHAT_WINDOW_REQUEST_CHANNEL,
+  type ChatWindowApi,
+} from "../chat-window-types";
 import { contextBridge, ipcRenderer } from "electron";
 
 import {
@@ -23,7 +28,50 @@ import type { NativeControlMenuInput } from "../radius-api";
 import type { StartAgentPromptInput } from "../radius-api";
 import type { ResolveToolApprovalInput } from "../radius-api";
 
+const chatWindowListener = <T>(
+  channel: string,
+  listener: (value: T) => void,
+): (() => void) => {
+  const handler = (_event: Electron.IpcRendererEvent, value: T): void =>
+    listener(value);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+};
+const chatWindows: ChatWindowApi = {
+  beginRename: (id) => ipcRenderer.invoke("radius:chat-window-rename", id),
+  onRename: (listener) =>
+    chatWindowListener("radius:chat-window-rename", listener),
+  state: () => ipcRenderer.invoke("radius:chat-window-state"),
+  restoreViews: () => ipcRenderer.invoke("radius:chat-window-restore-views"),
+  onChanged: (listener) => chatWindowListener(CHAT_WINDOWS_CHANNEL, listener),
+  onRequest: (listener) =>
+    chatWindowListener(CHAT_WINDOW_REQUEST_CHANNEL, listener),
+  onError: (listener) =>
+    chatWindowListener("radius:chat-window-error", listener),
+  onNavigateMain: (listener) =>
+    chatWindowListener("radius:chat-main-navigate", listener),
+  reply: (id, result) =>
+    ipcRenderer.invoke("radius:chat-window-reply", id, result),
+  move: (id, windowId) =>
+    ipcRenderer.invoke("radius:chat-window-move", id, windowId),
+  detach: (id) => ipcRenderer.invoke("radius:chat-window-detach", id),
+  reorder: (id, direction) =>
+    ipcRenderer.invoke("radius:chat-window-reorder", id, direction),
+  close: (id) => ipcRenderer.invoke("radius:chat-window-close", id),
+  bringBack: (id) => ipcRenderer.invoke("radius:chat-window-bring-back", id),
+  focus: (id) => ipcRenderer.invoke("radius:chat-window-focus", id),
+  select: (id) => ipcRenderer.invoke("radius:chat-window-select", id),
+  openMain: (view) => ipcRenderer.invoke("radius:chat-window-open-main", view),
+  setDropZone: (zone) =>
+    ipcRenderer.invoke("radius:chat-window-drop-zone", zone),
+  beginDrag: (id, token) =>
+    ipcRenderer.invoke("radius:chat-window-drag-begin", id, token),
+  endDrag: (token, cancelled) =>
+    ipcRenderer.invoke("radius:chat-window-drag-end", token, cancelled),
+};
+
 const radiusApi = {
+  chatWindows,
   authenticationStatus: () => ipcRenderer.invoke("radius:auth-status"),
   signIn: () => ipcRenderer.invoke("radius:auth-sign-in"),
   signOut: () => ipcRenderer.invoke("radius:auth-sign-out"),
@@ -44,6 +92,21 @@ const radiusApi = {
     ipcRenderer.invoke("radius:list-session-transcript", sessionId),
   getComposerDraft: (context: ComposerDraftContext) =>
     ipcRenderer.invoke("radius:get-composer-draft", context),
+  getComposerState: (context) =>
+    ipcRenderer.invoke("radius:get-composer-state", context),
+  getComposerAccessMode: (context) =>
+    ipcRenderer.invoke("radius:get-composer-access-mode", context),
+  setComposerAccessMode: (context, mode) =>
+    ipcRenderer.invoke("radius:set-composer-access-mode", { context, mode }),
+  addComposerAttachments: (input) =>
+    ipcRenderer.invoke("radius:add-composer-attachments", input),
+  removeComposerAttachment: (context, attachmentId) =>
+    ipcRenderer.invoke("radius:remove-composer-attachment", {
+      context,
+      attachmentId,
+    }),
+  onComposerStateChanged: (listener) =>
+    chatWindowListener("radius:composer-state-changed", listener),
   saveComposerDraft: (input: SaveComposerDraftInput) =>
     ipcRenderer.invoke("radius:save-composer-draft", input),
   clearComposerDraft: (context: ComposerDraftContext) =>

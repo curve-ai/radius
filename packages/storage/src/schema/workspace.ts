@@ -104,6 +104,9 @@ export const sessions = sqliteTable(
       onDelete: "restrict",
     }),
     title: text("title").notNull(),
+    accessMode: text("access_mode", { enum: ["ask", "project", "full"] })
+      .notNull()
+      .default("project"),
     status: text("status", {
       enum: ["active", "completed", "cancelled", "failed"],
     }).notNull(),
@@ -114,6 +117,10 @@ export const sessions = sqliteTable(
     deletedAtMs: timestamp("deleted_at_ms"),
   },
   (table) => [
+    check(
+      "sessions_access_mode_valid",
+      sql`${table.accessMode} in ('ask', 'project', 'full')`,
+    ),
     check("sessions_title_nonempty", sql`length(trim(${table.title})) > 0`),
     check("sessions_revision_positive", sql`${table.revision} > 0`),
     check(
@@ -177,13 +184,79 @@ export const composerDrafts = sqliteTable(
     ),
     check(
       "composer_drafts_content_length_valid",
-      sql`length(${table.content}) between 1 and 100000`,
+      sql`length(${table.content}) between 0 and 100000`,
     ),
     check(
       "composer_drafts_updated_after_created",
       sql`${table.updatedAtMs} >= ${table.createdAtMs}`,
     ),
     index("composer_drafts_updated_at_idx").on(table.updatedAtMs),
+  ],
+);
+
+export const desktopPreferences = sqliteTable(
+  "desktop_preferences",
+  {
+    clientInstanceId: id("client_instance_id")
+      .primaryKey()
+      .references(() => clientInstances.id, { onDelete: "cascade" }),
+    defaultAccessMode: text("default_access_mode", {
+      enum: ["ask", "project", "full"],
+    })
+      .notNull()
+      .default("project"),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+  },
+  (table) => [
+    check(
+      "desktop_preferences_access_mode_valid",
+      sql`${table.defaultAccessMode} in ('ask', 'project', 'full')`,
+    ),
+    check("desktop_preferences_timestamp_valid", sql`${table.updatedAtMs} > 0`),
+  ],
+);
+
+export const composerDraftAttachments = sqliteTable(
+  "composer_draft_attachments",
+  {
+    id: text("id").primaryKey(),
+    draftId: id("draft_id").references(() => composerDrafts.id, {
+      onDelete: "cascade",
+    }),
+    position: integer("position").notNull(),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    contentSha256: text("content_sha256").notNull(),
+    localRelativePath: text("local_relative_path").notNull(),
+    lastModified: integer("last_modified").notNull(),
+  },
+  (table) => [
+    uniqueIndex("composer_draft_attachments_position_uq").on(
+      table.draftId,
+      table.position,
+    ),
+    check(
+      "composer_draft_attachments_position_valid",
+      sql`${table.position} >= 0`,
+    ),
+    check(
+      "composer_draft_attachments_name_valid",
+      sql`length(trim(${table.name})) between 1 and 255`,
+    ),
+    check("composer_draft_attachments_size_valid", sql`${table.byteSize} > 0`),
+    check(
+      "composer_draft_attachments_hash_valid",
+      sql`length(${table.contentSha256}) = 64 and ${table.contentSha256} not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "composer_draft_attachments_location_valid",
+      sql`length(${table.localRelativePath}) > 0`,
+    ),
+    check(
+      "composer_draft_attachments_modified_valid",
+      sql`${table.lastModified} >= 0`,
+    ),
   ],
 );
 

@@ -14,6 +14,21 @@ import type {
 
 export type ThemePreference = "system" | "light" | "dark";
 export type SessionStatus = "active" | "completed" | "cancelled" | "failed";
+export type AccessMode = "ask" | "project" | "full";
+export interface ComposerAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  lastModified: number;
+  bytes: Uint8Array;
+}
+export interface ComposerState {
+  accessMode: AccessMode;
+  attachments: ComposerAttachment[];
+}
+export type ComposerStateChange =
+  | { kind: "attachments"; context: ComposerDraftContext }
+  | { kind: "access"; sessionId: string | null };
 
 export type NativeControlMenuIcon =
   | "archivebox"
@@ -324,6 +339,8 @@ export interface StartAgentPromptInput {
    * before constructing ContentBlocks.
    */
   attachments?: PromptAttachment[];
+  /** Managed pending files; main resolves and validates them within this draft. */
+  attachmentIds?: string[];
   modelId?: string | null;
   prompt: string;
   projectId?: string | null;
@@ -448,6 +465,7 @@ export type PlatformConnectionInput =
   { kind: "cloud" } | { kind: "self-hosted"; url: string };
 
 export interface RadiusApi {
+  chatWindows: import("./chat-window-types").ChatWindowApi;
   authenticationStatus(): Promise<
     import("./auth-types").DesktopAuthenticationStatus
   >;
@@ -465,6 +483,23 @@ export interface RadiusApi {
   listRecentSessions(): Promise<RecentSidebarSession[]>;
   listSessionTranscript(sessionId: string): Promise<SessionTranscriptEvent[]>;
   getComposerDraft(context: ComposerDraftContext): Promise<string | null>;
+  getComposerState(context: ComposerDraftContext): Promise<ComposerState>;
+  getComposerAccessMode(context: ComposerDraftContext): Promise<AccessMode>;
+  setComposerAccessMode(
+    context: ComposerDraftContext,
+    mode: AccessMode,
+  ): Promise<void>;
+  addComposerAttachments(input: {
+    context: ComposerDraftContext;
+    files: Array<{ attachment: PromptAttachment; lastModified: number }>;
+  }): Promise<void>;
+  removeComposerAttachment(
+    context: ComposerDraftContext,
+    attachmentId: string,
+  ): Promise<void>;
+  onComposerStateChanged(
+    listener: (change: ComposerStateChange) => void,
+  ): () => void;
   saveComposerDraft(input: SaveComposerDraftInput): Promise<void>;
   clearComposerDraft(context: ComposerDraftContext): Promise<void>;
   onSessionTranscriptStream(

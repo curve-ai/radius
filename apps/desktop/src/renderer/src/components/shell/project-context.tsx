@@ -1,6 +1,9 @@
+import { useChatWindow } from "./chat-window-context";
+import { useWorkspaceNavigation } from "./navigation-context";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -58,13 +61,21 @@ export function ProjectProvider({
 }: {
   children: ReactNode;
 }): ReactNode {
+  const {
+    state: chatWindow,
+    requestedSessionId,
+    reportError,
+  } = useChatWindow();
+  const { navigate } = useWorkspaceNavigation();
+  const selectionStorage =
+    chatWindow.kind === "main" ? localStorage : sessionStorage;
   const [projects, setProjects] = useState<ProjectSidebarRecord[]>([]);
   const [recents, setRecents] = useState<RecentSessionRecord[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() =>
-    localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY),
+    selectionStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY),
   );
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() =>
-    localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY),
+    selectionStorage.getItem(ACTIVE_SESSION_STORAGE_KEY),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +92,7 @@ export function ProjectProvider({
   );
   const knownSessionIdsRef = useRef<Set<string>>(new Set());
   const workingStatesRef = useRef<Map<string, boolean>>(new Map());
+  const restoreViewsRef = useRef<Promise<void> | null>(null);
 
   const updateSessionReadAt = useCallback(
     (updates: Readonly<Record<string, string>>): void => {
@@ -92,7 +104,7 @@ export function ProjectProvider({
         ) {
           return current;
         }
-        const next = { ...current, ...updates };
+        const next = { ...getInitialSessionReadAt(), ...updates };
         localStorage.setItem(SESSION_READ_AT_STORAGE_KEY, JSON.stringify(next));
         return next;
       });
@@ -100,10 +112,21 @@ export function ProjectProvider({
     [],
   );
 
+  const chatWindowRef = useRef(chatWindow);
+  useLayoutEffect(() => {
+    chatWindowRef.current = chatWindow;
+  });
   const loadProjects = useCallback(
     async (showLoading: boolean): Promise<void> => {
       if (showLoading) setLoading(true);
       try {
+        restoreViewsRef.current ??= window.radius.chatWindows
+          .restoreViews()
+          .catch((cause) => {
+            restoreViewsRef.current = null;
+            throw cause;
+          });
+        await restoreViewsRef.current;
         const [nextProjects, nextRecents] = await Promise.all([
           window.radius.listProjects(),
           window.radius.listRecentSessions(),
@@ -141,13 +164,19 @@ export function ProjectProvider({
         );
         setProjects(projectsWithWorkingState);
         setRecents(recentsWithWorkingState);
-        const storedSessionId = localStorage.getItem(
+        const storedSessionId = selectionStorage.getItem(
           ACTIVE_SESSION_STORAGE_KEY,
         );
         const storedSession = nextSessions.find(
           (session) => session.id === storedSessionId,
         );
-        if (storedSession?.lastAssistantMessageAt) {
+        if (
+          storedSession?.lastAssistantMessageAt &&
+          document.hasFocus() &&
+          (!chatWindowRef.current.detached[storedSession.id] ||
+            chatWindowRef.current.detached[storedSession.id] ===
+              chatWindowRef.current.id)
+        ) {
           updateSessionReadAt({
             [storedSession.id]: storedSession.lastAssistantMessageAt,
           });
@@ -165,7 +194,7 @@ export function ProjectProvider({
               project.sessions.some((session) => session.id === candidate),
             ) || nextRecents.some((session) => session.id === candidate);
           if (exists) return candidate;
-          localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+          selectionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
           return null;
         });
         setActiveProjectId((current) => {
@@ -175,8 +204,8 @@ export function ProjectProvider({
             recentSessionActive,
             storedSessionProjectId: storedSessionProject?.id ?? null,
           });
-          if (next) localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, next);
-          else localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+          if (next) selectionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, next);
+          else selectionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
           return next;
         });
         setError(null);
@@ -186,7 +215,7 @@ export function ProjectProvider({
         if (showLoading) setLoading(false);
       }
     },
-    [updateSessionReadAt],
+    [updateSessionReadAt, selectionStorage],
   );
 
   const refresh = useCallback(
@@ -234,14 +263,28 @@ export function ProjectProvider({
     return () => window.clearInterval(timer);
   }, [hasActiveSessions, loadProjects]);
 
-  const selectProject = useCallback((projectId: string): void => {
-    setActiveProjectId(projectId);
-    localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
-    setActiveSessionId(null);
-    localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-  }, []);
+  useEffect(() => {
+    const changed = (event: StorageEvent): void => {
+      if (event.key === "radius:chat-library-changed") void loadProjects(false);
+      if (event.key === SESSION_READ_AT_STORAGE_KEY)
+        setSessionReadAt(getInitialSessionReadAt());
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [loadProjects]);
 
-  const selectSession = useCallback(
+  const selectProject = useCallback(
+    (projectId: string): void => {
+      void window.radius.chatWindows.select(null).catch(reportError);
+      setActiveProjectId(projectId);
+      selectionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
+      setActiveSessionId(null);
+      selectionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    },
+    [selectionStorage, reportError],
+  );
+
+  const selectLocalSession = useCallback(
     (sessionId: string): void => {
       const selectedSession = [
         ...projects.flatMap((project) => project.sessions),
@@ -259,24 +302,94 @@ export function ProjectProvider({
       setActiveProjectId(projectId);
       setActiveSessionId(sessionId);
       if (projectId)
-        localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
-      else localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
-      localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
+        selectionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
+      else selectionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+      selectionStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
     },
-    [projects, recents, updateSessionReadAt],
+    [projects, recents, updateSessionReadAt, selectionStorage],
   );
 
+  const selectSession = useCallback(
+    (sessionId: string): void => {
+      void window.radius.chatWindows
+        .focus(sessionId)
+        .then((focused) => {
+          if (!focused) {
+            selectLocalSession(sessionId);
+            void window.radius.chatWindows.select(sessionId).catch(reportError);
+          }
+        })
+        .catch(reportError);
+    },
+    [selectLocalSession, reportError],
+  );
+
+  const selectLocalSessionRef = useRef(selectLocalSession);
+  useLayoutEffect(() => {
+    selectLocalSessionRef.current = selectLocalSession;
+  });
+  useEffect(
+    () =>
+      window.radius.chatWindows.onRename((sessionId) => {
+        selectLocalSessionRef.current(sessionId);
+        setSessionRenameRequestId(sessionId);
+        navigate("workspace");
+      }),
+    [navigate],
+  );
+  const canSelectRequested =
+    requestedSessionId !== null &&
+    (chatWindow.kind === "detached"
+      ? chatWindow.sessionIds.includes(requestedSessionId)
+      : !chatWindow.detached[requestedSessionId] ||
+        chatWindow.sessionIds.includes(requestedSessionId));
+  useEffect(() => {
+    if (requestedSessionId && canSelectRequested) {
+      selectLocalSessionRef.current(requestedSessionId);
+      navigate("workspace");
+    }
+  }, [
+    requestedSessionId,
+    chatWindow.activeSessionId,
+    canSelectRequested,
+    navigate,
+  ]);
+
+  useEffect(() => {
+    if (
+      activeSessionId &&
+      chatWindow.detached[activeSessionId] &&
+      chatWindow.detached[activeSessionId] !== chatWindow.id &&
+      !chatWindow.sessionIds.includes(activeSessionId)
+    ) {
+      const frame = window.requestAnimationFrame(() =>
+        setActiveSessionId(null),
+      );
+      selectionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+      return () => window.cancelAnimationFrame(frame);
+    }
+    return;
+  }, [
+    activeSessionId,
+    chatWindow.detached,
+    chatWindow.id,
+    chatWindow.sessionIds,
+    selectionStorage,
+  ]);
+
   const clearActiveSession = useCallback((): void => {
+    void window.radius.chatWindows.select(null).catch(reportError);
     setActiveSessionId(null);
-    localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-  }, []);
+    selectionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+  }, [selectionStorage, reportError]);
 
   const clearActiveProject = useCallback((): void => {
+    void window.radius.chatWindows.select(null).catch(reportError);
     setActiveProjectId(null);
-    localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+    selectionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
     setActiveSessionId(null);
-    localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-  }, []);
+    selectionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+  }, [selectionStorage, reportError]);
 
   const markSessionsRead = useCallback(
     (sessionIds: readonly string[]): void => {
@@ -303,7 +416,7 @@ export function ProjectProvider({
         if (![...targetIds].some((sessionId) => sessionId in current)) {
           return current;
         }
-        const next = { ...current };
+        const next = { ...getInitialSessionReadAt() };
         for (const sessionId of targetIds) delete next[sessionId];
         localStorage.setItem(SESSION_READ_AT_STORAGE_KEY, JSON.stringify(next));
         return next;
@@ -314,10 +427,11 @@ export function ProjectProvider({
 
   const activateSession = useCallback(
     async (sessionId: string): Promise<void> => {
-      localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
+      selectionStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
+      await window.radius.chatWindows.select(sessionId);
       await refresh();
     },
-    [refresh],
+    [refresh, selectionStorage],
   );
 
   const openCreateProjectDialog = useCallback((): void => {
@@ -365,6 +479,7 @@ export function ProjectProvider({
     async (projectId: string, rootId: string): Promise<void> => {
       try {
         await window.radius.removeProjectFolder({ projectId, rootId });
+        localStorage.setItem("radius:chat-library-changed", String(Date.now()));
         await refresh();
       } catch (cause) {
         setError(
@@ -391,6 +506,7 @@ export function ProjectProvider({
     async (sessionId: string, pinned: boolean): Promise<void> => {
       try {
         await window.radius.setSessionPinned(sessionId, pinned);
+        localStorage.setItem("radius:chat-library-changed", String(Date.now()));
         await refresh();
       } catch (cause) {
         setError(
@@ -406,6 +522,7 @@ export function ProjectProvider({
     async (sessionId: string): Promise<void> => {
       try {
         await window.radius.setSessionArchived(sessionId);
+        localStorage.setItem("radius:chat-library-changed", String(Date.now()));
         await refresh();
       } catch (cause) {
         setError(projectErrorMessage(cause, "Session could not be archived"));
@@ -419,6 +536,7 @@ export function ProjectProvider({
     async (sessionId: string, title: string): Promise<void> => {
       try {
         await window.radius.renameSession({ sessionId, title });
+        localStorage.setItem("radius:chat-library-changed", String(Date.now()));
         await refresh();
       } catch (cause) {
         setError(projectErrorMessage(cause, "Session could not be renamed"));
@@ -446,9 +564,14 @@ export function ProjectProvider({
     }
     return sessions;
   }, [projects, recents]);
-  const activeSession = activeSessionId
-    ? (sessionsById.get(activeSessionId) ?? null)
-    : null;
+  const activeSession =
+    activeSessionId &&
+    (chatWindow.kind === "detached"
+      ? chatWindow.sessionIds.includes(activeSessionId)
+      : !chatWindow.detached[activeSessionId] ||
+        chatWindow.sessionIds.includes(activeSessionId))
+      ? (sessionsById.get(activeSessionId) ?? null)
+      : null;
   const activeProject =
     activeSession?.project ??
     projects.find((project) => project.id === activeProjectId) ??

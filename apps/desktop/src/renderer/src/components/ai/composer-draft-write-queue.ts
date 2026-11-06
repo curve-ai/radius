@@ -23,10 +23,21 @@ interface ScheduledDraftWrite {
 export class ComposerDraftWriteQueue {
   readonly #tails = new Map<string, Promise<void>>();
   readonly #scheduled = new Map<string, ScheduledDraftWrite>();
+  readonly #failures = new Map<string, unknown>();
 
   #enqueue(contextKey: string, operation: () => Promise<void>): Promise<void> {
     const previous = this.#tails.get(contextKey) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
+    const current = previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await operation();
+          this.#failures.delete(contextKey);
+        } catch (error) {
+          this.#failures.set(contextKey, error);
+          throw error;
+        }
+      });
     this.#tails.set(contextKey, current);
     const cleanup = (): void => {
       if (this.#tails.get(contextKey) === current) {
@@ -96,5 +107,10 @@ export class ComposerDraftWriteQueue {
       await current.catch(() => undefined);
       if (this.#tails.get(contextKey) === current) return;
     }
+  }
+
+  async flush(contextKey: string): Promise<void> {
+    await this.waitForIdle(contextKey);
+    if (this.#failures.has(contextKey)) throw this.#failures.get(contextKey);
   }
 }

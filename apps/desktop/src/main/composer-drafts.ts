@@ -1,5 +1,4 @@
 import {
-  clearComposerDraft,
   getComposerDraft,
   MAX_COMPOSER_DRAFT_LENGTH,
   saveComposerDraft,
@@ -10,6 +9,7 @@ import {
 import type { ComposerDraftContext } from "../radius-api";
 import { localDeviceIdentity } from "./device-identity";
 import { initializeStorage } from "./storage";
+import { withComposerMutation } from "./composer-mutations";
 
 function parseIdentifier(value: unknown, label: string): string {
   if (typeof value !== "string" || !value) {
@@ -18,7 +18,9 @@ function parseIdentifier(value: unknown, label: string): string {
   return value;
 }
 
-function parseComposerDraftContext(value: unknown): ComposerDraftContext {
+export function parseComposerDraftContext(
+  value: unknown,
+): ComposerDraftContext {
   if (!value || typeof value !== "object") {
     throw new Error("A draft context is required");
   }
@@ -43,7 +45,9 @@ function parseComposerDraftContext(value: unknown): ComposerDraftContext {
   throw new Error("The draft context is invalid");
 }
 
-async function localDraftStorage(context: ComposerDraftContext): Promise<{
+export async function localDraftStorage(
+  context: ComposerDraftContext,
+): Promise<{
   database: RadiusDatabase;
   input: ComposerDraftInput;
 }> {
@@ -83,17 +87,10 @@ export async function saveComposerDraftForRenderer(
     );
   }
   const { database, input } = await localDraftStorage(context);
-  await saveComposerDraft(database, {
-    ...input,
-    content,
-  });
-}
-
-export async function clearComposerDraftForRenderer(
-  value: unknown,
-): Promise<void> {
-  const { database, input } = await localDraftStorage(
-    parseComposerDraftContext(value),
+  await withComposerMutation(() =>
+    saveComposerDraft(database, {
+      ...input,
+      content,
+    }),
   );
-  await clearComposerDraft(database, input);
 }

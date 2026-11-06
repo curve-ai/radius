@@ -4,7 +4,7 @@ import {
   distributionAgentCredential,
 } from "./desktop-auth";
 import {
-  clearComposerDraft,
+  getComposerAccessMode,
   createSession,
   getLatestAgentProviderSession,
   getSessionProjectContext,
@@ -154,6 +154,10 @@ import {
   type ValidatedPromptAttachment,
 } from "./prompt-attachments";
 import { writeContentAddressedFile } from "./content-addressed-file";
+import {
+  clearAcceptedComposerDraft,
+  resolveComposerPromptAttachments,
+} from "./composer-state";
 import {
   createAgentRunStartup,
   type AgentRunStartup,
@@ -948,6 +952,20 @@ export async function startAgentPrompt(
   assertDesktopAuthenticated();
   distributionAgentCredential(rawInput.agentId);
   const input = parsePromptInput(rawInput);
+  const context = await initializeStorage();
+  const identity = localDeviceIdentity(context.vault);
+  input.accessMode = await getComposerAccessMode(
+    context.database,
+    identity.clientInstanceId,
+    input.sessionId,
+  );
+  if (input.attachmentIds)
+    input.attachments = await resolveComposerPromptAttachments(
+      input.sessionId
+        ? { kind: "session", sessionId: input.sessionId }
+        : { kind: "new_chat", projectId: input.projectId ?? null },
+      input.attachmentIds,
+    );
   const prompt = input.prompt.trim();
   const promptAttachments = validatePromptAttachments(input.attachments ?? [], {
     image: true,
@@ -961,7 +979,6 @@ export async function startAgentPrompt(
 
   const target = await requireAgentTarget(input.agentId);
   const release = target.kind === "release" ? target.release : null;
-  const context = await initializeStorage();
   const installation = release
     ? await ensureAgentInstallation(context, release)
     : null;
@@ -1010,7 +1027,6 @@ export async function startAgentPrompt(
       "This development agent has not advertised model selection",
     );
   }
-  const identity = localDeviceIdentity(context.vault);
   const [existingRevision, existingSessionContext] = input.sessionId
     ? await Promise.all([
         getSessionRevision(context.database, input.sessionId),
@@ -1050,6 +1066,7 @@ export async function startAgentPrompt(
       originClientInstanceId: identity.clientInstanceId,
       projectId,
       title: promptTitle(prompt || promptAttachments[0]!.name),
+      accessMode: input.accessMode,
     });
   }
   const journal = new RuntimeSessionJournal(
@@ -1093,12 +1110,11 @@ export async function startAgentPrompt(
   });
   try {
     await startup.promise;
-    await clearComposerDraft(context.database, {
-      clientInstanceId: identity.clientInstanceId,
-      context: input.sessionId
+    await clearAcceptedComposerDraft(
+      input.sessionId
         ? { kind: "session", sessionId: input.sessionId }
         : { kind: "new_chat", projectId },
-    }).catch((error) => {
+    ).catch((error) => {
       console.error(
         "[drafts] The submitted composer draft could not be cleared",
         error,
@@ -1148,6 +1164,18 @@ function parsePromptInput(input: unknown): StartAgentPromptInput {
         : "ask",
     agentId: value.agentId,
     attachments: parsePromptAttachments(value.attachments),
+    attachmentIds:
+      value.attachmentIds === undefined
+        ? undefined
+        : (() => {
+            if (
+              !Array.isArray(value.attachmentIds) ||
+              value.attachmentIds.length > 10 ||
+              value.attachmentIds.some((id) => typeof id !== "string")
+            )
+              throw new Error("Invalid attachment selection");
+            return value.attachmentIds as string[];
+          })(),
     modelId: value.modelId as string | null | undefined,
     prompt: value.prompt,
     projectId: value.projectId as string | null | undefined,

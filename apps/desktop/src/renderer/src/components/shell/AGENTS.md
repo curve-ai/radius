@@ -43,6 +43,9 @@ design system in `../../../../../../../DESIGN.md` also apply here.
   the inner trailing position, archive at the outer trailing position, and both
   controls hidden until hover or keyboard focus on fine-pointer desktop input.
   Preserve visible controls on coarse pointers and full keyboard access.
+  Detached chat sidebars reuse the same rows with Close tab in the outer action
+  slot; Archive stays in their native menu. Keep the main workspace's Archive
+  action unchanged.
   Right-clicking a session row opens the same native action menu as the active
   session header; Rename must select the session and enter the durable title
   editor rather than creating a second rename surface.

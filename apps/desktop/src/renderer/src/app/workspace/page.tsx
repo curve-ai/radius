@@ -1,4 +1,15 @@
 import {
+  getChatViewState,
+  saveChatViewState,
+  registerChatView,
+  chatViewReady,
+  type LocalChatViewState,
+} from "@renderer/components/shell/chat-view-state";
+import {
+  useChatWindow,
+  readWindowPreference,
+} from "@renderer/components/shell/chat-window-context";
+import {
   Bot,
   Boxes,
   CircleAlert,
@@ -22,11 +33,9 @@ import {
 } from "react";
 
 import {
-  appendAttachmentFiles,
   attachmentFilesFromDataTransfer,
   dataTransferContainsFiles,
   PromptAttachmentError,
-  serializePromptAttachments,
 } from "@renderer/components/ai/attachment-files";
 import { AgentElicitationPanel } from "@renderer/components/ai/agent-elicitation";
 import { createSessionRequestGuard } from "@renderer/components/ai/session-request-guard";
@@ -35,10 +44,7 @@ import {
   isChatFollowCancelKey,
   submittedTurnScrollLayout,
 } from "@renderer/components/ai/chat-scroll";
-import {
-  ChatComposer,
-  type ChatAccessMode,
-} from "@renderer/components/ai/chat-composer";
+import { ChatComposer } from "@renderer/components/ai/chat-composer";
 import { useComposerDraft } from "@renderer/components/ai/use-composer-draft";
 import { SessionThread } from "@renderer/components/ai/session-thread";
 import { PlanProgress } from "@renderer/components/ai/plan-progress";
@@ -81,6 +87,7 @@ import type {
 } from "../../../../radius-api";
 import { ConnectorsPage } from "./connectors-page";
 import { AgentsPage } from "./agents-page";
+import { useSessionComposer } from "./use-session-composer";
 import { agentErrorMessage } from "./agent-errors";
 
 type ContentView = Exclude<WorkspaceView, "settings">;
@@ -204,35 +211,6 @@ function useChatFileIngress(onAddFiles: (files: readonly File[]) => void): {
   };
 }
 
-function usePromptAttachmentFiles(): {
-  attachments: File[];
-  addAttachments(files: readonly File[]): void;
-  clearAttachments(): void;
-  fileIngress: ReturnType<typeof useChatFileIngress>;
-  removeAttachment(index: number): void;
-} {
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const addAttachments = useCallback((files: readonly File[]): void => {
-    if (files.length === 0) return;
-    setAttachments((current) => appendAttachmentFiles(current, files));
-  }, []);
-  const clearAttachments = useCallback((): void => setAttachments([]), []);
-  const removeAttachment = useCallback(
-    (index: number): void =>
-      setAttachments((current) =>
-        current.filter((_, currentIndex) => currentIndex !== index),
-      ),
-    [],
-  );
-  return {
-    attachments,
-    addAttachments,
-    clearAttachments,
-    fileIngress: useChatFileIngress(addAttachments),
-    removeAttachment,
-  };
-}
-
 function ChatFileDropOverlay({ active }: { active: boolean }): ReactNode {
   const reduceMotion = useReducedMotion();
 
@@ -273,7 +251,7 @@ function ChatFileDropOverlay({ active }: { active: boolean }): ReactNode {
 
 let cachedDesktopAgents: DesktopAgentSummary[] = [];
 
-function useDesktopAgents(): {
+function useDesktopAgents(initial?: LocalChatViewState): {
   agents: DesktopAgentSummary[];
   error: string | null;
   models: DesktopAgentSummary["models"];
@@ -288,23 +266,39 @@ function useDesktopAgents(): {
     useState<DesktopAgentSummary[]>(cachedDesktopAgents);
   const [error, setError] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentIdState] = useState<string | null>(
-    cachedDesktopAgents[0]?.id ?? null,
+    initial?.agentId ?? cachedDesktopAgents[0]?.id ?? null,
   );
   const [selectedModelId, setSelectedModelIdState] = useState<string | null>(
-    cachedDesktopAgents[0]?.defaultModelId ??
+    initial?.modelId ??
+      cachedDesktopAgents[0]?.defaultModelId ??
       cachedDesktopAgents[0]?.models[0]?.id ??
       null,
   );
   const [selectedThinkingEffortId, setSelectedThinkingEffortId] = useState<
     string | null
   >(
-    cachedDesktopAgents[0]?.models.find(
-      (model) =>
-        model.id ===
-        (cachedDesktopAgents[0]?.defaultModelId ??
-          cachedDesktopAgents[0]?.models[0]?.id),
-    )?.defaultThinkingEffortId ?? null,
+    initial?.thinkingEffortId ??
+      cachedDesktopAgents[0]?.models.find(
+        (model) =>
+          model.id ===
+          (cachedDesktopAgents[0]?.defaultModelId ??
+            cachedDesktopAgents[0]?.models[0]?.id),
+      )?.defaultThinkingEffortId ??
+      null,
   );
+
+  const selectionRef = useRef({
+    agentId: selectedAgentId,
+    modelId: selectedModelId,
+    thinkingEffortId: selectedThinkingEffortId,
+  });
+  useLayoutEffect(() => {
+    selectionRef.current = {
+      agentId: selectedAgentId,
+      modelId: selectedModelId,
+      thinkingEffortId: selectedThinkingEffortId,
+    };
+  });
 
   const selectModelForAgent = (
     agent: DesktopAgentSummary | null,
@@ -331,11 +325,23 @@ function useDesktopAgents(): {
           );
           cachedDesktopAgents = usableAgents;
           setAgents(usableAgents);
-          const agent = usableAgents[0] ?? null;
+          const choice = selectionRef.current;
+          const agent =
+            usableAgents.find((item) => item.id === choice.agentId) ??
+            usableAgents[0] ??
+            null;
+          const model =
+            agent?.models.find((item) => item.id === choice.modelId) ??
+            agent?.models.find((item) => item.id === agent.defaultModelId) ??
+            agent?.models[0];
           setSelectedAgentIdState(agent?.id ?? null);
-          selectModelForAgent(
-            agent,
-            agent?.defaultModelId ?? agent?.models[0]?.id ?? null,
+          setSelectedModelIdState(model?.id ?? null);
+          setSelectedThinkingEffortId(
+            model?.thinkingEfforts.some(
+              (item) => item.id === choice.thinkingEffortId,
+            )
+              ? choice.thinkingEffortId
+              : (model?.defaultThinkingEffortId ?? null),
           );
           setError(null);
         })
@@ -568,7 +574,6 @@ function NewChatPage({
 }: {
   onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
 }): ReactNode {
-  const [accessMode, setAccessMode] = useState<ChatAccessMode>("project");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const {
@@ -588,37 +593,33 @@ function NewChatPage({
     [activeProject?.id],
   );
   const draft = useComposerDraft(draftContext);
-  const selectedAgent =
-    agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const composer = useSessionComposer(draftContext);
   const {
+    accessMode,
+    setAccessMode,
     attachments,
     addAttachments,
-    clearAttachments,
-    fileIngress,
     removeAttachment,
-  } = usePromptAttachmentFiles();
+  } = composer;
+  const fileIngress = useChatFileIngress(addAttachments);
 
   const handleSubmit = async (submittedPrompt: string): Promise<void> => {
     if (!selectedAgentId || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const promptAttachments = await serializePromptAttachments(
-        attachments,
-        selectedAgent?.promptCapabilities,
-      );
+      const attachmentIds = await composer.flush();
       await draft.flush();
       const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
-        attachments: promptAttachments,
+        attachmentIds,
         modelId: selectedModelId,
         prompt: submittedPrompt,
         projectId: activeProject?.id ?? null,
         thinkingEffortId: selectedThinkingEffortId,
       });
       draft.reset();
-      clearAttachments();
       onPendingOutgoingTurnChange({
         eventId: result.userMessageEventId,
         sessionId: result.sessionId,
@@ -660,7 +661,11 @@ function NewChatPage({
         </div>
 
         <div className="mx-auto w-full max-w-reader shrink-0">
-          <ComposerError message={submitError ?? agentsError ?? draft.error} />
+          <ComposerError
+            message={
+              submitError ?? agentsError ?? draft.error ?? composer.error
+            }
+          />
           <ChatComposer
             accessLearnMoreHref={CLOUD_PERMISSIONS_URL}
             accessMode={accessMode}
@@ -669,7 +674,7 @@ function NewChatPage({
             focusKey="new-chat"
             connectedAgents={agents}
             connectedModels={models}
-            disabled={submitting}
+            disabled={submitting || composer.pending || composer.loading}
             selectedAgentId={selectedAgentId ?? undefined}
             selectedModelId={selectedModelId ?? undefined}
             selectedThinkingEffortId={selectedThinkingEffortId ?? undefined}
@@ -705,12 +710,14 @@ function SessionPage({
   onPendingOutgoingTurnChange: (turn: PendingOutgoingTurn | null) => void;
   pendingOutgoingTurn: PendingOutgoingTurn | null;
 }): ReactNode {
-  const [accessMode, setAccessMode] = useState<ChatAccessMode>("project");
+  const { project, session } = activeSession;
+  const restored = useMemo(() => getChatViewState(session.id), [session.id]);
   const [events, setEvents] = useState<SessionTranscriptEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
   const [followingTurnEventId, setFollowingTurnEventId] = useState<
@@ -737,15 +744,31 @@ function SessionPage({
     setSelectedAgentId,
     setSelectedModelId,
     setSelectedThinkingEffortId,
-  } = useDesktopAgents();
-  const { project, session } = activeSession;
-  const selectedAgent =
-    agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  } = useDesktopAgents(restored);
   const draftContext = useMemo<ComposerDraftContext>(
     () => ({ kind: "session", sessionId: session.id }),
     [session.id],
   );
   const draft = useComposerDraft(draftContext);
+  const composer = useSessionComposer(draftContext);
+  const {
+    accessMode,
+    setAccessMode,
+    attachments,
+    addAttachments,
+    removeAttachment,
+  } = composer;
+  const fileIngress = useChatFileIngress(addAttachments);
+  const flushComposer = composer.flush;
+  const flushDraft = draft.flush;
+  const flushDraftForCapture = useCallback(async (): Promise<void> => {
+    if (submittingRef.current)
+      throw new Error(
+        "Wait for the message to finish sending before moving this chat.",
+      );
+    await flushComposer();
+    await flushDraft();
+  }, [flushDraft, flushComposer]);
   const sessionFeatures = useAgentSessionFeatures(
     session.id,
     selectedAgentId,
@@ -763,13 +786,66 @@ function SessionPage({
   const reduceMotion = useReducedMotion();
   const windowResizing = useWorkspaceWindowResizing();
 
-  const {
-    attachments,
-    addAttachments,
-    clearAttachments,
-    fileIngress,
-    removeAttachment,
-  } = usePromptAttachmentFiles();
+  const readViewRef = useRef<() => LocalChatViewState>(() => {
+    throw new Error("Chat is not ready");
+  });
+  const flushViewRef = useRef(async (): Promise<void> => {});
+  useLayoutEffect(() => {
+    readViewRef.current = () => {
+      const scroller = transcriptScrollRef.current;
+      const top = scroller?.getBoundingClientRect().top ?? 0;
+      const anchor = scroller
+        ? [
+            ...scroller.querySelectorAll<HTMLElement>(
+              "[data-session-event-id]",
+            ),
+          ].find((node) => node.getBoundingClientRect().bottom > top)
+        : undefined;
+      return {
+        agentId: selectedAgentId,
+        modelId: selectedModelId,
+        thinkingEffortId: selectedThinkingEffortId,
+        scrollTop: scroller?.scrollTop ?? restored?.scrollTop ?? 0,
+        scrollAnchor: anchor
+          ? {
+              eventId: anchor.dataset.sessionEventId!,
+              offset: anchor.getBoundingClientRect().top - top,
+            }
+          : undefined,
+        atBottom: scroller
+          ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <
+            8
+          : (restored?.atBottom ?? true),
+        toolPanelOpen:
+          readWindowPreference("radius:workspace-tool-panel") !== "false",
+      };
+    };
+    flushViewRef.current = async () => {
+      if (loading)
+        throw new Error(
+          "Wait for this chat to finish opening before moving it.",
+        );
+      return await flushDraftForCapture();
+    };
+  });
+  useLayoutEffect(() => {
+    const unregister = registerChatView(
+      session.id,
+      async () => {
+        await flushViewRef.current();
+        return readViewRef.current();
+      },
+      flushDraftForCapture,
+    );
+    return () => {
+      saveChatViewState(session.id, readViewRef.current());
+      unregister();
+    };
+  }, [session.id, flushDraftForCapture]);
+  useEffect(() => {
+    if (!loading && !error && !composer.loading && !composer.error)
+      chatViewReady(session.id);
+  }, [session.id, loading, error, composer.loading, composer.error]);
 
   const resolveToolApproval = useCallback(
     async (
@@ -984,10 +1060,30 @@ function SessionPage({
       pendingInitialScrollSessionIdRef.current === session.id;
     if (!initialScrollPending && !composerResizeShouldStickRef.current) return;
 
-    scroller.scrollTop = scroller.scrollHeight;
+    scroller.scrollTop =
+      initialScrollPending && restored && !restored.atBottom
+        ? restored.scrollTop
+        : scroller.scrollHeight;
+    if (initialScrollPending && restored?.scrollAnchor && !restored.atBottom) {
+      const anchor = scroller.querySelector<HTMLElement>(
+        `[data-session-event-id="${CSS.escape(restored.scrollAnchor.eventId)}"]`,
+      );
+      if (anchor)
+        scroller.scrollTop +=
+          anchor.getBoundingClientRect().top -
+          scroller.getBoundingClientRect().top -
+          restored.scrollAnchor.offset;
+    }
     if (initialScrollPending) pendingInitialScrollSessionIdRef.current = null;
     composerResizeShouldStickRef.current = false;
-  }, [composerOverlayHeight, events, loading, session.id, windowResizing]);
+  }, [
+    composerOverlayHeight,
+    events,
+    loading,
+    session.id,
+    windowResizing,
+    restored,
+  ]);
 
   useEffect(() => {
     const scroller = transcriptScrollRef.current;
@@ -1067,19 +1163,17 @@ function SessionPage({
   }, [events, session.id, updateFollowingTurn]);
 
   const handleSubmit = async (submittedPrompt: string): Promise<void> => {
-    if (!selectedAgentId || submitting) return;
+    if (!selectedAgentId || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const promptAttachments = await serializePromptAttachments(
-        attachments,
-        selectedAgent?.promptCapabilities,
-      );
+      const attachmentIds = await composer.flush();
       await draft.flush();
       const result = await window.radius.startAgentPrompt({
         accessMode,
         agentId: selectedAgentId,
-        attachments: promptAttachments,
+        attachmentIds,
         modelId: selectedModelId,
         prompt: submittedPrompt,
         projectId: project?.id ?? null,
@@ -1087,7 +1181,7 @@ function SessionPage({
         thinkingEffortId: selectedThinkingEffortId,
       });
       draft.reset();
-      clearAttachments();
+
       onPendingOutgoingTurnChange({
         eventId: result.userMessageEventId,
         sessionId: result.sessionId,
@@ -1104,6 +1198,7 @@ function SessionPage({
             ),
       );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -1254,7 +1349,9 @@ function SessionPage({
               </div>
             ) : null}
             <ComposerError
-              message={submitError ?? agentsError ?? draft.error}
+              message={
+                submitError ?? agentsError ?? draft.error ?? composer.error
+              }
             />
           </div>
         </div>
@@ -1268,7 +1365,12 @@ function SessionPage({
               connectedAgents={agents}
               connectedModels={models}
               contextUsage={sessionFeatures.features?.usage}
-              disabled={submitting || elicitations.requests.length > 0}
+              disabled={
+                submitting ||
+                composer.pending ||
+                composer.loading ||
+                elicitations.requests.length > 0
+              }
               focusKey={session.id}
               selectedAgentId={selectedAgentId ?? undefined}
               selectedModelId={selectedModelId ?? undefined}
@@ -1306,13 +1408,26 @@ function SessionPage({
 }
 
 export function WorkspacePage({ view }: { view: ContentView }): ReactNode {
-  const { activeSession } = useProjects();
+  const { activeSession, loading } = useProjects();
+  const { state: chatWindow } = useChatWindow();
   const [pendingOutgoingTurn, setPendingOutgoingTurn] =
     useState<PendingOutgoingTurn | null>(null);
 
   if (view === "workspace") {
+    if (!activeSession && chatWindow.kind === "detached")
+      return (
+        <div
+          role="status"
+          className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground"
+        >
+          {loading
+            ? "Opening chat…"
+            : "Drag a chat into the sidebar to open it here."}
+        </div>
+      );
     return activeSession ? (
       <SessionPage
+        key={activeSession.session.id}
         activeSession={activeSession}
         pendingOutgoingTurn={pendingOutgoingTurn}
         onPendingOutgoingTurnChange={setPendingOutgoingTurn}

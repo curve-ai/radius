@@ -1,3 +1,4 @@
+import { ChatWindowProvider } from "@renderer/components/shell/chat-window-provider";
 import { AuthGate } from "./auth/auth-gate";
 import { useEffect, useRef, type ReactNode } from "react";
 
@@ -113,13 +114,15 @@ function AppContent(): ReactNode {
 export function App(): ReactNode {
   return (
     <ThemeProvider>
-      <AuthGate>
-        <WorkspaceNavigationProvider>
-          <ProjectProvider>
-            <AppContent />
-          </ProjectProvider>
-        </WorkspaceNavigationProvider>
-      </AuthGate>
+      <ChatWindowProvider>
+        <AuthGate>
+          <WorkspaceNavigationProvider>
+            <ProjectProvider>
+              <AppContent />
+            </ProjectProvider>
+          </WorkspaceNavigationProvider>
+        </AuthGate>
+      </ChatWindowProvider>
     </ThemeProvider>
   );
 }

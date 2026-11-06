@@ -96,6 +96,18 @@ export class SyncEngine {
       );
       if (deliveries.length > 0) {
         try {
+          if (
+            !capabilities.sessionAccessMode &&
+            deliveries.some(
+              ({ change }) =>
+                (change.kind === "session.upsert" ||
+                  change.kind === "session.delete") &&
+                change.payload.accessMode !== undefined,
+            )
+          )
+            throw new Error(
+              "SYNC_PROVIDER_SESSION_ACCESS_MODE_UPGRADE_REQUIRED",
+            );
           const request = PushRequestSchema.parse({
             protocolVersion: 1,
             clientInstanceId,

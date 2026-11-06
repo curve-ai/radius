@@ -106,6 +106,13 @@
       "when": 1788527649112,
       "tag": "0014_agent_run_session_id",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1793577600000,
+      "tag": "0015_session_composer",
+      "breakpoints": true
     }
   ]
 }

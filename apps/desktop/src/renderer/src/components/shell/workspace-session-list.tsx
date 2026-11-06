@@ -1,3 +1,6 @@
+import { AppWindow, X } from "lucide-react";
+import { useChatWindow } from "./chat-window-context";
+import { useChatDrag } from "./use-chat-drag";
 import {
   Archive,
   ChevronRight,
@@ -90,7 +93,7 @@ function getInitialPinnedProjectIds(): Set<string> {
   }
 }
 
-function SessionSidebarRow({
+export function SessionSidebarRow({
   active,
   indented = false,
   layoutIntent,
@@ -98,6 +101,7 @@ function SessionSidebarRow({
   session,
   unread,
   onArchive,
+  onClose,
   onOpenMenu,
   onSelect,
   onSetPinned,
@@ -109,6 +113,7 @@ function SessionSidebarRow({
   session: WorkspaceSessionRecord;
   unread: boolean;
   onArchive: (session: WorkspaceSessionRecord) => void;
+  onClose?: (session: WorkspaceSessionRecord) => void;
   onOpenMenu: (
     session: WorkspaceSessionRecord,
     point: NativeControlMenuPoint,
@@ -117,6 +122,10 @@ function SessionSidebarRow({
   onSetPinned: (session: WorkspaceSessionRecord) => void;
 }): ReactNode {
   const reduceMotion = useReducedMotion();
+  const { state: chatWindow, reportError } = useChatWindow();
+  const chatDrag = useChatDrag(session.id);
+  const detached =
+    chatWindow.kind === "main" && Boolean(chatWindow.detached[session.id]);
   const pinned = session.pinnedAt !== null;
   const pinLabel = pinned ? "Unpin" : "Pin";
   const animateLayout = !reduceMotion && layoutIntent !== null;
@@ -161,9 +170,28 @@ function SessionSidebarRow({
       }
       data-slot="sidebar-menu-item"
       data-sidebar="menu-item"
+      data-chat-session-id={session.id}
       className="group/menu-item relative w-full"
     >
       <SidebarMenuButton
+        {...chatDrag}
+        aria-keyshortcuts={
+          chatWindow.kind === "detached"
+            ? "Alt+ArrowUp Alt+ArrowDown"
+            : undefined
+        }
+        onKeyDown={(event) => {
+          if (
+            chatWindow.kind === "detached" &&
+            event.altKey &&
+            ["ArrowUp", "ArrowDown"].includes(event.key)
+          ) {
+            event.preventDefault();
+            void window.radius.chatWindows
+              .reorder(session.id, event.key === "ArrowUp" ? "up" : "down")
+              .catch(reportError);
+          }
+        }}
         type="button"
         isActive={active}
         aria-current={active ? "page" : undefined}
@@ -172,14 +200,24 @@ function SessionSidebarRow({
           indented && "pl-9!",
           hasTrailingStatus && "md:pr-8!",
         )}
-        title={session.title}
+        title={
+          detached
+            ? `${session.title} — open in detached window`
+            : session.title
+        }
         onContextMenu={(event) => {
           event.preventDefault();
           onOpenMenu(session, { x: event.clientX, y: event.clientY });
         }}
         onClick={() => onSelect(session.id)}
       >
-        <span className="truncate">{session.title}</span>
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+        {detached ? (
+          <AppWindow
+            className="size-3 shrink-0 text-muted-foreground"
+            aria-label="Open in detached window"
+          />
+        ) : null}
       </SidebarMenuButton>
       {hasTrailingStatus ? (
         <span className="pointer-events-none absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center transition-opacity duration-[80ms] group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0">
@@ -219,14 +257,14 @@ function SessionSidebarRow({
             type="button"
             disabled={pending}
             className={SESSION_ACTION_CLASS}
-            aria-label={`Archive ${session.title}`}
-            onClick={() => onArchive(session)}
+            aria-label={`${onClose ? "Close tab" : "Archive"} ${session.title}`}
+            onClick={() => (onClose ?? onArchive)(session)}
           >
-            <Archive aria-hidden />
+            {onClose ? <X aria-hidden /> : <Archive aria-hidden />}
           </SidebarMenuAction>
         </TooltipTrigger>
         <TooltipContent side="top" className="pointer-events-none px-2 py-1">
-          Archive
+          {onClose ? "Close tab" : "Archive"}
         </TooltipContent>
       </Tooltip>
     </motion.li>

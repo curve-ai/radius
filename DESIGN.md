@@ -268,6 +268,15 @@ The shell is one coordinated workspace, not a collection of independent pages.
   chat menu's Copy-submenu arrow gutter; visible labels and native metrics remain
   unchanged. Unsupported actions must not be simulated with no-op handlers.
   Escape closes the menu and restores focus to its trigger.
+- Detached chat windows reuse the workspace's sidebar material, text-first
+  rows, neutral selection, resize edge, and complete off-canvas collapse. They
+  show one Chats collection and a quiet Open main window footer, without the
+  main workspace's primary navigation, search, or account controls. Their title
+  area retains the sidebar toggle; no horizontal tab strip is introduced.
+  A chat open elsewhere keeps a small window glyph in its original library row.
+  Detached row hover actions retain Pin/Unpin at the inner trailing position and
+  use Close tab at the outer position; Archive remains in the native menu.
+  Dragging dims the source row and outlines available sidebar drop regions.
 - The Radius/search row stays pinned directly below the native titlebar. Search
   and titlebar navigation use 28px hover targets, 14px optically centered
   icons, and 4px gaps. On macOS the native control origin is `(17px, 16px)`;
@@ -586,8 +595,9 @@ The shell is one coordinated workspace, not a collection of independent pages.
   when the title length changes. The ellipsis and header right-click open the
   native chat menu: Pin/Unpin, Rename, Mark as unread, Archive, separator,
   Share, Copy submenu, separator, and Open in new window. Pin/Unpin, Rename,
-  Mark as unread, Archive, and supported Copy operations are real. Share and
-  Open in new window remain disabled until their Radius behavior is defined.
+  Mark as unread, Archive, supported Copy operations, and Open in new window are
+  real. Share remains disabled. Window actions use the existing native menu
+  composition; detached chats also offer Bring back and Close tab.
   Existing keyboard shortcuts remain available, and the trigger stays separate
   from the editable title.
 - The right tool panel owns contextual runtime and storage

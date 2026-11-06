@@ -1,3 +1,4 @@
+import { useChatWindow } from "./chat-window-context";
 import { Folder, MessagesSquare } from "lucide-react";
 import {
   useCallback,
@@ -18,6 +19,7 @@ import { cn } from "@renderer/lib/utils";
 import type { NativeControlMenuPoint } from "../../../../radius-api";
 
 export function WorkspaceSessionHeader(): ReactNode {
+  const { reportError } = useChatWindow();
   const {
     activeSession,
     archiveSession,
@@ -154,7 +156,7 @@ export function WorkspaceSessionHeader(): ReactNode {
       },
       point,
     )
-      .catch(() => undefined)
+      .catch(reportError)
       .finally(() => setMenuOpen(false));
   };
 

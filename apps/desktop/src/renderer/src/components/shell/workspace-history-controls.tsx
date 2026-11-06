@@ -1,3 +1,4 @@
+import { useChatWindow } from "./chat-window-context";
 import { ArrowLeft, ArrowRight, PanelLeftIcon, SquarePen } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -10,6 +11,7 @@ const titlebarControlClass =
   "size-7 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground focus-visible:bg-foreground/[0.08] focus-visible:ring-0 active:scale-100 disabled:opacity-30 [&>svg]:block [&>svg]:size-3.5 [&>svg]:shrink-0";
 
 export function WorkspaceHistoryControls(): ReactNode {
+  const { state: chatWindow } = useChatWindow();
   const { activeView, canGoBack, canGoForward, goBack, goForward } =
     useWorkspaceNavigation();
   const { isMobile, openMobile, state, toggleSidebar } = useSidebar();
@@ -31,33 +33,35 @@ export function WorkspaceHistoryControls(): ReactNode {
       >
         <PanelLeftIcon strokeWidth={1.75} aria-hidden />
       </Button>
-      <nav aria-label="History" className="flex h-7 items-center gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={titlebarControlClass}
-          aria-label="Back"
-          title="Back"
-          disabled={!canGoBack}
-          onClick={goBack}
-        >
-          <ArrowLeft strokeWidth={1.75} aria-hidden />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={titlebarControlClass}
-          aria-label="Forward"
-          title="Forward"
-          disabled={!canGoForward}
-          onClick={goForward}
-        >
-          <ArrowRight strokeWidth={1.75} aria-hidden />
-        </Button>
-      </nav>
-      {!sidebarOpen && (
+      {chatWindow.kind === "main" && (
+        <nav aria-label="History" className="flex h-7 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={titlebarControlClass}
+            aria-label="Back"
+            title="Back"
+            disabled={!canGoBack}
+            onClick={goBack}
+          >
+            <ArrowLeft strokeWidth={1.75} aria-hidden />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={titlebarControlClass}
+            aria-label="Forward"
+            title="Forward"
+            disabled={!canGoForward}
+            onClick={goForward}
+          >
+            <ArrowRight strokeWidth={1.75} aria-hidden />
+          </Button>
+        </nav>
+      )}
+      {!sidebarOpen && chatWindow.kind === "main" && (
         <>
           <Button
             type="button"
