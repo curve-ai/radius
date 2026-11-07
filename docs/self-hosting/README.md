@@ -34,17 +34,26 @@ configured platform domain:
 https://agents.example.com/api/platform/v1/auth/oidc/callback
 ```
 
-Create the local configuration and registry password file:
+Create the local configuration and the key pair that signs registry tokens:
 
 ```bash
 cp hosting/docker/.env.self-host.example hosting/docker/.env.self-host
 chmod 600 hosting/docker/.env.self-host
-htpasswd -B -c /absolute/path/to/radius-registry.htpasswd radius
-chmod 600 /absolute/path/to/radius-registry.htpasswd
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout /absolute/path/to/registry-token.key \
+  -out /absolute/path/to/registry-token.crt \
+  -days 3650 -subj "/CN=radius-registry-token"
+# The platform containers run as uid 1000; only they need to read the key.
+sudo chown 1000:1000 /absolute/path/to/registry-token.key
+chmod 600 /absolute/path/to/registry-token.key
+chmod 644 /absolute/path/to/registry-token.crt
 ```
 
-Use the same registry username/password in the htpasswd prompt and env file.
-Generate every secret independently with at least 32 random base64url
+Set `RADIUS_REGISTRY_TOKEN_KEY` and `RADIUS_REGISTRY_TOKEN_CERT` in the env file
+to those two paths. The registry accepts only short-lived tokens signed with this
+key: each upload gets its own password from the platform, valid for 60 minutes,
+which can push only to that agent's repository. No static registry password
+exists. Generate every secret independently with at least 32 random base64url
 characters. For a published release, select its exact version, validate the
 model, pull the coherent image set, and start it:
 
@@ -69,9 +78,11 @@ host:
 bun run --cwd hosting test:integration
 ```
 
-This requires Docker, `htpasswd`, `curl`, `jq`, `shasum`, and Node.js. It builds from
-the current checkout, uses only loopback ports, proves TLS routing and registry
-authentication, performs a real CLI deployment and worker verification, then
+This requires Docker, `openssl`, `curl`, `jq`, `shasum`, and Node.js (on Windows,
+run it from Git Bash). It builds from the current checkout, uses only loopback
+ports, proves TLS routing and registry token authentication (upload credentials
+reach only their own repository and stop working once expired), performs a real
+CLI deployment and worker verification, then
 destroys and restores its disposable PostgreSQL database and registry volume.
 It cleans up the isolated Compose project on success or failure.
 
@@ -200,7 +211,31 @@ its own disposable volumes and confirms that the deployment inventory,
 installation observations, migration ledger, dashboard login surface, and exact
 registry digest survive restoration.
 
+Images are encrypted in transit by HTTPS. The registry does not encrypt them at
+rest: keep its volume on an encrypted disk (BitLocker, LUKS) or encrypted cloud
+storage.
+
+## Registry token key rotation
+
+The key file and the certificate file may each hold more than one PEM entry.
+The platform signs with the first key and certificate and accepts upload
+passwords from any key in the file; the registry trusts every certificate in
+the file. To rotate without breaking uploads in progress:
+
+1. Create a new pair. Put the new key first and the old key second in the key
+   file, and the certificates in the same order in the certificate file.
+2. Restart the registry first, then `platform-api` and `platform-jobs`.
+3. After 60 minutes, remove the old key and certificate and restart all three.
+
 ## Upgrade and rollback
+
+Installations set up before registry tokens used an htpasswd file. Before
+upgrading one, create the key pair as in the installation steps, set
+`RADIUS_REGISTRY_TOKEN_KEY` and `RADIUS_REGISTRY_TOKEN_CERT`, and remove
+`RADIUS_REGISTRY_AUTH_FILE`, `RADIUS_REGISTRY_USERNAME` and
+`RADIUS_REGISTRY_PASSWORD` from the env file; then delete the htpasswd file.
+Without the key pair the stack refuses to start and names the missing setting.
+Images and versions already in the registry keep working.
 
 Take a paired database/registry backup and change only `RADIUS_VERSION`. For a
 published release, pull the image set, inspect `self-host:config`, and

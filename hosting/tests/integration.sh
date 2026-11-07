@@ -17,9 +17,11 @@ export RADIUS_PLATFORM_DOMAIN="127.0.0.1:${TEST_API_PORT}"
 export RADIUS_REGISTRY_DOMAIN="127.0.0.1:${TEST_REGISTRY_PORT}"
 export RADIUS_ACME_EMAIL="verify@example.com"
 export RADIUS_POSTGRES_PASSWORD="radius_postgres_verify_abcdefghijklmnopqrstuvwxyz"
-export RADIUS_REGISTRY_USERNAME="radius-verify"
-export RADIUS_REGISTRY_PASSWORD="radius_registry_verify_abcdefghijklmnopqrstuvwxyz"
-export RADIUS_REGISTRY_AUTH_FILE="${TMP_DIR}/registry.htpasswd"
+export RADIUS_REGISTRY_TOKEN_KEY="${TMP_DIR}/registry-token.key"
+export RADIUS_REGISTRY_TOKEN_CERT="${TMP_DIR}/registry-token.crt"
+# Docker reaches the API directly over loopback HTTP in this test, not through
+# Caddy, so the token realm points there.
+export RADIUS_REGISTRY_TOKEN_REALM="http://127.0.0.1:${TEST_API_PORT}/api/platform/v1/registry/token"
 export RADIUS_REGISTRY_HTTP_SECRET="radius_registry_http_verify_abcdefghijklmnopqrstuvwxyz"
 export RADIUS_OIDC_TRANSACTION_SECRET="radius_oidc_verify_abcdefghijklmnopqrstuvwxyz"
 export RADIUS_OIDC_ISSUER="https://identity.example.com"
@@ -54,16 +56,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command in docker htpasswd curl jq shasum node; do
+for command in docker openssl curl jq shasum node; do
   command -v "${command}" >/dev/null || {
     echo "self-host verify: ${command} is required" >&2
     exit 1
   }
 done
 
-htpasswd -Bbn "${RADIUS_REGISTRY_USERNAME}" "${RADIUS_REGISTRY_PASSWORD}" \
-  > "${RADIUS_REGISTRY_AUTH_FILE}"
-chmod 600 "${RADIUS_REGISTRY_AUTH_FILE}"
+# MSYS_NO_PATHCONV stops Git Bash on Windows rewriting "/CN=..." as a path.
+MSYS_NO_PATHCONV=1 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout "${RADIUS_REGISTRY_TOKEN_KEY}" -out "${RADIUS_REGISTRY_TOKEN_CERT}" \
+  -days 1 -subj "/CN=radius-registry-token-verify" 2>/dev/null
+# A throwaway test key, readable by the containers' non-root user.
+chmod 644 "${RADIUS_REGISTRY_TOKEN_KEY}" "${RADIUS_REGISTRY_TOKEN_CERT}"
 
 "${compose[@]}" config --quiet
 docker run --rm \
@@ -93,15 +98,55 @@ curl --noproxy '*' -kfsS --resolve "platform.localhost:${TEST_HTTPS_PORT}:127.0.
 [[ "$(curl --noproxy '*' -ksS -o /dev/null -w '%{http_code}' \
   --resolve "registry.localhost:${TEST_HTTPS_PORT}:127.0.0.1" \
   "https://registry.localhost:${TEST_HTTPS_PORT}/v2/")" == "401" ]]
-[[ "$(curl --noproxy '*' -ksS -o /dev/null -w '%{http_code}' \
-  --resolve "registry.localhost:${TEST_HTTPS_PORT}:127.0.0.1" \
-  -u "${RADIUS_REGISTRY_USERNAME}:${RADIUS_REGISTRY_PASSWORD}" \
-  "https://registry.localhost:${TEST_HTTPS_PORT}/v2/")" == "200" ]]
-
-[[ "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${TEST_REGISTRY_PORT}/v2/")" == "401" ]]
+# The registry accepts only platform-signed tokens: an anonymous request gets
+# a Bearer challenge naming the realm, and no Basic password gets in.
+curl -sS -o /dev/null -D - "http://127.0.0.1:${TEST_REGISTRY_PORT}/v2/" \
+  | grep -qi "^www-authenticate: Bearer realm=\"${RADIUS_REGISTRY_TOKEN_REALM}\""
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' \
-  -u "${RADIUS_REGISTRY_USERNAME}:${RADIUS_REGISTRY_PASSWORD}" \
-  "http://127.0.0.1:${TEST_REGISTRY_PORT}/v2/")" == "200" ]]
+  -u "radius:static-registry-password" \
+  "http://127.0.0.1:${TEST_REGISTRY_PORT}/v2/")" == "401" ]]
+
+# Prepares an upload of the example agent's build directly, because the CLI
+# uses the upload password without printing it. Sets upload_id,
+# upload_username, upload_password and upload_repository.
+prepare_upload() {
+  local request prepared
+  request="$(cd "${ROOT_DIR}/examples/typescript-agent" && node -e '
+    const fs = require("fs");
+    const latest = JSON.parse(fs.readFileSync(".radius/builds/latest.json", "utf8"));
+    const receipt = JSON.parse(fs.readFileSync(`.radius/builds/${latest.buildDigest}/receipt.json`, "utf8"));
+    process.stdout.write(JSON.stringify({
+      apiVersion: 1, organization: "verify", agent: receipt.manifest.agent,
+      environment: process.argv[1], buildDigest: receipt.buildDigest,
+      bundleSha256: receipt.bundleSha256, manifest: receipt.manifest,
+    }));' "$1")"
+  prepared="$(curl -fsS -X POST \
+    -H "Authorization: Bearer ${access_token}" \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: registry-token-$1" \
+    "http://127.0.0.1:${TEST_API_PORT}/api/platform/v1/agents/agent_example1/deployments/prepare" \
+    --data-binary "${request}")"
+  upload_id="$(jq -er '.uploadId' <<<"${prepared}")"
+  upload_username="$(jq -er '.credentials.username' <<<"${prepared}")"
+  upload_password="$(jq -er '.credentials.password' <<<"${prepared}")"
+  upload_repository="$(jq -er '.imageReference' <<<"${prepared}" \
+    | sed -E 's|^[^/]+/||; s|:[^:/]+$||')"
+  [[ "${upload_username}" == "upload-${upload_id}" ]]
+}
+# Prints a registry token for the current upload and scope.
+registry_token() {
+  curl -fsS -u "${upload_username}:${upload_password}" \
+    "${RADIUS_REGISTRY_TOKEN_REALM}?service=${RADIUS_REGISTRY_DOMAIN}&scope=$1" \
+    | jq -er '.token'
+}
+# Prints the repository access a token grants.
+token_access() {
+  node -e 'process.stdout.write(JSON.stringify(JSON.parse(Buffer.from(process.argv[1].split(".")[1], "base64url")).access))' "$1"
+}
+registry_token_status() {
+  curl -sS -o /dev/null -w '%{http_code}' -u "$1" \
+    "${RADIUS_REGISTRY_TOKEN_REALM}?service=${RADIUS_REGISTRY_DOMAIN}"
+}
 
 bootstrap_output="$("${compose[@]}" run --rm --no-deps platform-api \
   bun platform-admin.js bootstrap-owner \
@@ -244,6 +289,19 @@ for _attempt in {1..30}; do
 done
 [[ "${worker_completed}" == "true" ]]
 
+# Upload credentials work for their own repository only, and not once expired.
+prepare_upload token-check
+[[ "$(token_access "$(registry_token "repository:${upload_repository}:push,pull")")" == \
+  "[{\"type\":\"repository\",\"name\":\"${upload_repository}\",\"actions\":[\"push\",\"pull\"]}]" ]]
+[[ "$(token_access "$(registry_token "repository:agent_other/agent:push,pull")")" == "[]" ]]
+[[ "$(registry_token_status "${upload_username}:wrong-${upload_password}")" == "401" ]]
+docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" \
+  psql -U radius -d radius -v ON_ERROR_STOP=1 -c "
+    UPDATE radius_platform.agent_deployment_uploads
+    SET expires_at = created_at + interval '1 millisecond'
+    WHERE upload_id = '${upload_id}'" >/dev/null
+[[ "$(registry_token_status "${upload_username}:${upload_password}")" == "401" ]]
+
 client_instance_id="60000000-0000-4000-8000-000000000001"
 client_registration="$(curl -fsS -X PUT \
   -H "Authorization: Bearer ${access_token}" \
@@ -369,8 +427,9 @@ restored_membership_evidence="$(docker exec "${COMPOSE_PROJECT_NAME}-postgres-1"
     WHERE membership.membership_id = '50000000-0000-4000-8000-000000000002';
   ")"
 [[ "${restored_membership_evidence}" == "developer|active|5|5|1|1" ]]
+prepare_upload restore-check
 curl -fsSI \
-  -u "${RADIUS_REGISTRY_USERNAME}:${RADIUS_REGISTRY_PASSWORD}" \
+  -H "Authorization: Bearer $(registry_token "repository:agent_example1/agent:pull")" \
   -H "Accept: application/vnd.oci.image.manifest.v1+json" \
   "http://127.0.0.1:${TEST_REGISTRY_PORT}/v2/agent_example1/agent/manifests/${deployment_digest}" \
   | grep -qi "Docker-Content-Digest: ${deployment_digest}"

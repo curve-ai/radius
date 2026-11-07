@@ -1,8 +1,10 @@
 import {
   createDistributionRegistryVerifier,
+  registryPullAuthorization,
   RegistryVerificationError,
   type RegistryManifestVerificationResult,
   type RegistryManifestVerifier,
+  type RegistryTokenSigner,
 } from "@curve-ai/platform-providers";
 
 import { PlatformApiError } from "./app.js";
@@ -18,6 +20,7 @@ export function createPlatformRegistryVerifier(options: {
   allowInsecureRegistryVerification: boolean;
   username: string;
   password: string;
+  tokenSigner?: RegistryTokenSigner;
   fetch?: PlatformRegistryFetch;
 }): RegistryManifestVerifier {
   const verificationIsLoopback = isLoopbackRegistry(
@@ -36,8 +39,15 @@ export function createPlatformRegistryVerifier(options: {
     allowInsecureLoopback:
       options.allowInsecureRegistryVerification ||
       isLoopbackRegistry(options.registry),
-    authorizationForRegistry: () =>
-      `Basic ${Buffer.from(`${options.username}:${options.password}`).toString("base64")}`,
+    authorizationForRegistry: (registry, repository) =>
+      options.tokenSigner
+        ? registryPullAuthorization(
+            options.tokenSigner,
+            "radius-platform-api",
+            registry,
+            repository,
+          )
+        : `Basic ${Buffer.from(`${options.username}:${options.password}`).toString("base64")}`,
     fetch: options.fetch as typeof globalThis.fetch | undefined,
   });
 
