@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 import { provisionPlatformOrganization } from "@curve-ai/platform-database";
+import { registryTokenSignerFromEnvironment } from "@curve-ai/platform-providers";
 
 import {
   createNativeAuthRoutes,
@@ -14,25 +15,36 @@ import {
 } from "./browser-auth.js";
 import { normalizeOidcProvisioningPolicy } from "./browser-session.js";
 import { normalizePlatformOidcOptions } from "./oidc.js";
-import { createPostgresPlatformServices } from "./postgres-services.js";
+import {
+  createPostgresPlatformServices,
+  findRegistryUpload,
+} from "./postgres-services.js";
+import { createRegistryTokenRoutes } from "./registry-token.js";
 
 const developmentToken = process.env.RADIUS_PLATFORM_DEV_TOKEN?.trim();
 const databaseUrl = requiredEnvironment("DATABASE_URL");
 const bootstrapDevelopmentAuthority =
   process.env.RADIUS_PLATFORM_BOOTSTRAP_DEV_AUTHORITY === "true";
 const sharedOrigins = process.env.RADIUS_PLATFORM_SHARED_ORIGINS === "true";
+// Set in self-host, where the registry accepts only tokens this platform
+// signs. Unset in dev, where the registry has no auth.
+const registryTokenSigner = registryTokenSignerFromEnvironment(process.env);
+const registry = registryTokenSigner
+  ? requiredEnvironment("RADIUS_PLATFORM_REGISTRY")
+  : process.env.RADIUS_PLATFORM_REGISTRY;
 
 const runtime = await createPostgresPlatformServices({
   connectionString: databaseUrl,
   bootstrapDevelopmentAuthority,
   developmentAccessToken: developmentToken,
   migrationsDirectory: process.env.RADIUS_PLATFORM_MIGRATIONS_DIR,
-  registry: process.env.RADIUS_PLATFORM_REGISTRY,
+  registry,
   registryVerification: process.env.RADIUS_PLATFORM_REGISTRY_VERIFY,
   allowInsecureRegistryVerification:
     process.env.RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE === "true",
   registryUsername: process.env.RADIUS_PLATFORM_REGISTRY_USERNAME,
   registryPassword: process.env.RADIUS_PLATFORM_REGISTRY_PASSWORD,
+  registryTokenSigner,
 });
 
 const browserAuth = browserAuthFromEnvironment(runtime.pool, sharedOrigins);
@@ -64,6 +76,14 @@ const app = createPlatformApp(runtime.services, {
           process.env.RADIUS_OIDC_ALLOW_INSECURE_LOOPBACK === "true",
       })
     : undefined,
+  registryToken:
+    registryTokenSigner && registry
+      ? createRegistryTokenRoutes({
+          signer: registryTokenSigner,
+          service: registry,
+          findUpload: (uploadId) => findRegistryUpload(runtime.pool, uploadId),
+        })
+      : undefined,
   browserAuth,
   provisioning,
   deploymentMode: sharedOrigins ? "managed" : "self_hosted",

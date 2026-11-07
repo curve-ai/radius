@@ -1,3 +1,5 @@
+export * from "./registry-token.js";
+
 export interface RegistryManifestVerificationRequest {
   imageReference: string;
   expectedDigest: `sha256:${string}`;
@@ -40,6 +42,7 @@ export interface DistributionRegistryVerifierOptions {
   registryEndpoints?: Readonly<Record<string, string>>;
   authorizationForRegistry?: (
     registry: string,
+    repository: string,
   ) => Promise<string | undefined> | string | undefined;
   fetch?: typeof globalThis.fetch;
   allowInsecureLoopback?: boolean;
@@ -93,6 +96,7 @@ export function createDistributionRegistryVerifier(
       }
       const authorization = await options.authorizationForRegistry?.(
         parsed.registry,
+        parsed.repository,
       );
       let response: Response;
       try {

@@ -16,6 +16,7 @@
   "dependencies": {
     "@curve-ai/agent-contracts": "0.0.1",
     "@curve-ai/build": "0.0.1",
+    "@curve-ai/platform-client": "0.0.1",
     "@curve-ai/radius-runtime": "0.0.1",
     "@stricli/core": "1.2.1",
     "jsonc-parser": "3.3.1",

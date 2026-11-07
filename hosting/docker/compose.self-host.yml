@@ -32,14 +32,18 @@ services:
     image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
     restart: unless-stopped
     environment:
-      REGISTRY_AUTH: htpasswd
-      REGISTRY_AUTH_HTPASSWD_REALM: Radius Registry
-      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      # Accepts only short-lived tokens signed by platform-api, which issues
+      # them per upload for one repository.
+      REGISTRY_AUTH: token
+      REGISTRY_AUTH_TOKEN_REALM: ${RADIUS_REGISTRY_TOKEN_REALM:-https://${RADIUS_PLATFORM_DOMAIN}/api/platform/v1/registry/token}
+      REGISTRY_AUTH_TOKEN_SERVICE: ${RADIUS_REGISTRY_DOMAIN}
+      REGISTRY_AUTH_TOKEN_ISSUER: radius-platform
+      REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE: /auth/token.crt
       REGISTRY_HTTP_DEBUG_ADDR: 0.0.0.0:5001
       REGISTRY_HTTP_SECRET: ${RADIUS_REGISTRY_HTTP_SECRET:?set RADIUS_REGISTRY_HTTP_SECRET}
       REGISTRY_STORAGE_DELETE_ENABLED: "false"
     volumes:
-      - ${RADIUS_REGISTRY_AUTH_FILE:?set RADIUS_REGISTRY_AUTH_FILE}:/auth/htpasswd:ro
+      - ${RADIUS_REGISTRY_TOKEN_CERT:?set RADIUS_REGISTRY_TOKEN_CERT}:/auth/token.crt:ro
       - radius-registry-data:/var/lib/registry
     healthcheck:
       test:
@@ -94,8 +98,8 @@ services:
       RADIUS_PLATFORM_REGISTRY: ${RADIUS_REGISTRY_DOMAIN}
       RADIUS_PLATFORM_REGISTRY_VERIFY: registry:5000
       RADIUS_PLATFORM_REGISTRY_VERIFY_INSECURE: "true"
-      RADIUS_PLATFORM_REGISTRY_USERNAME: ${RADIUS_REGISTRY_USERNAME:?set RADIUS_REGISTRY_USERNAME}
-      RADIUS_PLATFORM_REGISTRY_PASSWORD: ${RADIUS_REGISTRY_PASSWORD:?set RADIUS_REGISTRY_PASSWORD}
+      RADIUS_REGISTRY_TOKEN_KEY: /run/radius/registry-token.key
+      RADIUS_REGISTRY_TOKEN_CERT: /run/radius/registry-token.crt
       RADIUS_NATIVE_AUTH_CONFIG: ${RADIUS_NATIVE_AUTH_CONFIG:-}
       RADIUS_NATIVE_AUTO_JOIN: ${RADIUS_NATIVE_AUTO_JOIN:-false}
       RADIUS_SYNC_ENABLED: ${RADIUS_SYNC_ENABLED:-false}
@@ -111,6 +115,9 @@ services:
       RADIUS_OIDC_AUTO_JOIN_ROLE: ${RADIUS_OIDC_AUTO_JOIN_ROLE:-viewer}
       RADIUS_OIDC_BOOTSTRAP_ACCOUNT_ID: ${RADIUS_OIDC_BOOTSTRAP_ACCOUNT_ID:-}
       RADIUS_PLATFORM_APPLICATION_URL: https://${RADIUS_PLATFORM_DOMAIN}
+    volumes:
+      - ${RADIUS_REGISTRY_TOKEN_KEY:?set RADIUS_REGISTRY_TOKEN_KEY}:/run/radius/registry-token.key:ro
+      - ${RADIUS_REGISTRY_TOKEN_CERT:?set RADIUS_REGISTRY_TOKEN_CERT}:/run/radius/registry-token.crt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,8 +139,11 @@ services:
       RADIUS_PLATFORM_REGISTRIES: ${RADIUS_REGISTRY_DOMAIN}
       RADIUS_PLATFORM_INSECURE_REGISTRIES: registry:5000
       RADIUS_PLATFORM_REGISTRY_ENDPOINTS: '{"${RADIUS_REGISTRY_DOMAIN}":"registry:5000"}'
-      RADIUS_PLATFORM_REGISTRY_USERNAME: ${RADIUS_REGISTRY_USERNAME}
-      RADIUS_PLATFORM_REGISTRY_PASSWORD: ${RADIUS_REGISTRY_PASSWORD}
+      RADIUS_REGISTRY_TOKEN_KEY: /run/radius/registry-token.key
+      RADIUS_REGISTRY_TOKEN_CERT: /run/radius/registry-token.crt
+    volumes:
+      - ${RADIUS_REGISTRY_TOKEN_KEY:?set RADIUS_REGISTRY_TOKEN_KEY}:/run/radius/registry-token.key:ro
+      - ${RADIUS_REGISTRY_TOKEN_CERT:?set RADIUS_REGISTRY_TOKEN_CERT}:/run/radius/registry-token.crt:ro
     depends_on:
       jobs-redis:
         condition: service_healthy
