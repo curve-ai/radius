@@ -37,6 +37,9 @@ import type {
   UpdateOrganizationMembershipResponse,
 } from "@curve-ai/platform-contracts";
 import { DEVELOPER_TOKEN_SCOPES } from "@curve-ai/platform-contracts";
+import type { RegistryTokenSigner } from "@curve-ai/platform-providers";
+
+import type { RegistryUploadRecord } from "./registry-token.js";
 
 import {
   PlatformApiError,
@@ -112,6 +115,9 @@ export interface PostgresPlatformOptions {
   allowInsecureRegistryVerification?: boolean;
   registryUsername?: string;
   registryPassword?: string;
+  // When set, each upload gets its own password and the registry verifier
+  // signs its own pull tokens; the static username and password are unused.
+  registryTokenSigner?: RegistryTokenSigner;
   fetch?: PlatformRegistryFetch;
   now?: () => Date;
 }
@@ -137,6 +143,7 @@ export async function createPostgresPlatformServices(
       options.allowInsecureRegistryVerification ?? false,
     username: registryUsername,
     password: registryPassword,
+    tokenSigner: options.registryTokenSigner,
     fetch: options.fetch,
   });
   const now = options.now ?? (() => new Date());
@@ -311,6 +318,7 @@ export async function createPostgresPlatformServices(
         registry,
         registryUsername,
         registryPassword,
+        registryTokenSigner: options.registryTokenSigner,
         now,
         access,
       });
@@ -1505,6 +1513,7 @@ async function prepareAgentDeployment(options: {
   registry: string;
   registryUsername: string;
   registryPassword: string;
+  registryTokenSigner?: RegistryTokenSigner;
   now: () => Date;
 }): Promise<PrepareAgentDeploymentResponse> {
   const requestDigest = digestJson(options.request);
@@ -1556,7 +1565,9 @@ async function prepareAgentDeployment(options: {
     );
     const uploadId = randomUUID();
     const imageReference = `${options.registry}/${options.request.agent}/agent:${uploadId.replaceAll("-", "")}`;
-    const expiresAt = new Date(options.now().getTime() + 15 * 60_000);
+    // Long enough for a large image on a slow link; the registry token
+    // endpoint refuses the upload's password after this.
+    const expiresAt = new Date(options.now().getTime() + 60 * 60_000);
     await client.query(
       `
         INSERT INTO radius_platform.agent_deployment_uploads (
@@ -1589,7 +1600,9 @@ async function prepareAgentDeployment(options: {
         options.request.manifest.minimumDesktopVersion,
         options.request.manifest.protocol.version,
         imageReference,
-        "environment:RADIUS_PLATFORM_REGISTRY_PASSWORD",
+        options.registryTokenSigner
+          ? "registry-token:upload-password"
+          : "environment:RADIUS_PLATFORM_REGISTRY_PASSWORD",
         expiresAt,
       ],
     );
@@ -1624,20 +1637,42 @@ function prepareResponse(
     registry: string;
     registryUsername: string;
     registryPassword: string;
+    registryTokenSigner?: RegistryTokenSigner;
   },
   upload: { upload_id: string; image_reference: string; expires_at: Date },
 ): PrepareAgentDeploymentResponse {
+  // The per-upload password is derived from the upload id, so nothing is
+  // stored and a replayed prepare returns the same one.
+  const signer = options.registryTokenSigner;
   return {
     apiVersion: 1,
     uploadId: upload.upload_id,
     imageReference: upload.image_reference,
     credentials: {
       registry: options.registry,
-      username: options.registryUsername,
-      password: options.registryPassword,
+      username: signer
+        ? `upload-${upload.upload_id}`
+        : options.registryUsername,
+      password: signer
+        ? signer.uploadPassword(upload.upload_id)
+        : options.registryPassword,
       expiresAt: upload.expires_at.toISOString(),
     },
   };
+}
+
+/** What the registry token endpoint needs to know about one upload. */
+export async function findRegistryUpload(
+  pool: PlatformPool,
+  uploadId: string,
+): Promise<RegistryUploadRecord | null> {
+  const result = await pool.query<RegistryUploadRecord>(
+    `SELECT upload_state AS state, expires_at AS "expiresAt",
+            image_reference AS "imageReference"
+     FROM radius_platform.agent_deployment_uploads WHERE upload_id = $1`,
+    [uploadId],
+  );
+  return result.rows[0] ?? null;
 }
 
 async function loadUploadForVerification(

@@ -16,7 +16,10 @@ test("verifies an allowlisted manifest by exact digest", async () => {
     authorizationForRegistry: () => "Bearer worker-token",
     fetch: async (input, init) => {
       requestedUrl = String(input);
-      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer worker-token");
+      assert.equal(
+        new Headers(init?.headers).get("authorization"),
+        "Bearer worker-token",
+      );
       return new Response(null, {
         status: 200,
         headers: {
@@ -100,11 +103,16 @@ test("allows an explicitly configured internal HTTP registry", async () => {
 
 test("maps a public registry authority to its internal endpoint", async () => {
   let requestedUrl = "";
+  let authorizedFor: string[] = [];
   const verifier = createDistributionRegistryVerifier({
     allowedRegistries: ["127.0.0.1:5001"],
     allowInsecureLoopback: true,
     insecureRegistries: ["registry:5000"],
     registryEndpoints: { "127.0.0.1:5001": "registry:5000" },
+    authorizationForRegistry: (registry, repository) => {
+      authorizedFor = [registry, repository];
+      return undefined;
+    },
     fetch: async (input) => {
       requestedUrl = String(input);
       return new Response(null, {
@@ -119,4 +127,7 @@ test("maps a public registry authority to its internal endpoint", async () => {
     expectedDigest: digest,
   });
   assert.match(requestedUrl, /^http:\/\/registry:5000\/v2\//);
+  // Tokens are issued for the public registry name the registry knows itself
+  // by, never the internal endpoint the request goes to.
+  assert.deepEqual(authorizedFor, ["127.0.0.1:5001", "radius/agent"]);
 });

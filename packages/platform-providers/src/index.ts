@@ -1,3 +1,5 @@
+export * from "./registry-token.js";
+
 export interface RegistryManifestVerificationRequest {
   imageReference: string;
   expectedDigest: `sha256:${string}`;
@@ -40,6 +42,7 @@ export interface DistributionRegistryVerifierOptions {
   registryEndpoints?: Readonly<Record<string, string>>;
   authorizationForRegistry?: (
     registry: string,
+    repository: string,
   ) => Promise<string | undefined> | string | undefined;
   fetch?: typeof globalThis.fetch;
   allowInsecureLoopback?: boolean;
@@ -61,10 +64,12 @@ export function createDistributionRegistryVerifier(
     (options.insecureRegistries ?? []).map(normalizeRegistry),
   );
   const endpoints = new Map(
-    Object.entries(options.registryEndpoints ?? {}).map(([registry, endpoint]) => [
-      normalizeRegistry(registry),
-      normalizeRegistry(endpoint),
-    ]),
+    Object.entries(options.registryEndpoints ?? {}).map(
+      ([registry, endpoint]) => [
+        normalizeRegistry(registry),
+        normalizeRegistry(endpoint),
+      ],
+    ),
   );
   if (allowed.size === 0) {
     throw new Error("At least one registry must be allowlisted");
@@ -93,6 +98,7 @@ export function createDistributionRegistryVerifier(
       }
       const authorization = await options.authorizationForRegistry?.(
         parsed.registry,
+        parsed.repository,
       );
       let response: Response;
       try {
@@ -176,7 +182,11 @@ function parseImageReference(imageReference: string): {
   const lastSlash = repository.lastIndexOf("/");
   const colon = repository.lastIndexOf(":");
   if (colon > lastSlash) repository = repository.slice(0, colon);
-  if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/i.test(repository)) {
+  if (
+    !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/i.test(
+      repository,
+    )
+  ) {
     throw new RegistryVerificationError(
       "INVALID_REFERENCE",
       "Image repository is invalid",

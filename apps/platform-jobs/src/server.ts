@@ -5,7 +5,11 @@ import {
   RADIUS_PLATFORM_JOBS_QUEUE,
 } from "@curve-ai/platform-job-contracts";
 import { createPlatformDatabase } from "@curve-ai/platform-database";
-import { createDistributionRegistryVerifier } from "@curve-ai/platform-providers";
+import {
+  createDistributionRegistryVerifier,
+  registryPullAuthorization,
+  registryTokenSignerFromEnvironment,
+} from "@curve-ai/platform-providers";
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 
@@ -36,16 +40,27 @@ if (
   throw new Error("Registry username and password must be configured together");
 }
 
+const registryTokenSigner = registryTokenSignerFromEnvironment(process.env);
+
 const registryVerifier = createDistributionRegistryVerifier({
   allowedRegistries,
   insecureRegistries,
   registryEndpoints,
   allowInsecureLoopback:
     process.env.RADIUS_PLATFORM_ALLOW_INSECURE_LOOPBACK === "true",
-  authorizationForRegistry: () =>
-    registryUsername && registryPassword
-      ? `Basic ${Buffer.from(`${registryUsername}:${registryPassword}`).toString("base64")}`
-      : undefined,
+  // With the token key (self-host), sign a pull token for just this
+  // repository; otherwise send the static credentials (dev).
+  authorizationForRegistry: (registry, repository) =>
+    registryTokenSigner
+      ? registryPullAuthorization(
+          registryTokenSigner,
+          "radius-platform-jobs",
+          registry,
+          repository,
+        )
+      : registryUsername && registryPassword
+        ? `Basic ${Buffer.from(`${registryUsername}:${registryPassword}`).toString("base64")}`
+        : undefined,
 });
 const processJob = createPlatformJobProcessor({
   registryVerifier,

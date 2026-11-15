@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import { access, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { BlockList, isIP } from "node:net";
 import { dirname, join } from "node:path";
 
 export interface RegistryUploadCredentials {
@@ -39,6 +41,18 @@ export async function pushAgentOciImage(options: {
   const env = { ...process.env, DOCKER_CONFIG: dockerConfig };
 
   try {
+    await assertDockerUsesHttps(
+      [options.credentials.registry, options.imageReference.split("/")[0]!],
+      async () =>
+        (
+          await runner({
+            command: docker,
+            args: ["info", "--format", "{{json .RegistryConfig}}"],
+            cwd: options.build.layoutPath,
+            env,
+          })
+        ).stdout,
+    );
     await runner({
       command: "tar",
       args: ["-cf", imageArchive, "-C", options.build.layoutPath, "."],
@@ -168,6 +182,99 @@ export async function runOciCommand(options: {
     });
     child.stdin.end(options.stdin ?? "");
   });
+}
+
+interface DockerRegistryConfig {
+  InsecureRegistryCIDRs?: string[];
+  IndexConfigs?: Record<string, { Secure?: boolean }>;
+}
+
+// Docker's own defaults; both are loopback, which may use plain HTTP anyway.
+const DEFAULT_INSECURE_CIDRS = new Set(["127.0.0.0/8", "::1/128"]);
+
+/**
+ * Refuses an upload Docker would send over plain HTTP, unless the registry is
+ * on this machine.
+ */
+async function assertDockerUsesHttps(
+  registries: string[],
+  readRegistryConfig: () => Promise<string>,
+): Promise<void> {
+  const remote = [...new Set(registries)].filter(
+    (registry) => !isLoopbackRegistry(registry),
+  );
+  if (remote.length === 0) return;
+
+  let config: DockerRegistryConfig;
+  try {
+    config = JSON.parse((await readRegistryConfig()).trim());
+    if (!config || typeof config !== "object") throw new Error("not an object");
+  } catch (error) {
+    throw new Error(
+      "Could not read Docker's registry settings (docker info) to confirm the upload uses HTTPS",
+      { cause: error },
+    );
+  }
+
+  const insecureCidrs = (config.InsecureRegistryCIDRs ?? []).filter(
+    (cidr) => !DEFAULT_INSECURE_CIDRS.has(cidr),
+  );
+  const insecureNetworks = new BlockList();
+  for (const cidr of insecureCidrs) {
+    const [network, prefix] = cidr.split("/");
+    if (network && prefix && isIP(network)) {
+      insecureNetworks.addSubnet(network, Number(prefix), ipFamily(network));
+    }
+  }
+
+  for (const registry of remote) {
+    const host = registryHost(registry);
+    // A hostname is resolved only when someone added insecure networks, so a
+    // normal setup makes no DNS call. If it fails, docker login fails too.
+    const addresses = isIP(host)
+      ? [host]
+      : insecureCidrs.length > 0
+        ? await lookup(host, { all: true }).then(
+            (results) => results.map((result) => result.address),
+            () => [],
+          )
+        : [];
+    if (
+      // Registry names ignore case, so Docker's entry may be spelled differently.
+      Object.entries(config.IndexConfigs ?? {}).some(
+        ([name, index]) =>
+          name.toLowerCase() === registry.toLowerCase() &&
+          index.Secure === false,
+      ) ||
+      addresses.some((address) =>
+        insecureNetworks.check(address, ipFamily(address)),
+      )
+    ) {
+      throw new Error(
+        `Docker would upload to ${registry} over plain HTTP. Radius uploads only over HTTPS, except to a registry on this machine. Remove ${registry} from Docker's insecure registries.`,
+      );
+    }
+  }
+}
+
+function registryHost(registry: string): string {
+  const lower = registry.toLowerCase();
+  if (lower.startsWith("[")) return lower.slice(1, lower.indexOf("]"));
+  return lower.split(":")[0]!;
+}
+
+function isLoopbackRegistry(registry: string): boolean {
+  const host = registryHost(registry);
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    (isIP(host) === 4 && host.startsWith("127."))
+  );
+}
+
+function ipFamily(address: string): "ipv4" | "ipv6" {
+  return isIP(address) === 6 ? "ipv6" : "ipv4";
 }
 
 function validateImageReference(value: string): void {

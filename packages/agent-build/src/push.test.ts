@@ -51,6 +51,9 @@ test("uses a temporary Docker config and never places the password in argv", asy
   const calls: Parameters<OciCommandRunner>[0][] = [];
   const runner: OciCommandRunner = async (options) => {
     calls.push(options);
+    if (options.args[0] === "info") {
+      return { stdout: JSON.stringify(SECURE_DOCKER), stderr: "" };
+    }
     if (options.args.includes("inspect")) {
       return {
         stdout: `Name: registry.example/acme/agent:test\nDigest: sha256:${"d".repeat(64)}\n`,
@@ -101,4 +104,119 @@ test("uses a temporary Docker config and never places the password in argv", asy
       .filter((call) => call.command === "docker")
       .every((call) => call.env?.DOCKER_CONFIG),
   );
+});
+
+const SECURE_DOCKER = {
+  InsecureRegistryCIDRs: ["::1/128", "127.0.0.0/8"],
+  IndexConfigs: {
+    "docker.io": { Name: "docker.io", Secure: true },
+  },
+};
+
+async function pushWithDocker(
+  registry: string,
+  dockerInfo: unknown,
+  loginRegistry = registry,
+): Promise<{ calls: Parameters<OciCommandRunner>[0][]; error: unknown }> {
+  const root = await mkdtemp(join(tmpdir(), "radius-oci-https-"));
+  const layoutPath = join(root, "oci-layout");
+  await mkdir(layoutPath);
+  const calls: Parameters<OciCommandRunner>[0][] = [];
+  const runner: OciCommandRunner = async (options) => {
+    calls.push(options);
+    if (options.args[0] === "info") {
+      return {
+        stdout:
+          typeof dockerInfo === "string"
+            ? dockerInfo
+            : JSON.stringify(dockerInfo),
+        stderr: "",
+      };
+    }
+    if (options.args.includes("inspect")) {
+      return { stdout: `Digest: sha256:${"d".repeat(64)}\n`, stderr: "" };
+    }
+    return { stdout: "", stderr: "" };
+  };
+  try {
+    await pushTypeScriptOciImage({
+      build: { imageReference: "radius.local/dev/agent:test", layoutPath },
+      imageReference: `${registry}/agent_x/agent:test`,
+      credentials: {
+        registry: loginRegistry,
+        username: "upload",
+        password: "secret",
+      },
+      commandRunner: runner,
+    });
+    return { calls, error: null };
+  } catch (error) {
+    return { calls, error };
+  }
+}
+
+test("refuses a registry Docker marks insecure, before logging in", async () => {
+  const { calls, error } = await pushWithDocker("registry.example.com", {
+    ...SECURE_DOCKER,
+    IndexConfigs: {
+      "registry.example.com": { Name: "registry.example.com", Secure: false },
+    },
+  });
+  assert.match(String(error), /over plain HTTP/);
+  assert.equal(
+    calls.some((call) => call.args.includes("login")),
+    false,
+  );
+});
+
+test("matches Docker's insecure registry whatever its letter case", async () => {
+  const { calls, error } = await pushWithDocker(
+    "registry.example.com:5000",
+    {
+      ...SECURE_DOCKER,
+      IndexConfigs: {
+        "registry.example.com:5000": {
+          Name: "registry.example.com:5000",
+          Secure: false,
+        },
+      },
+    },
+    "Registry.Example.com:5000",
+  );
+  assert.match(String(error), /Registry\.Example\.com:5000 over plain HTTP/);
+  assert.equal(
+    calls.some((call) => call.args.includes("login")),
+    false,
+  );
+});
+
+test("refuses a registry IP inside Docker's insecure networks", async () => {
+  const { error } = await pushWithDocker("10.1.2.3:5000", {
+    ...SECURE_DOCKER,
+    InsecureRegistryCIDRs: [
+      ...SECURE_DOCKER.InsecureRegistryCIDRs,
+      "10.0.0.0/8",
+    ],
+  });
+  assert.match(String(error), /over plain HTTP/);
+});
+
+test("refuses when Docker's registry settings cannot be read", async () => {
+  const { error } = await pushWithDocker("registry.example.com", "");
+  assert.match(String(error), /Could not read Docker's registry settings/);
+});
+
+test("skips the check for a registry on this machine", async () => {
+  for (const registry of [
+    "127.0.0.1:5001",
+    "localhost:5000",
+    "registry.localhost:5000",
+  ]) {
+    const { calls, error } = await pushWithDocker(registry, "");
+    assert.equal(error, null);
+    assert.equal(
+      calls.some((call) => call.args[0] === "info"),
+      false,
+    );
+  }
 });

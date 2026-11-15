@@ -190,6 +190,9 @@ export function createPlatformApp(
   options: {
     browserAuth?: PlatformBrowserAuthServices;
     nativeAuth?: Hono;
+    // The Docker Registry token endpoint. It uses Basic auth with upload
+    // credentials, so it is mounted ahead of the Bearer-token check.
+    registryToken?: Hono;
     provisioning?: PlatformProvisioningServices;
     deploymentMode?: "managed" | "self_hosted";
     // Conversation sync needs the database directly: it writes 27 projection
@@ -238,6 +241,9 @@ export function createPlatformApp(
     return context.json(result);
   });
 
+  if (options.registryToken) {
+    app.route("/api/platform/v1/registry", options.registryToken);
+  }
   if (options.nativeAuth) {
     app.route("/api/platform/v1/auth/native", options.nativeAuth);
   } else {
